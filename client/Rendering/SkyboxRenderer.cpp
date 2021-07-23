@@ -95,11 +95,12 @@ void SkyboxRenderer::AddSkyboxPass(Renderer::RenderGraph* renderGraph, RenderRes
                 i32 lockLight = *CVarSystem::Get()->GetIntCVar("lights.lock");
                 if (!lockLight)
                 {
-                    _skybandColors.top = vec4(mapSingleton.GetSkybandTopColor(), 0.0f);
-                    _skybandColors.middle = vec4(mapSingleton.GetSkybandMiddleColor(), 0.0f);
-                    _skybandColors.bottom = vec4(mapSingleton.GetSkybandBottomColor(), 0.0f);
-                    _skybandColors.aboveHorizon = vec4(mapSingleton.GetSkybandAboveHorizonColor(), 0.0f);
-                    _skybandColors.horizon = vec4(mapSingleton.GetSkybandHorizonColor(), 0.0f);
+                    AreaUpdateLightColorData lightColor = mapSingleton.GetLightColorData();
+                    _skybandColors.top = vec4(lightColor.skybandTopColor, 0.0f);
+                    _skybandColors.middle = vec4(lightColor.skybandMiddleColor, 0.0f);
+                    _skybandColors.bottom = vec4(lightColor.skybandBottomColor, 0.0f);
+                    _skybandColors.aboveHorizon = vec4(lightColor.skybandAboveHorizonColor, 0.0f);
+                    _skybandColors.horizon = vec4(lightColor.skybandHorizonColor, 0.0f);
                 }
 
                 commandList.PushConstant(&_skybandColors, 0, sizeof(SkybandColors));

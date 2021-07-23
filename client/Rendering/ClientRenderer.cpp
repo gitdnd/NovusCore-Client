@@ -10,6 +10,7 @@
 #include "CameraFreelook.h"
 #include "../Utils/ServiceLocator.h"
 #include "../ECS/Components/Singletons/MapSingleton.h"
+#include "../ECS/Components/Singletons/AreaUpdateSingleton.h"
 
 #include <Memory/StackAllocator.h>
 #include <Renderer/Renderer.h>
@@ -164,8 +165,9 @@ void ClientRenderer::Render()
 
     if (!CVAR_LightLockEnabled.Get())
     {
-        _resources.lightConstantBuffer->resource.ambientColor = vec4(mapSingleton.GetAmbientLight(), 1.0f);
-        _resources.lightConstantBuffer->resource.lightColor = vec4(mapSingleton.GetDiffuseLight(), 1.0f);
+        AreaUpdateLightColorData lightColor = mapSingleton.GetLightColorData();
+        _resources.lightConstantBuffer->resource.ambientColor = vec4(lightColor.ambientColor, 1.0f);
+        _resources.lightConstantBuffer->resource.lightColor = vec4(lightColor.diffuseColor, 1.0f);
         _resources.lightConstantBuffer->resource.lightDir = vec4(mapSingleton.GetLightDirection(), 1.0f);
         _resources.lightConstantBuffer->Apply(_frameIndex);
     }

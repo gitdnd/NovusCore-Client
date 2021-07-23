@@ -8,6 +8,7 @@
 #include "../Components/Singletons/DayNightSingleton.h"
 
 #include <glm/glm.hpp>
+#include <imgui/imgui.h>
 
 void AreaUpdateSystem::Init(entt::registry& registry)
 {
@@ -80,18 +81,13 @@ void AreaUpdateSystem::Update(entt::registry& registry)
         NDBC::Light* defaultLight = lightNDBC->GetRowById<NDBC::Light>(1);
         AreaUpdateLightColorData finalColorData = GetLightColorData(ndbcSingleton, mapSingleton, defaultLight);
 
-        // Get Lights
-
-        std::vector<NDBC::Light*>* lights = mapSingleton.GetLightsByMapId(currentMap.id);
-        if (lights)
+        i32 forceUseDefaultLight = *CVarSystem::Get()->GetIntCVar("lights.useDefault");
+        if (!forceUseDefaultLight)
         {
-            std::vector<AreaUpdateLightData> innerRadiusLights;
-            innerRadiusLights.reserve(4);
+            areaUpdateSingleton.totalLightDatas.clear();
+            const std::vector<NDBC::Light*>& lights = mapSingleton.GetLightsByMapId(currentMap.id);
 
-            std::vector<AreaUpdateLightData> outerRadiusLights;
-            outerRadiusLights.reserve(4);
-
-            for (NDBC::Light* light : *lights)
+            for (NDBC::Light* light : lights)
             {
                 const vec3& lightPosition = light->position;
 
@@ -103,79 +99,51 @@ void AreaUpdateSystem::Update(entt::registry& registry)
                 }
 
                 f32 distanceToLight = glm::distance(position, lightPosition);
-                if (distanceToLight < light->fallOff.x)
+                if (distanceToLight <= light->fallOff.y)
                 {
-                    AreaUpdateLightData& lightData = innerRadiusLights.emplace_back();
-                    lightData.light = light;
-                    lightData.distance = distanceToLight;
-                }
-                else if (distanceToLight < light->fallOff.y)
-                {
-                    AreaUpdateLightData& lightData = outerRadiusLights.emplace_back();
-                    lightData.light = light;
-                    lightData.distance = distanceToLight;
+                    AreaUpdateLightData& lightData = areaUpdateSingleton.totalLightDatas.emplace_back();
+                    lightData.lightId = light->id;
+                    lightData.fallOff = light->fallOff;
+                    lightData.distanceToCenter = distanceToLight;
+                    lightData.distanceToInnerRadius = glm::abs(distanceToLight - light->fallOff.x);
+
+                    lightData.colorData = GetLightColorData(ndbcSingleton, mapSingleton, light);
                 }
             }
 
-            i32 forceUseDefaultLight = *CVarSystem::Get()->GetIntCVar("lights.useDefault");
-            if (!forceUseDefaultLight)
+            // Sort Lights by distance to inner radius
+            std::sort(areaUpdateSingleton.totalLightDatas.begin(), areaUpdateSingleton.totalLightDatas.end(), [](AreaUpdateLightData a, AreaUpdateLightData b) { return a.distanceToCenter > b.distanceToCenter; });
+
+            AreaUpdateLightColorData lightColor = GetLightColorData(ndbcSingleton, mapSingleton, defaultLight);
+
+            for (AreaUpdateLightData& lightData : areaUpdateSingleton.totalLightDatas)
             {
-                size_t numInnerLights = innerRadiusLights.size();
-                size_t numOuterLights = outerRadiusLights.size();
-                if (numInnerLights)
-                {
-                    if (numInnerLights > 1)
-                    {
-                        // Sort Inner Radius Lights by distance
-                        std::sort(innerRadiusLights.begin(), innerRadiusLights.end(), [](AreaUpdateLightData a, AreaUpdateLightData b) { return a.distance < b.distance; });
-                    }
+                f32 lengthOfFallOff = lightData.fallOff.y - lightData.fallOff.x;
+                f32 val = (lightData.fallOff.y - lightData.distanceToCenter) / lengthOfFallOff;
 
-                    NDBC::Light* light = innerRadiusLights[0].light;
-                    finalColorData = GetLightColorData(ndbcSingleton, mapSingleton, light);
-                }
-                else if (numOuterLights)
-                {
-                    // Sort Outer Radius Lights by distance
-                    std::sort(outerRadiusLights.begin(), outerRadiusLights.end(), [](AreaUpdateLightData a, AreaUpdateLightData b) { return a.distance > b.distance; });
+                // Check if We are inside the inner radius of the light
+                if (lightData.distanceToCenter <= lightData.fallOff.x)
+                    val = 1.0f;
 
-                    AreaUpdateLightColorData lightColor = GetLightColorData(ndbcSingleton, mapSingleton, defaultLight);
-
-                    for (AreaUpdateLightData& lightData : outerRadiusLights)
-                    {
-                        NDBC::Light* light = lightData.light;
-
-                        AreaUpdateLightColorData outerColorData = GetLightColorData(ndbcSingleton, mapSingleton, light);
-
-                        f32 lengthOfFallOff = light->fallOff.y - light->fallOff.x;
-                        f32 val = (light->fallOff.y - lightData.distance) / lengthOfFallOff;
-
-                        lightColor.ambientColor = glm::mix(lightColor.ambientColor, outerColorData.ambientColor, val);
-                        lightColor.diffuseColor = glm::mix(lightColor.diffuseColor, outerColorData.diffuseColor, val);
-                        lightColor.skybandTopColor = glm::mix(lightColor.skybandTopColor, outerColorData.skybandTopColor, val);
-                        lightColor.skybandMiddleColor = glm::mix(lightColor.skybandMiddleColor, outerColorData.skybandMiddleColor, val);
-                        lightColor.skybandBottomColor = glm::mix(lightColor.skybandBottomColor, outerColorData.skybandBottomColor, val);
-                        lightColor.skybandAboveHorizonColor = glm::mix(lightColor.skybandAboveHorizonColor, outerColorData.skybandAboveHorizonColor, val);
-                        lightColor.skybandHorizonColor = glm::mix(lightColor.skybandHorizonColor, outerColorData.skybandHorizonColor, val);
-                    }
-
-                    finalColorData.ambientColor = lightColor.ambientColor;
-                    finalColorData.diffuseColor = lightColor.diffuseColor;
-                    finalColorData.skybandTopColor = lightColor.skybandTopColor;
-                    finalColorData.skybandMiddleColor = lightColor.skybandMiddleColor;
-                    finalColorData.skybandBottomColor = lightColor.skybandBottomColor;
-                    finalColorData.skybandAboveHorizonColor = lightColor.skybandAboveHorizonColor;
-                    finalColorData.skybandHorizonColor = lightColor.skybandHorizonColor;
-                }
+                lightColor.ambientColor = glm::mix(lightColor.ambientColor, lightData.colorData.ambientColor, val);
+                lightColor.diffuseColor = glm::mix(lightColor.diffuseColor, lightData.colorData.diffuseColor, val);
+                lightColor.skybandTopColor = glm::mix(lightColor.skybandTopColor, lightData.colorData.skybandTopColor, val);
+                lightColor.skybandMiddleColor = glm::mix(lightColor.skybandMiddleColor, lightData.colorData.skybandMiddleColor, val);
+                lightColor.skybandBottomColor = glm::mix(lightColor.skybandBottomColor, lightData.colorData.skybandBottomColor, val);
+                lightColor.skybandAboveHorizonColor = glm::mix(lightColor.skybandAboveHorizonColor, lightData.colorData.skybandAboveHorizonColor, val);
+                lightColor.skybandHorizonColor = glm::mix(lightColor.skybandHorizonColor, lightData.colorData.skybandHorizonColor, val);
             }
+
+            finalColorData.ambientColor = lightColor.ambientColor;
+            finalColorData.diffuseColor = lightColor.diffuseColor;
+            finalColorData.skybandTopColor = lightColor.skybandTopColor;
+            finalColorData.skybandMiddleColor = lightColor.skybandMiddleColor;
+            finalColorData.skybandBottomColor = lightColor.skybandBottomColor;
+            finalColorData.skybandAboveHorizonColor = lightColor.skybandAboveHorizonColor;
+            finalColorData.skybandHorizonColor = lightColor.skybandHorizonColor;
         }
 
-        mapSingleton.SetAmbientLight(finalColorData.ambientColor);
-        mapSingleton.SetDiffuseLight(finalColorData.diffuseColor);
-        mapSingleton.SetSkybandTopColor(finalColorData.skybandTopColor);
-        mapSingleton.SetSkybandMiddleColor(finalColorData.skybandMiddleColor);
-        mapSingleton.SetSkybandBottomColor(finalColorData.skybandBottomColor);
-        mapSingleton.SetSkybandAboveHorizonColor(finalColorData.skybandAboveHorizonColor);
-        mapSingleton.SetSkybandHorizonColor(finalColorData.skybandHorizonColor);
+        mapSingleton.SetLightColorData(finalColorData);
 
         // Get Light Direction
         {
@@ -257,51 +225,53 @@ AreaUpdateLightColorData AreaUpdateSystem::GetLightColorData(NDBCSingleton& ndbc
     u32 timeInSeconds = static_cast<u32>(dayNightSingleton.seconds);
 
     NDBC::LightParams* lightParams = lightParamNDBC->GetRowById<NDBC::LightParams>(light->paramClearId);
-    u32 lightIntBandStartId = lightParams->id * 18 - 17;
-    u32 lightFloatBandStartId = lightParams->id * 6 - 5;
+
+    // The ID specified in the LightParams are 1 indexed as opposed to 0 indexed, so in order to corectly calculate the starting Id into "IntBand" and "FloatBand", we must subtract 1 from the stored LightParamsId
+    u32 lightIntBandStartId = ((lightParams->id - 1) * 18) + 1;
+    u32 lightFloatBandStartId = ((lightParams->id - 1) * 6) + 1;
 
     // TODO: If the first timeValue for a given light is higher than our current time, we need to figure out what to do.
     // Do we discard that light in the search or do we handle it in here?
 
     // Get Ambient Light
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId);
         colorData.ambientColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Diffuse Light
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 1);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 1);
         colorData.diffuseColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color Top
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 2);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 2);
         colorData.skybandTopColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color Middle
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 3);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 3);
         colorData.skybandMiddleColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color Bottom
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 4);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 4);
         colorData.skybandBottomColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color AboveHorizon
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 5);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 5);
         colorData.skybandAboveHorizonColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color Horizon
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowByIndex<NDBC::LightIntBand>(lightIntBandStartId + 6);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 6);
         colorData.skybandHorizonColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
@@ -310,6 +280,7 @@ AreaUpdateLightColorData AreaUpdateSystem::GetLightColorData(NDBCSingleton& ndbc
 
 vec3 AreaUpdateSystem::GetColorValueFromLightIntBand(NDBC::LightIntBand* lightIntBand, u32 timeInSeconds)
 {
+    const u32 TotalSecondsInOneDay = 86400;
     vec3 color = vec3(0.0f, 0.0f, 0.0f);
 
     if (lightIntBand->timeValues[0] < timeInSeconds)
@@ -338,7 +309,19 @@ vec3 AreaUpdateSystem::GetColorValueFromLightIntBand(NDBC::LightIntBand* lightIn
                 u32 currentTimestamp = lightIntBand->timeValues[currentIndex];
                 u32 nextTimestamp = lightIntBand->timeValues[nextIndex];
 
-                f32 transitionTime = static_cast<f32>(nextTimestamp - currentTimestamp);
+                f32 transitionTime = 0;
+                
+                if (nextTimestamp < currentTimestamp)
+                {
+                    // Calculate diff between current & next (range is 0..86400, it can wrap around)
+                    u32 diff = (TotalSecondsInOneDay - currentTimestamp) + nextTimestamp;
+                    transitionTime = static_cast<f32>(diff);
+                }
+                else
+                {
+                    transitionTime = static_cast<f32>(nextTimestamp - currentTimestamp);
+                }
+
                 f32 relativeSeconds = static_cast<f32>(timeInSeconds - currentTimestamp);
 
                 f32 transitionProgress = relativeSeconds / transitionTime;

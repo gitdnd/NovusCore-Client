@@ -581,6 +581,44 @@ void EngineLoop::DrawEngineStats(EngineStatsSingleton* stats)
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Light Info"))
+            {
+                entt::registry* registry = ServiceLocator::GetGameRegistry();
+                MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+                AreaUpdateSingleton& areaUpdateSingleton = registry->ctx<AreaUpdateSingleton>();
+                
+                size_t numLights = areaUpdateSingleton.totalLightDatas.size();
+                ImGui::Text("Lights (Total: %u)", numLights);
+                ImGui::Separator();
+
+                AreaUpdateLightColorData lightColorData = mapSingleton.GetLightColorData();
+                ImGui::Text("Ambient Color (R: %f, G: %f, B: %f)", lightColorData.ambientColor.r, lightColorData.ambientColor.g, lightColorData.ambientColor.b);
+                ImGui::Text("Diffuse Color (R: %f, G: %f, B: %f)", lightColorData.diffuseColor.r, lightColorData.diffuseColor.g, lightColorData.diffuseColor.b);
+                ImGui::Text("Skyband Top Color (R: %f, G: %f, B: %f)", lightColorData.skybandTopColor.r, lightColorData.skybandTopColor.g, lightColorData.skybandTopColor.b);
+                ImGui::Text("Skyband Middle Color (R: %f, G: %f, B: %f)", lightColorData.skybandMiddleColor.r, lightColorData.skybandMiddleColor.g, lightColorData.skybandMiddleColor.b);
+                ImGui::Text("Skyband Bottom Color (R: %f, G: %f, B: %f)", lightColorData.skybandBottomColor.r, lightColorData.skybandBottomColor.g, lightColorData.skybandBottomColor.b);
+                ImGui::Text("Skyband Above Horizon Color (R: %f, G: %f, B: %f)", lightColorData.skybandAboveHorizonColor.r, lightColorData.skybandAboveHorizonColor.g, lightColorData.skybandAboveHorizonColor.b);
+                ImGui::Text("Skyband Horizon Color (R: %f, G: %f, B: %f)", lightColorData.skybandHorizonColor.r, lightColorData.skybandHorizonColor.g, lightColorData.skybandHorizonColor.b);
+
+                ImGui::Separator();
+
+                ImGui::Text("-- Lights --");
+                for (int i = 0; i < numLights; i++)
+                {
+                    AreaUpdateLightData& lightData = areaUpdateSingleton.totalLightDatas[i];
+
+                    f32 fallOffRange = lightData.fallOff.y - lightData.fallOff.x;
+                    f32 impact = (lightData.fallOff.y - lightData.distanceToCenter) / fallOffRange;
+
+                    if (lightData.distanceToCenter < lightData.fallOff.x)
+                        impact = 1.0f;
+
+                    ImGui::Text("#%u - (Id: %u, Impact: %f, Ambient Color(R: %f, G: %f, B: %f))", i + 1, lightData.lightId, impact, lightData.colorData.ambientColor.r, lightData.colorData.ambientColor.g, lightData.colorData.ambientColor.b);
+                }
+
+                ImGui::EndTabItem();
+            }
+
             if (ImGui::BeginTabItem("Position"))
             {
                 ImGui::Spacing();
