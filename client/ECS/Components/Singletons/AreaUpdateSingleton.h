@@ -68,7 +68,6 @@ struct AreaUpdateLightData
     u32 lightId;
     vec2 fallOff;
     f32 distanceToCenter;
-    f32 distanceToInnerRadius;
 
     AreaUpdateLightColorData colorData;
 };

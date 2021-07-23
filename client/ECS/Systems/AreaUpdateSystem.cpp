@@ -105,13 +105,12 @@ void AreaUpdateSystem::Update(entt::registry& registry)
                     lightData.lightId = light->id;
                     lightData.fallOff = light->fallOff;
                     lightData.distanceToCenter = distanceToLight;
-                    lightData.distanceToInnerRadius = glm::abs(distanceToLight - light->fallOff.x);
 
                     lightData.colorData = GetLightColorData(ndbcSingleton, mapSingleton, light);
                 }
             }
 
-            // Sort Lights by distance to inner radius
+            // Sort Lights by distance to center
             std::sort(areaUpdateSingleton.totalLightDatas.begin(), areaUpdateSingleton.totalLightDatas.end(), [](AreaUpdateLightData a, AreaUpdateLightData b) { return a.distanceToCenter > b.distanceToCenter; });
 
             AreaUpdateLightColorData lightColor = GetLightColorData(ndbcSingleton, mapSingleton, defaultLight);
