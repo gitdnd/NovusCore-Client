@@ -52,6 +52,7 @@
 #include "Utils/ServiceLocator.h"
 #include "Utils/MapUtils.h"
 #include "Utils/NetworkUtils.h"
+#include "Utils/ConfigUtils.h"
 #include "UI/Utils/ElementUtils.h"
 
 // Handlers
@@ -380,13 +381,13 @@ bool EngineLoop::Update(f32 deltaTime)
     {
         if (CVarSystem::Get()->IsDirty())
         {
-            //ConfigLoader::Save(ConfigSaveType::CVAR);
+            ConfigUtils::SaveConfig(ConfigSaveType::CVAR);
             CVarSystem::Get()->ClearDirty();
         }
 
         if (configSingleton.uiConfig.IsDirty())
         {
-            //ConfigLoader::Save(ConfigSaveType::UI);
+            ConfigUtils::SaveConfig(ConfigSaveType::UI);
             configSingleton.uiConfig.ClearDirty();
         }
     }
