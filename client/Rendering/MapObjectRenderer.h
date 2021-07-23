@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <Utils/ByteBuffer.h>
 #include <Utils/SafeVector.h>
+#include <Utils/SafeUnorderedMap.h>
 
 #include <Renderer/Buffer.h>
 #include <Renderer/Descriptors/SamplerDesc.h>
@@ -94,6 +95,29 @@ class MapObjectRenderer
 public:
     struct LoadedMapObject
     {
+        LoadedMapObject(){}
+
+        // We have to manually implement a copy constructor because std::mutex is not copyable
+        LoadedMapObject(const LoadedMapObject& other) 
+        {
+            objectID = other.objectID;
+            debugName = other.debugName;
+            drawParameterIDs = other.drawParameterIDs;
+            materialParameterIDs = other.materialParameterIDs;
+            instanceIDs = other.instanceIDs;
+            instanceMaterialParameterIDs = other.instanceMaterialParameterIDs;
+            vertexColors[0] = other.vertexColors[0];
+            vertexColors[1] = other.vertexColors[1];
+            vertexColorTextureIDs[0] = other.vertexColorTextureIDs[0];
+            vertexColorTextureIDs[1] = other.vertexColorTextureIDs[1];
+            instanceCount = other.instanceCount;
+            baseMaterialOffset = other.baseMaterialOffset;
+            baseCullingDataOffset = other.baseCullingDataOffset;
+            renderBatches = other.renderBatches;
+            renderBatchOffsets = other.renderBatchOffsets;
+            cullingData = other.cullingData;
+        };
+
         u32 objectID;
         std::string debugName = "";
 
@@ -108,7 +132,6 @@ public:
         u32 vertexColorTextureIDs[2] = { 0, 0 };
         u32 instanceCount;
 
-        u32 baseVertexOffset = 0;
         u32 baseMaterialOffset = 0;
         u32 baseCullingDataOffset = 0;
 
@@ -118,6 +141,7 @@ public:
 
         // Culling data
         std::vector<Terrain::CullingData> cullingData;
+        std::mutex mutex;
     };
 
     struct InstanceLookupData
@@ -153,17 +177,16 @@ public:
 
     void Clear();
 
-    const std::vector<LoadedMapObject>& GetLoadedMapObjects() { return _loadedMapObjects; }
-    const std::vector<InstanceData>& GetInstances() { return _instances; }
-    const std::vector<Terrain::PlacementDetails>& GetPlacementDetails() { return _mapObjectPlacementDetails; }
-    const std::vector<InstanceLookupData>& GetInstanceLookupData() { return _instanceLookupData; }
+    SafeVector<LoadedMapObject>& GetLoadedMapObjects() { return _loadedMapObjects; }
+    SafeVector<InstanceData>& GetInstances() { return _instances; }
+    SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _mapObjectPlacementDetails; }
+    SafeVector<InstanceLookupData>& GetInstanceLookupData() { return _instanceLookupData; }
 
-    u32 GetChunkPlacementDetailsOffset(u16 chunkID) { return _mapChunkToPlacementOffset[chunkID]; }
-    u32 GetNumLoadedMapObjects() { return static_cast<u32>(_loadedMapObjects.size()); }
-    u32 GetNumMapObjectPlacements() { return static_cast<u32>(_instances.size()); }
+    u32 GetNumLoadedMapObjects() { return static_cast<u32>(_loadedMapObjects.Size()); }
+    u32 GetNumMapObjectPlacements() { return static_cast<u32>(_instances.Size()); }
 
     // Drawcall stats
-    u32 GetNumDrawCalls() { return static_cast<u32>(_drawParameters.size()); }
+    u32 GetNumDrawCalls() { return static_cast<u32>(_drawParameters.Size()); }
     u32 GetNumSurvivingDrawCalls() { return _numSurvivingDrawCalls; }
 
     // Triangle stats
@@ -182,7 +205,7 @@ private:
 
     bool LoadRenderBatches(Bytebuffer& buffer, Mesh& mesh, LoadedMapObject& mapObject);
 
-    void AddInstance(LoadedMapObject& mapObject, const Terrain::Placement* placement);
+    void AddInstance(LoadedMapObject& mapObject, const Terrain::Placement* placement, u32& instanceIndex);
 
     void CreateBuffers();
 
@@ -219,17 +242,17 @@ private:
     Renderer::DescriptorSet _passDescriptorSet;
     Renderer::DescriptorSet _meshDescriptorSet;
 
-    std::vector<LoadedMapObject> _loadedMapObjects;
-    robin_hood::unordered_map<u32, u32> _nameHashToIndexMap;
+    SafeVector<LoadedMapObject> _loadedMapObjects;
+    SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
 
-    std::vector<DrawParameters> _drawParameters;
-    std::vector<u16> _indices;
-    std::vector<Terrain::MapObjectVertex> _vertices;
-    std::vector<InstanceData> _instances;
-    std::vector<InstanceLookupData> _instanceLookupData;
-    std::vector<Material> _materials;
-    std::vector<MaterialParameters> _materialParameters;
-    std::vector<Terrain::CullingData> _cullingData;
+    SafeVector<DrawParameters> _drawParameters;
+    SafeVector<u16> _indices;
+    SafeVector<Terrain::MapObjectVertex> _vertices;
+    SafeVector<InstanceData> _instances;
+    SafeVector<InstanceLookupData> _instanceLookupData;
+    SafeVector<Material> _materials;
+    SafeVector<MaterialParameters> _materialParameters;
+    SafeVector<Terrain::CullingData> _cullingData;
 
     Renderer::Buffer<CullingConstants>* _cullingConstantBuffer;
 
@@ -250,13 +273,13 @@ private:
 
     Renderer::TextureArrayID _mapObjectTextures;
 
-    robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
-    robin_hood::unordered_map<u16, u32> _mapChunkToPlacementOffset;
-    std::vector<Terrain::PlacementDetails> _mapObjectPlacementDetails;
+    SafeUnorderedMap<u32, u8> _uniqueIdCounter;
+
+    SafeVector<Terrain::PlacementDetails> _mapObjectPlacementDetails;
 
     u32 _numSurvivingDrawCalls;
     u32 _numTriangles;
     u32 _numSurvivingTriangles;
 
-    SafeVector<MapObjectToBeLoaded> _mapObjectsToBeLoaded;  // TODO: Make this a concurrent queue
+    SafeVector<MapObjectToBeLoaded> _mapObjectsToBeLoaded;
 };

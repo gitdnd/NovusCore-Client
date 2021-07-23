@@ -666,16 +666,10 @@ void TerrainRenderer::CreatePermanentResources()
 
     // Upload cell index buffer
     {
-        Renderer::BufferDesc indexUploadBufferDesc;
-        indexUploadBufferDesc.name = "TerrainCellIndexUploadBuffer";
-        indexUploadBufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-        indexUploadBufferDesc.size = sizeof(u16) * Terrain::NUM_INDICES_PER_CELL;
-        indexUploadBufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
+        size_t size = sizeof(u16) * Terrain::NUM_INDICES_PER_CELL;
+        auto uploadBuffer = _renderer->CreateUploadBuffer(_cellIndexBuffer, 0, size);
 
-        Renderer::BufferID indexUploadBuffer = _renderer->CreateBuffer(indexUploadBufferDesc);
-        _renderer->QueueDestroyBuffer(indexUploadBuffer);
-
-        u16* indices = static_cast<u16*>(_renderer->MapBuffer(indexUploadBuffer));
+        u16* indices = static_cast<u16*>(uploadBuffer->mappedMemory);
 
         // Fill index buffer
         size_t indexIndex = 0;
@@ -716,9 +710,6 @@ void TerrainRenderer::CreatePermanentResources()
                 indices[indexIndex++] = topRightVertex;
             }
         }
-
-        _renderer->UnmapBuffer(indexUploadBuffer);
-        _renderer->CopyBuffer(_cellIndexBuffer, 0, indexUploadBuffer, 0, indexUploadBufferDesc.size);
     }
 
     // Check if we should load a default map specified by Config
@@ -909,17 +900,10 @@ bool TerrainRenderer::LoadMap(const NDBC::Map* map)
         {
             const size_t cellCount = Terrain::MAP_CELLS_PER_CHUNK * _loadedChunks.Size();
 
-            Renderer::BufferDesc uploadBufferDesc;
-            uploadBufferDesc.name = "TerrainInstanceUploadBuffer";
-            uploadBufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-            uploadBufferDesc.size = sizeof(CellInstance) * cellCount;
-            uploadBufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
+            size_t size = sizeof(CellInstance) * cellCount;
+            auto uploadBuffer = _renderer->CreateUploadBuffer(_instanceBuffer, 0, size);
 
-            Renderer::BufferID instanceUploadBuffer = _renderer->CreateBuffer(uploadBufferDesc);
-            _renderer->QueueDestroyBuffer(instanceUploadBuffer);
-
-            void* instanceBufferMemory = _renderer->MapBuffer(instanceUploadBuffer);
-            CellInstance* instanceData = static_cast<CellInstance*>(instanceBufferMemory);
+            CellInstance* instanceData = static_cast<CellInstance*>(uploadBuffer->mappedMemory);
             u32 instanceDataIndex = 0;
 
             _loadedChunks.ReadLock(
@@ -934,10 +918,8 @@ bool TerrainRenderer::LoadMap(const NDBC::Map* map)
                         }
                     }
                 });
-            
+
             assert(instanceDataIndex == cellCount);
-            _renderer->UnmapBuffer(instanceUploadBuffer);
-            _renderer->CopyBuffer(_instanceBuffer, 0, instanceUploadBuffer, 0, uploadBufferDesc.size);
         }
     }
 
@@ -1147,12 +1129,6 @@ void TerrainRenderer::LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded)
         }
     }
 
-    // TODO: Parallelize loading in the other renderers so we don't have to do this... But lets split this task into smaller chunks.
-    {
-        std::scoped_lock lock(_subLoadMutex);
-
-        ZoneScopedN("Subload");
-        _mapObjectRenderer->RegisterMapObjectsToBeLoaded(chunkID, chunk, stringTable);
-        _complexModelRenderer->RegisterLoadFromChunk(chunkID, chunk, stringTable);
-    }
+    _mapObjectRenderer->RegisterMapObjectsToBeLoaded(chunkID, chunk, stringTable);
+    _complexModelRenderer->RegisterLoadFromChunk(chunkID, chunk, stringTable);
 }

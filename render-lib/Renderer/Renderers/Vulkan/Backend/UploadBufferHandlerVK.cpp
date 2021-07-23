@@ -4,6 +4,7 @@
 #include "CommandListHandlerVK.h"
 #include "SemaphoreHandlerVK.h"
 #include "RenderDeviceVK.h"
+#include "../../../RenderSettings.h"
 
 #include <tracy/Tracy.hpp>
 #include <tracy/TracyVulkan.hpp>
@@ -76,12 +77,12 @@ namespace Renderer
 
                 BufferDesc bufferDesc;
                 bufferDesc.name = "StagingBuffer" + std::to_string(i);
-                bufferDesc.size = BUFFER_SIZE;
+                bufferDesc.size = Settings::STAGING_BUFFER_SIZE;
                 bufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
                 bufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
 
                 stagingBuffer.buffer = _bufferHandler->CreateBuffer(bufferDesc);
-                stagingBuffer.allocator.Init(BUFFER_SIZE, "StagingBuffer", true, false);
+                stagingBuffer.allocator.Init(Settings::STAGING_BUFFER_SIZE, "StagingBuffer", true, false);
 
                 // Map the buffer
                 void* mappedStagingMemory;
@@ -157,7 +158,7 @@ namespace Renderer
 
         std::shared_ptr<UploadBuffer> UploadBufferHandlerVK::CreateUploadBuffer(BufferID targetBuffer, size_t targetOffset, size_t size)
         {
-            if (size > BUFFER_SIZE)
+            if (size > Settings::STAGING_BUFFER_SIZE)
             {
                 DebugHandler::PrintFatal("Requested bigger staging memory than our staging buffer size!");
             }
@@ -188,6 +189,9 @@ namespace Renderer
                 [&](UploadBuffer* buffer)
                 {
                     {
+                        UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
+                        std::scoped_lock submitLock(data->submitMutex); // We need to grab this one before the handelock, even if we then decide not to submit, or we might deadlock
+
                         std::scoped_lock lock(stagingBuffer.handleLock);
                         // Decrement the number of active handles into this staging buffer
                         if (--stagingBuffer.activeHandles == 0)
@@ -212,7 +216,7 @@ namespace Renderer
 
         std::shared_ptr<UploadBuffer> UploadBufferHandlerVK::CreateUploadBuffer(TextureID targetTexture, size_t targetOffset, size_t size)
         {
-            if (size > BUFFER_SIZE)
+            if (size > Settings::STAGING_BUFFER_SIZE)
             {
                 DebugHandler::PrintFatal("Requested bigger staging memory than our staging buffer size!");
             }
@@ -248,6 +252,9 @@ namespace Renderer
                             // If we are the last active handle and the staging buffer is full, execute it
                             if (stagingBuffer.isFull)
                             {
+                                UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
+
+                                std::scoped_lock submitLock(data->submitMutex);
                                 ExecuteStagingBuffer(stagingBuffer);
                                 stagingBuffer.isFull = false;
                             }
@@ -284,65 +291,64 @@ namespace Renderer
 
             StagingBuffer* stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
 
-            // Try to allocate in the currently selected stagingbuffer
-            if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
-            {
-                stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
-                mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
-                return offset;
-            }
+            u32 tries = 0;
 
+            while (tries < 5)
             {
-                std::scoped_lock lock(data->submitMutex);
-
-                // First thread to reach here should submit it
-                if (stagingBuffer->isFirstThreadToReach)
+                // Try to allocate in the currently selected stagingbuffer
+                if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
                 {
-                    stagingBuffer->isFirstThreadToReach = false;
+                    stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
+                    mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
+                    return offset;
+                }
 
-                    // If the buffer is full and nobody is currently writing into it, submit it.
-                    // Otherwise it gets submitted when the last writer releases their active handle
+                {
+                    std::scoped_lock lock(data->submitMutex);
+
+                    // First thread to reach here should submit it
+                    if (stagingBuffer->isFirstThreadToReach)
                     {
-                        std::scoped_lock lock(stagingBuffer->handleLock);
-                        stagingBuffer->isFull = true;
-                        if (stagingBuffer->activeHandles == 0)
+                        stagingBuffer->isFirstThreadToReach = false;
+
+                        // If the buffer is full and nobody is currently writing into it, submit it.
+                        // Otherwise it gets submitted when the last writer releases their active handle
                         {
-                            ExecuteStagingBuffer(*stagingBuffer);
+                            std::scoped_lock lock(stagingBuffer->handleLock);
+                            stagingBuffer->isFull = true;
+                            if (stagingBuffer->activeHandles == 0)
+                            {
+                                ExecuteStagingBuffer(*stagingBuffer);
+                            }
+                        }
+
+                        // Get for the next staging buffer
+                        selectedStagingBuffer = (selectedStagingBuffer + 1) % data->stagingBuffers.Num;
+                        data->selectedStagingBuffer = selectedStagingBuffer;
+
+                        stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
+
+                        // Wait for it if needed
+                        WaitForStagingBuffer(*stagingBuffer);
+                        stagingBuffer->isFirstThreadToReach = true;
+
+                        {
+                            std::scoped_lock lock(stagingBuffer->handleLock);
+                            stagingBuffer->isFull = false;
                         }
                     }
-
-                    // Get for the next staging buffer
-                    selectedStagingBuffer = (selectedStagingBuffer + 1) % data->stagingBuffers.Num;
-                    data->selectedStagingBuffer = selectedStagingBuffer;
-
-                    stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-
-                    // Wait for it if needed
-                    WaitForStagingBuffer(*stagingBuffer);
-                    stagingBuffer->isFirstThreadToReach = true;
-
+                    else
                     {
-                        std::scoped_lock lock(stagingBuffer->handleLock);
-                        stagingBuffer->isFull = false;
+                        // Just grab the new stagingbuffer
+                        selectedStagingBuffer = data->selectedStagingBuffer;
+                        stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
                     }
                 }
-                else
-                {
-                    // Just grab the new stagingbuffer
-                    selectedStagingBuffer = data->selectedStagingBuffer;
-                    stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-                }
-            }
 
-            // Try to allocate in the newly selected stagingbuffer
-            if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
-            {
-                stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
-                mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
-                return offset;
+                tries++;
             }
             
-            DebugHandler::PrintFatal("Could not allocate in staging buffer even after getting a second buffer");
+            DebugHandler::PrintFatal("Could not allocate in staging buffer after 5 tries");
             return offset;
         }
 

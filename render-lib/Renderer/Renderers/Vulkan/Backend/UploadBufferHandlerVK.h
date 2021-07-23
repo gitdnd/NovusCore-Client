@@ -41,8 +41,6 @@ namespace Renderer
             void WaitForStagingBuffer(StagingBuffer& stagingBuffer);
 
         private:
-            static const size_t BUFFER_SIZE = 32 * 1024 * 1024; // 32 MB
-
             RenderDeviceVK* _device;
             BufferHandlerVK* _bufferHandler;
             TextureHandlerVK* _textureHandler;

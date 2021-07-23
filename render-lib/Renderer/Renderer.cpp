@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "RenderGraph.h"
+#include "RenderSettings.h"
 
 #include <Memory/Allocator.h>
 
@@ -43,22 +44,27 @@ namespace Renderer
         desc.usage |= BufferUsage::TRANSFER_DESTINATION; // If we're supposed to stage into it, we have to make sure it's a transfer destination
         BufferID bufferID = CreateBuffer(desc);
 
-        // Create staging buffer
-        desc.name += "Staging";
-        desc.usage = BufferUsage::TRANSFER_SOURCE; // The staging buffer needs to be transfer source
-        desc.cpuAccess = BufferCPUAccess::WriteOnly;
+        // If the size is big enough to upload in one go
+        if (dataSize < Settings::STAGING_BUFFER_SIZE)
+        {
+            auto uploadBuffer = CreateUploadBuffer(bufferID, 0, dataSize);
+            memcpy(uploadBuffer->mappedMemory, data, dataSize);
+        }
+        else // Else if we need to chunk it up
+        {
+            size_t dataUploaded = 0;
+            while (dataUploaded < dataSize)
+            {
+                size_t remainingData = dataSize - dataUploaded;
+                size_t dataChunkSize = Math::Min(remainingData, Settings::STAGING_BUFFER_SIZE);
 
-        BufferID stagingBuffer = CreateBuffer(desc);
+                auto uploadBuffer = CreateUploadBuffer(bufferID, dataUploaded, dataChunkSize);
 
-        // Upload to staging buffer
-        void* dst = MapBuffer(stagingBuffer);
-        memcpy(dst, data, dataSize);
-        UnmapBuffer(stagingBuffer);
+                memcpy(uploadBuffer->mappedMemory, &static_cast<u8*>(data)[dataUploaded], dataChunkSize);
 
-        // Queue destroy staging buffer
-        QueueDestroyBuffer(stagingBuffer);
-        // Copy from staging buffer to buffer
-        CopyBuffer(bufferID, 0, stagingBuffer, 0, desc.size);
+                dataUploaded += dataChunkSize;
+            }
+        }
 
         return bufferID;
     }

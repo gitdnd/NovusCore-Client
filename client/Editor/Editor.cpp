@@ -180,12 +180,12 @@ namespace Editor
                             TerrainRenderer* terrainRenderer = clientRenderer->GetTerrainRenderer();
                             MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
 
-                            const std::vector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
-                            const std::vector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();
+                            SafeVector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
+                            SafeVector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();
 
-                            const MapObjectRenderer::InstanceLookupData& instanceLookupData = instanceLookupDatas[_selectedMapObjectData.instanceLookupDataID];
-                            const MapObjectRenderer::LoadedMapObject& loadedMapObject = loadedMapObjects[instanceLookupData.loadedObjectID];
-                            const mat4x4& instanceMatrix = mapObjectRenderer->GetInstances()[instanceLookupData.instanceID].instanceMatrix;
+                            const MapObjectRenderer::InstanceLookupData& instanceLookupData = instanceLookupDatas.ReadGet(_selectedMapObjectData.instanceLookupDataID);
+                            const MapObjectRenderer::LoadedMapObject& loadedMapObject = loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
+                            const mat4x4& instanceMatrix = mapObjectRenderer->GetInstances().ReadGet(instanceLookupData.instanceID).instanceMatrix;
 
                             Geometry::AABoundingBox mapObjectAABB;
                             mapObjectAABB.min = vec3(Terrain::MAP_SIZE, Terrain::MAP_SIZE, Terrain::MAP_SIZE);
@@ -358,12 +358,12 @@ namespace Editor
         TerrainRenderer* terrainRenderer = clientRenderer->GetTerrainRenderer();
         MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
 
-        const std::vector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
-        const std::vector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();
+        SafeVector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
+        SafeVector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();
 
-        const MapObjectRenderer::InstanceLookupData& instanceLookupData = instanceLookupDatas[_selectedMapObjectData.instanceLookupDataID];
-        const MapObjectRenderer::LoadedMapObject& loadedMapObject = loadedMapObjects[instanceLookupData.loadedObjectID];
-        const mat4x4& instanceMatrix = mapObjectRenderer->GetInstances()[instanceLookupData.instanceID].instanceMatrix;
+        const MapObjectRenderer::InstanceLookupData& instanceLookupData = instanceLookupDatas.ReadGet(_selectedMapObjectData.instanceLookupDataID);
+        const MapObjectRenderer::LoadedMapObject& loadedMapObject = loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
+        const mat4x4& instanceMatrix = mapObjectRenderer->GetInstances().ReadGet(instanceLookupData.instanceID).instanceMatrix;
 
         glm::vec3 scale;
         glm::quat rotation;

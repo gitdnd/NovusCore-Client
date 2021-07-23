@@ -15,6 +15,7 @@ namespace Renderer
 {
     namespace Backend
     {
+NOVUS_NO_PADDING_START;
         struct GraphicsPipelineCacheDesc
         {
             GraphicsPipelineDesc::States states;
@@ -22,6 +23,7 @@ namespace Renderer
             ImageID renderTargets[MAX_RENDER_TARGETS] = { ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid(), ImageID::Invalid() };
             DepthImageID depthStencil = DepthImageID::Invalid();
         };
+NOVUS_NO_PADDING_END;
 
         struct GraphicsPipeline
         {
@@ -802,7 +804,7 @@ namespace Renderer
 
         u64 PipelineHandlerVK::CalculateCacheDescHash(const GraphicsPipelineDesc& desc)
         {
-            GraphicsPipelineCacheDesc cacheDesc;
+            GraphicsPipelineCacheDesc cacheDesc = {};
             cacheDesc.states = desc.states;
 
             for (int i = 0; i < MAX_RENDER_TARGETS; i++)
@@ -813,22 +815,23 @@ namespace Renderer
                 cacheDesc.renderTargets[i] = desc.MutableResourceToImageID(desc.renderTargets[i]);
             }
 
-            if (desc.depthStencil != RenderPassMutableResource::Invalid())
+            RenderPassMutableResource invalidValue = RenderPassMutableResource::Invalid();
+            if (desc.depthStencil != invalidValue)
             {
                 cacheDesc.depthStencil = desc.MutableResourceToDepthImageID(desc.depthStencil);
             }
 
-            u64 hash = XXHash64::hash(&cacheDesc, sizeof(cacheDesc), 0);
+            u64 hash = XXHash64::hash(&cacheDesc, sizeof(GraphicsPipelineCacheDesc), 0);
 
             return hash;
         }
 
         u64 PipelineHandlerVK::CalculateCacheDescHash(const ComputePipelineDesc& desc)
         {
-            ComputePipelineCacheDesc cacheDesc;
+            ComputePipelineCacheDesc cacheDesc = {};
             cacheDesc.shader = desc.computeShader;
 
-            u64 hash = XXHash64::hash(&cacheDesc, sizeof(cacheDesc), 0);
+            u64 hash = XXHash64::hash(&cacheDesc, sizeof(ComputePipelineCacheDesc), 0);
 
             return hash;
         }

@@ -216,7 +216,7 @@ namespace Renderer
             f32 height = desc.dimensions.y;
             u32 mips = desc.mipLevels;
 
-            u32 uwidth = static_cast<u32>(width);;
+            u32 uwidth = static_cast<u32>(width);
             u32 uheight = static_cast<u32>(height);
 
             // If the supplied dimensions is a % of window size
@@ -345,7 +345,7 @@ namespace Renderer
             f32 height = image.desc.dimensions.y;
             u32 mips = image.desc.mipLevels;
 
-            u32 uwidth = static_cast<u32>(width);;
+            u32 uwidth = static_cast<u32>(width);
             u32 uheight = static_cast<u32>(height);
 
             // If the supplied dimensions is a % of window size

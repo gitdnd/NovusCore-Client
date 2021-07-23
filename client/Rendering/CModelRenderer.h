@@ -157,7 +157,6 @@ public:
         return _animationModelInfo[modelId].numSequences;
     }
 
-    u32 GetChunkPlacementDetailsOffset(u16 chunkID) { return _mapChunkToPlacementOffset[chunkID]; }
     u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.size()); }
     u32 GetNumCModelPlacements() { return static_cast<u32>(_instances.size()); }
     u32 GetModelIndexByDrawCallDataIndex(u32 index, bool isOpaque)
@@ -329,10 +328,11 @@ private:
     Renderer::DescriptorSet _passDescriptorSet;
 
     robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
-    robin_hood::unordered_map<u16, u32> _mapChunkToPlacementOffset;
+    std::shared_mutex _uniqueIdCounterMutex;
+
     std::vector<Terrain::PlacementDetails> _complexModelPlacementDetails;
 
-    SafeVector<ComplexModelToBeLoaded> _complexModelsToBeLoaded; // TODO: Make this a concurrent queue
+    moodycamel::ConcurrentQueue<ComplexModelToBeLoaded> _complexModelsToBeLoaded;
     std::vector<LoadedComplexModel> _loadedComplexModels;
     robin_hood::unordered_map<u32, u32> _nameHashToIndexMap;
     robin_hood::unordered_map<u32, u32> _opaqueDrawCallDataIndexToLoadedModelIndex;
@@ -340,7 +340,7 @@ private:
 
     std::vector<CModel::ComplexVertex> _vertices;
     std::vector<u16> _indices;
-    std::vector<TextureUnit> _textureUnits;;
+    std::vector<TextureUnit> _textureUnits;
     std::vector<Instance> _instances;
     std::vector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
     std::vector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;

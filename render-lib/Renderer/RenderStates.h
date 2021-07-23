@@ -6,6 +6,7 @@ namespace Renderer
 {
     static const int MAX_RENDER_TARGETS = 8;
 
+    NOVUS_NO_PADDING_START;
     enum class FillMode
     {
         SOLID,
@@ -703,4 +704,5 @@ namespace Renderer
         DebugHandler::PrintFatal("This should never hit, did we forget to add more cases after updating DepthImageFormat?");
         return 1;
     }
+    NOVUS_NO_PADDING_END;
 }

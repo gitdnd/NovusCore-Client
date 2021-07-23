@@ -998,8 +998,8 @@ namespace Renderer
         case PipelineBarrierType::AllCommands:
             srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
             dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-            bufferBarrier.srcAccessMask = VK_ACCESS_FLAG_BITS_MAX_ENUM;;
-            bufferBarrier.dstAccessMask = VK_ACCESS_FLAG_BITS_MAX_ENUM;;
+            bufferBarrier.srcAccessMask = VK_ACCESS_FLAG_BITS_MAX_ENUM;
+            bufferBarrier.dstAccessMask = VK_ACCESS_FLAG_BITS_MAX_ENUM;
             break;
         }
 

@@ -830,17 +830,21 @@ void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, Ren
 
 void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable)
 {
-    _mapChunkToPlacementOffset[chunkID] = static_cast<u16>(_complexModelsToBeLoaded.Size());
-
     for (const Terrain::Placement& placement : chunk.complexModelPlacements)
     {
         u32 uniqueID = placement.uniqueID;
-        if (_uniqueIdCounter[uniqueID]++ == 0)
+
         {
-            ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
-            modelToBeLoaded.placement = &placement;
-            modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
-            modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
+            std::unique_lock lock(_uniqueIdCounterMutex);
+            if (_uniqueIdCounter[uniqueID]++ == 0)
+            {
+                ComplexModelToBeLoaded modelToBeLoaded;
+                modelToBeLoaded.placement = &placement;
+                modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
+                modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
+
+                _complexModelsToBeLoaded.enqueue(modelToBeLoaded);
+            }
         }
     }
 }
@@ -849,53 +853,52 @@ void CModelRenderer::ExecuteLoad()
 {
     ZoneScopedN("CModelRenderer::ExecuteLoad()");
 
-    size_t numComplexModelsToLoad = _complexModelsToBeLoaded.Size();
-    if (numComplexModelsToLoad == 0)
-        return;
-
+    std::atomic<size_t> numComplexModelsToLoad = 0;
+    
     _animationBoneDeformRangeAllocator.Reset();
     _animationBoneInstancesRangeAllocator.Reset();
 
-    _complexModelsToBeLoaded.WriteLock([&](std::vector<ComplexModelToBeLoaded>& complexModelsToBeLoaded)
+    ComplexModelToBeLoaded modelToBeLoaded;
+    while (_complexModelsToBeLoaded.try_dequeue(modelToBeLoaded))
+    {
+        ZoneScoped;
+        ZoneText(modelToBeLoaded.name->c_str(), modelToBeLoaded.name->length());
+
+        // Placements reference a path to a ComplexModel, several placements can reference the same object
+        // Because of this we want only the first load to actually load the object, subsequent loads should reuse the loaded version
+        u32 modelID;
+
+        auto it = _nameHashToIndexMap.find(modelToBeLoaded.nameHash);
+        if (it == _nameHashToIndexMap.end())
         {
-            for (ComplexModelToBeLoaded& modelToBeLoaded : complexModelsToBeLoaded)
-            {
-                ZoneScoped;
-                ZoneText(modelToBeLoaded.name->c_str(), modelToBeLoaded.name->length());
+            modelID = static_cast<u32>(_loadedComplexModels.size());
+            LoadedComplexModel& complexModel = _loadedComplexModels.emplace_back();
+            complexModel.objectID = modelID;
+            LoadComplexModel(modelToBeLoaded, complexModel);
 
-                // Placements reference a path to a ComplexModel, several placements can reference the same object
-                // Because of this we want only the first load to actually load the object, subsequent loads should reuse the loaded version
-                u32 modelID;
+            _nameHashToIndexMap[modelToBeLoaded.nameHash] = modelID;
+        }
+        else
+        {
+            modelID = it->second;
+        }
 
-                auto it = _nameHashToIndexMap.find(modelToBeLoaded.nameHash);
-                if (it == _nameHashToIndexMap.end())
-                {
-                    modelID = static_cast<u32>(_loadedComplexModels.size());
-                    LoadedComplexModel& complexModel = _loadedComplexModels.emplace_back();
-                    complexModel.objectID = modelID;
-                    LoadComplexModel(modelToBeLoaded, complexModel);
+        // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
+        Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.emplace_back();
+        placementDetails.loadedIndex = modelID;
+        placementDetails.instanceIndex = static_cast<u32>(_instances.size());
 
-                    _nameHashToIndexMap[modelToBeLoaded.nameHash] = modelID;
-                }
-                else
-                {
-                    modelID = it->second;
-                }
+        // Add placement as an instance
+        AddInstance(_loadedComplexModels[modelID], *modelToBeLoaded.placement);
+        numComplexModelsToLoad++;
+    }
 
-                // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
-                Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.emplace_back();
-                placementDetails.loadedIndex = modelID;
-                placementDetails.instanceIndex = static_cast<u32>(_instances.size());
-
-                // Add placement as an instance
-                AddInstance(_loadedComplexModels[modelID], *modelToBeLoaded.placement);
-            }
-        });
+    if (numComplexModelsToLoad == 0)
+        return;
 
     {
         ZoneScopedN("CModelRenderer::ExecuteLoad()::CreateBuffers()");
         CreateBuffers();
-        _complexModelsToBeLoaded.Clear();
 
         // Calculate triangles
         _numOpaqueTriangles = 0;
@@ -914,8 +917,11 @@ void CModelRenderer::ExecuteLoad()
 
 void CModelRenderer::Clear()
 {
-    _uniqueIdCounter.clear();
-    _mapChunkToPlacementOffset.clear();
+    {
+        std::unique_lock lock(_uniqueIdCounterMutex);
+        _uniqueIdCounter.clear();
+    }
+    
     _complexModelPlacementDetails.clear();
     _loadedComplexModels.clear();
     _nameHashToIndexMap.clear();
@@ -1048,15 +1054,16 @@ void CModelRenderer::CreatePermanentResources()
     {
         for (u32 y = 0; y < 10; y++)
         {
-            ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
-            {
-                Terrain::Placement* placement = new Terrain::Placement();
-                placement->position = vec3(x * 3.f, y * 3.f, 0.f);
+            ComplexModelToBeLoaded modelToBeLoaded;
+            
+            Terrain::Placement* placement = new Terrain::Placement();
+            placement->position = vec3(x * 3.f, y * 3.f, 0.f);
 
-                modelToBeLoaded.placement = placement;
-                modelToBeLoaded.name = new std::string("Creature/DruidCat/DruidCat.cmodel");
-                modelToBeLoaded.nameHash = x + (y * 10);
-            }
+            modelToBeLoaded.placement = placement;
+            modelToBeLoaded.name = new std::string("Creature/DruidCat/DruidCat.cmodel");
+            modelToBeLoaded.nameHash = x + (y * 10);
+
+            _complexModelsToBeLoaded.enqueue(modelToBeLoaded);
         }
     }
 

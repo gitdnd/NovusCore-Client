@@ -4,6 +4,7 @@
 #include <queue>
 #include <vector>
 #include <cassert>
+#include <mutex>
 #include <vulkan/vulkan.h>
 #include <Utils/DebugHandler.h>
 #include <tracy/TracyVulkan.hpp>
@@ -43,6 +44,7 @@ namespace Renderer
 
             u8 frameIndex = 0;
             FrameResource<VkFence, 2> frameFences;
+            std::mutex commandListMutex;
         };
 
         void CommandListHandlerVK::Init(RenderDeviceVK* device)
@@ -374,8 +376,11 @@ namespace Renderer
                 DebugHandler::PrintFatal("Failed to begin recording command buffer!");
             }
 
-            data.commandLists.push_back(commandList);
-
+            {
+                std::scoped_lock lock(data.commandListMutex);
+                data.commandLists.push_back(commandList);
+            }
+            
             return CommandListID(static_cast<CommandListID::type>(id));
         }
     }
