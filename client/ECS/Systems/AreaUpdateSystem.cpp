@@ -232,16 +232,16 @@ AreaUpdateLightColorData AreaUpdateSystem::GetLightColorData(NDBCSingleton& ndbc
     // TODO: If the first timeValue for a given light is higher than our current time, we need to figure out what to do.
     // Do we discard that light in the search or do we handle it in here?
 
-    // Get Ambient Light
-    {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId);
-        colorData.ambientColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
-    }
-
     // Get Diffuse Light
     {
-        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 1);
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId);
         colorData.diffuseColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
+    }
+
+    // Get Ambient Light
+    {
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 1);
+        colorData.ambientColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
     }
 
     // Get Skyband Color Top
@@ -322,7 +322,6 @@ vec3 AreaUpdateSystem::GetColorValueFromLightIntBand(NDBC::LightIntBand* lightIn
                 }
 
                 f32 relativeSeconds = static_cast<f32>(timeInSeconds - currentTimestamp);
-
                 f32 transitionProgress = relativeSeconds / transitionTime;
 
                 vec3 currentColor = UnpackUIntBGRToColor(lightIntBand->colorValues[currentIndex]);
