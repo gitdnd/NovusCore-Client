@@ -851,6 +851,20 @@ void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& ch
     }
 }
 
+void CModelRenderer::RegisterLoadFromDecoration(const std::string& modelPath, const u32& modelPathHash, vec3 position, quaternion rotation, f32 scale)
+{
+    ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
+
+    Terrain::Placement* placement = new Terrain::Placement();
+    placement->position = position;
+    placement->rotation = rotation;
+    placement->scale = static_cast<u16>(scale * 1024);
+
+    modelToBeLoaded.placement = placement;
+    modelToBeLoaded.name = new std::string(modelPath);
+    modelToBeLoaded.nameHash = modelPathHash;
+}
+
 void CModelRenderer::ExecuteLoad()
 {
     ZoneScopedN("CModelRenderer::ExecuteLoad()");
@@ -1096,28 +1110,6 @@ void CModelRenderer::CreatePermanentResources()
 
         _animationBoneInstancesRangeAllocator.Init(0, boneInstanceBufferSize);
     }
-
-    //modelToBeLoaded.name = new std::string("Creature/Snake/Snake.cmodel");
-    //modelToBeLoaded.name = new std::string("Creature/Murloc/Murloc.cmodel");
-    //modelToBeLoaded.name = new std::string("Creature/LichKingMurloc/LichKingMurloc.cmodel");
-    //modelToBeLoaded.name = new std::string("World/SkillActivated/CONTAINERS/TreasureChest01.cmodel");
-
-    /*for (u32 x = 0; x < 10; x++)
-    {
-        for (u32 y = 0; y < 10; y++)
-        {
-            ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
-            
-            Terrain::Placement* placement = new Terrain::Placement();
-            placement->position = vec3(x * 3.f, y * 3.f, 0.f);
-
-            modelToBeLoaded.placement = placement;
-            modelToBeLoaded.name = new std::string("Creature/DruidCat/DruidCat.cmodel");
-            modelToBeLoaded.nameHash = x + (y * 10);
-        }
-    }*/
-
-    ExecuteLoad();
 }
 
 bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, LoadedComplexModel& complexModel)
@@ -1781,10 +1773,10 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
 
     // Add the instance
     vec3 pos = placement.position;
-    vec3 rot = glm::radians(placement.rotation);
+    quaternion rot = placement.rotation;
     vec3 scale = vec3(placement.scale) / 1024.0f;
 
-    mat4x4 rotationMatrix = glm::eulerAngleZYX(rot.z, -rot.y, -rot.x);
+    mat4x4 rotationMatrix = glm::toMat4(rot);
     mat4x4 scaleMatrix = glm::scale(mat4x4(1.0f), scale);
 
     instance->modelId = complexModel.objectID;
@@ -2053,39 +2045,54 @@ void CModelRenderer::CreateBuffers()
     // Create AnimationSequence buffer
     {
         size_t numSequenceInfo = _animationTrackInfo.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackInfoBuffer";
+        desc.size = sizeof(AnimationTrackInfo) * numSequenceInfo;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
         if (numSequenceInfo > 0)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationTrackInfoBuffer";
-            desc.size = sizeof(AnimationTrackInfo) * numSequenceInfo;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _animationTrackInfoBuffer = _renderer->CreateAndFillBuffer(_animationTrackInfoBuffer, desc, _animationTrackInfo.data(), desc.size);
+        }
+        else
+        {
+            _animationTrackInfoBuffer = _renderer->CreateBuffer(desc);
         }
     }
     
     // Create AnimationTimestamp buffer
     {
         size_t numTrackTimestamps = _animationTrackTimestamps.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackTimestampBuffer";
+        desc.size = sizeof(u32) * numTrackTimestamps;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
         if (numTrackTimestamps > 0)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationTrackTimestampBuffer";
-            desc.size = sizeof(u32) * numTrackTimestamps;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _animationTrackTimestampBuffer = _renderer->CreateAndFillBuffer(_animationTrackTimestampBuffer, desc, _animationTrackTimestamps.data(), desc.size);
+        }
+        else
+        {
+            _animationTrackTimestampBuffer = _renderer->CreateBuffer(desc);
         }
     }
 
     // Create AnimationValueVec buffer
     {
         size_t numTrackValues = _animationTrackValues.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackValueBuffer";
+        desc.size = sizeof(vec4) * numTrackValues;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
         if (numTrackValues > 0)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationTrackValueBuffer";
-            desc.size = sizeof(vec4) * numTrackValues;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _animationTrackValueBuffer = _renderer->CreateAndFillBuffer(_animationTrackValueBuffer, desc, _animationTrackValues.data(), desc.size);
+        }
+        else
+        {
+            _animationTrackValueBuffer = _renderer->CreateBuffer(desc);
         }
     }
 

@@ -77,8 +77,9 @@ namespace Terrain
     {
         u32 uniqueID = 0;
         u32 nameID = 0;
+        u16 doodadSet = 0;
         vec3 position = vec3(0, 0, 0);
-        vec3 rotation = vec3(0, 0, 0);
+        quaternion rotation = quaternion(1, 0, 0, 0);
         u16 scale = 1024;
     };
 

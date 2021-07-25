@@ -95,6 +95,7 @@ ClientRenderer::ClientRenderer()
     InitImgui();
 
     ServiceLocator::SetRenderer(_renderer);
+    ServiceLocator::SetClientRenderer(this);
 
     CreatePermanentResources();
 
@@ -106,8 +107,6 @@ ClientRenderer::ClientRenderer()
     _rendertargetVisualizer = new RendertargetVisualizer(_renderer);
     _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _cModelRenderer);
     _pixelQuery = new PixelQuery(_renderer);
-
-    ServiceLocator::SetClientRenderer(this);
 }
 
 bool ClientRenderer::UpdateWindow(f32 deltaTime)

@@ -1,5 +1,7 @@
 #include "MapObjectRenderer.h"
 #include "DebugRenderer.h"
+#include "ClientRenderer.h"
+#include "CModelRenderer.h"
 
 #include <filesystem>
 #include <Renderer/Renderer.h>
@@ -728,50 +730,77 @@ bool MapObjectRenderer::LoadRoot(std::filesystem::path nmorPath, MeshRoot& meshR
     bool failed = false;
 
     _materials.WriteLock([&](std::vector<Material>& materials)
-    {
-        mapObject.baseMaterialOffset = static_cast<u32>(materials.size());
-
-        for (u32 i = 0; i < meshRoot.numMaterials; i++)
         {
-            Terrain::MapObjectMaterial mapObjectMaterial;
-            if (!buffer.GetBytes(reinterpret_cast<u8*>(&mapObjectMaterial), sizeof(Terrain::MapObjectMaterial)))
-            {
-                failed = true;
-                return;
-            }
+            mapObject.baseMaterialOffset = static_cast<u32>(materials.size());
 
-            Material& material = materials.emplace_back();
-            material.materialType = mapObjectMaterial.materialType;
-            material.unlit = mapObjectMaterial.flags.unlit;
-
-            // TransparencyMode 1 means that it checks the alpha of the texture if it should discard the pixel or not
-            if (mapObjectMaterial.transparencyMode == 1)
+            for (u32 i = 0; i < meshRoot.numMaterials; i++)
             {
-                material.alphaTestVal = 128.0f / 255.0f;
-            }
-
-            constexpr u32 maxTexturesPerMaterial = 3;
-            for (u32 j = 0; j < maxTexturesPerMaterial; j++)
-            {
-                if (mapObjectMaterial.textureNameID[j] < std::numeric_limits<u32>().max())
+                Terrain::MapObjectMaterial mapObjectMaterial;
+                if (!buffer.GetBytes(reinterpret_cast<u8*>(&mapObjectMaterial), sizeof(Terrain::MapObjectMaterial)))
                 {
-                    Renderer::TextureDesc textureDesc;
-                    textureDesc.path = textureSingleton.textureHashToPath[mapObjectMaterial.textureNameID[j]];
+                    failed = true;
+                    return;
+                }
 
-                    u32 textureID;
-                    _renderer->LoadTextureIntoArray(textureDesc, _mapObjectTextures, textureID);
+                Material& material = materials.emplace_back();
+                material.materialType = mapObjectMaterial.materialType;
+                material.unlit = mapObjectMaterial.flags.unlit;
 
-                    material.textureIDs[j] = static_cast<u16>(textureID);
+                // TransparencyMode 1 means that it checks the alpha of the texture if it should discard the pixel or not
+                if (mapObjectMaterial.transparencyMode == 1)
+                {
+                    material.alphaTestVal = 128.0f / 255.0f;
+                }
+
+                constexpr u32 maxTexturesPerMaterial = 3;
+                for (u32 j = 0; j < maxTexturesPerMaterial; j++)
+                {
+                    if (mapObjectMaterial.textureNameID[j] < std::numeric_limits<u32>().max())
+                    {
+                        Renderer::TextureDesc textureDesc;
+                        textureDesc.path = textureSingleton.textureHashToPath[mapObjectMaterial.textureNameID[j]];
+
+                        u32 textureID;
+                        _renderer->LoadTextureIntoArray(textureDesc, _mapObjectTextures, textureID);
+
+                        material.textureIDs[j] = static_cast<u16>(textureID);
+                    }
                 }
             }
-        }
-    });
+        });
 
     if (failed)
         return false;
 
     // Read number of meshes
     if (!buffer.Get<u32>(meshRoot.numMeshes))
+        return false;
+
+    // Read number of Decorations
+    if (!buffer.Get<u32>(meshRoot.numDecorations))
+        return false;
+
+    // Read Decorations
+    {
+        mapObject.decorations.resize(meshRoot.numDecorations);
+
+        if (!buffer.GetBytes(reinterpret_cast<u8*>(mapObject.decorations.data()), meshRoot.numDecorations * sizeof(MapObjectDecoration)))
+            return false;
+    }
+
+    // Read number of DecorationSets
+    if (!buffer.Get<u32>(meshRoot.numDecorationSets))
+        return false;
+
+    // Read DecorationSets
+    {
+        mapObject.decorationSets.resize(meshRoot.numDecorationSets);
+
+        if (!buffer.GetBytes(reinterpret_cast<u8*>(mapObject.decorationSets.data()), meshRoot.numDecorationSets * sizeof(MapObjectDecorationSet)))
+            return false;
+    }
+
+    if (!mapObject.decorationStringTable.Deserialize(&buffer))
         return false;
 
     return true;
@@ -978,10 +1007,11 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
     mapObject.instanceIDs.push_back(instanceIndex);
 
     vec3 pos = placement->position;
-    vec3 rot = glm::radians(placement->rotation);
-    mat4x4 rotationMatrix = glm::eulerAngleZYX(rot.z, -rot.y, -rot.x);
+    quaternion rot = placement->rotation;
+    mat4x4 rotationMatrix = glm::toMat4(rot);
+    mat4x4 scaleMatrix = glm::scale(mat4x4(1.0f), vec3(1.0f, 1.0f, 1.0f));
 
-    instance->instanceMatrix = glm::translate(mat4x4(1.0f), pos) * rotationMatrix;
+    instance->instanceMatrix = glm::translate(mat4x4(1.0f), pos) * rotationMatrix * scaleMatrix;
 
     for (u32 i = 0; i < mapObject.renderBatches.size(); i++)
     {
@@ -1016,6 +1046,69 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
         instanceLookupData.vertexOffset = renderBatchOffsets.baseVertexOffset;
         instanceLookupData.vertexColor1Offset = renderBatchOffsets.baseVertexColor1Offset;
         instanceLookupData.vertexColor2Offset = renderBatchOffsets.baseVertexColor2Offset;
+    }
+
+    // Load Decorations
+    {
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+        CModelRenderer* cmodelRenderer = clientRenderer->GetCModelRenderer();
+
+        size_t numDecorations = mapObject.decorations.size();
+        size_t numDecorationSets = mapObject.decorationSets.size();
+
+        if (numDecorations && numDecorationSets)
+        {
+            MapObjectDecorationSet& globalDecorationSet = mapObject.decorationSets[0];
+
+            for (u32 i = 0; i < globalDecorationSet.count; i++)
+            {
+                MapObjectDecoration& decoration = mapObject.decorations[globalDecorationSet.index + i];
+
+                std::string modelPath = mapObject.decorationStringTable.GetString(decoration.nameID);
+                u32 modelPathHash = mapObject.decorationStringTable.GetStringHash(decoration.nameID);
+
+                mat4x4 decorationRotationMatrix = glm::toMat4(decoration.rotation);
+                mat4x4 scaleMatrix = glm::scale(mat4x4(1.0f), vec3(decoration.scale, decoration.scale, decoration.scale));
+                mat4x4 instanceMatrix = glm::translate(mat4x4(1.0f), decoration.position) * decorationRotationMatrix * scaleMatrix;
+
+                mat4x4 newMatrix = instance->instanceMatrix * instanceMatrix;
+                glm::vec3 scale;
+                glm::quat rotation;
+                glm::vec3 translation;
+                glm::vec3 skew;
+                glm::vec4 perspective;
+                glm::decompose(newMatrix, scale, rotation, translation, skew, perspective);
+
+                cmodelRenderer->RegisterLoadFromDecoration(modelPath, modelPathHash, translation, rotation, decoration.scale);
+            }
+
+            if (placement->doodadSet != 0)
+            {
+                MapObjectDecorationSet& usedDecorationSet = mapObject.decorationSets[placement->doodadSet];
+
+                for (u32 i = 0; i < usedDecorationSet.count; i++)
+                {
+                    MapObjectDecoration& decoration = mapObject.decorations[usedDecorationSet.index + i];
+
+                    std::string modelPath = mapObject.decorationStringTable.GetString(decoration.nameID);
+                    u32 modelPathHash = mapObject.decorationStringTable.GetStringHash(decoration.nameID);
+
+                    mat4x4 decorationRotationMatrix = glm::toMat4(decoration.rotation);
+                    mat4x4 scaleMatrix = glm::scale(mat4x4(1.0f), vec3(decoration.scale, decoration.scale, decoration.scale));
+                    mat4x4 instanceMatrix = glm::translate(mat4x4(1.0f), decoration.position) * decorationRotationMatrix * scaleMatrix;
+
+                    mat4x4 newMatrix = instance->instanceMatrix * instanceMatrix;
+                    glm::vec3 scale;
+                    glm::quat rotation;
+                    glm::vec3 translation;
+                    glm::vec3 skew;
+                    glm::vec4 perspective;
+                    glm::decompose(newMatrix, scale, rotation, translation, skew, perspective);
+
+                    cmodelRenderer->RegisterLoadFromDecoration(modelPath, modelPathHash, translation, rotation, decoration.scale);
+                }
+            }
+        }
     }
 
     mapObject.instanceCount++;

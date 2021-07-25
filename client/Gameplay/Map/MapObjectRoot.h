@@ -27,7 +27,7 @@
 namespace Terrain
 {
     constexpr i32 MAP_OBJECT_ROOT_TOKEN = 1852665714; // UTF8 -> Binary -> Decimal for "nmor"
-    constexpr i32 MAP_OBJECT_ROOT_VERSION = 1;
+    constexpr i32 MAP_OBJECT_ROOT_VERSION = 2;
 
 #pragma pack(push, 1)
     struct MapObjectRootHeader

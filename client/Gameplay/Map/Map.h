@@ -96,7 +96,7 @@ namespace Terrain
             header.mapObjectName = "";
             header.mapObjectPlacement.nameID = std::numeric_limits<u32>().max();
             header.mapObjectPlacement.position = vec3(0, 0, 0);
-            header.mapObjectPlacement.rotation = vec3(0, 0, 0);
+            header.mapObjectPlacement.rotation = quaternion(1, 0, 0, 0);
             header.mapObjectPlacement.scale = 0;
 
             chunks.clear();

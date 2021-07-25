@@ -5,6 +5,7 @@
 #include <Utils/ByteBuffer.h>
 #include <Utils/SafeVector.h>
 #include <Utils/SafeUnorderedMap.h>
+#include <Containers/StringTable.h>
 
 #include <Renderer/Buffer.h>
 #include <Renderer/Descriptors/SamplerDesc.h>
@@ -40,6 +41,8 @@ class MapObjectRenderer
     {
         u32 numMaterials;
         u32 numMeshes;
+        u32 numDecorations;
+        u32 numDecorationSets;
     };
 
     struct RenderBatch
@@ -92,6 +95,24 @@ class MapObjectRenderer
         u32 baseVertexColor2Offset;
     };
 
+#pragma pack(push, 1)
+    struct MapObjectDecoration
+    {
+        u32 nameID;
+        vec3 position;
+        quaternion rotation;
+        f32 scale;
+        u32 color;
+    };
+    
+     struct MapObjectDecorationSet
+     {
+         char name[20] = { 0 };
+         u16 index;
+         u32 count;
+     };
+#pragma pack(pop)
+
 public:
     struct LoadedMapObject
     {
@@ -138,6 +159,11 @@ public:
         // Renderbatches
         std::vector<Terrain::RenderBatch> renderBatches;
         std::vector<RenderBatchOffsets> renderBatchOffsets;
+
+        // Decorations
+        std::vector<MapObjectDecoration> decorations;
+        std::vector<MapObjectDecorationSet> decorationSets;
+        StringTable decorationStringTable;
 
         // Culling data
         std::vector<Terrain::CullingData> cullingData;
