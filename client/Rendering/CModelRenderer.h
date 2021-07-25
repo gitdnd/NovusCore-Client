@@ -1,9 +1,11 @@
 #pragma once
 #include <NovusTypes.h>
+#include <mutex>
 
 #include <Utils/StringUtils.h>
 #include <Utils/ConcurrentQueue.h>
 #include <Utils/SafeVector.h>
+#include <Utils/SafeUnorderedMap.h>
 #include <Memory/BufferRangeAllocator.h>
 
 #include <Renderer/Descriptors/ImageDesc.h>
@@ -67,6 +69,24 @@ public:
 
     struct LoadedComplexModel
     {
+        LoadedComplexModel() {}
+
+        // We have to manually implement a copy constructor because std::mutex is not copyable
+        LoadedComplexModel(const LoadedComplexModel& other)
+        {
+            objectID = other.objectID;
+            debugName = other.debugName;
+            cullingDataID = other.cullingDataID;
+            numBones = other.numBones;
+            isAnimated = other.isAnimated;
+            numOpaqueDrawCalls = other.numOpaqueDrawCalls;
+            opaqueDrawCallTemplates = other.opaqueDrawCallTemplates;
+            opaqueDrawCallDataTemplates = other.opaqueDrawCallDataTemplates;
+            numTransparentDrawCalls = other.numTransparentDrawCalls;
+            transparentDrawCallTemplates = other.transparentDrawCallTemplates;
+            transparentDrawCallDataTemplates = other.transparentDrawCallDataTemplates;
+        };
+
         u32 objectID;
         std::string debugName = "";
 
@@ -81,6 +101,8 @@ public:
         u32 numTransparentDrawCalls = 0;
         std::vector<DrawCall> transparentDrawCallTemplates;
         std::vector<DrawCallData> transparentDrawCallDataTemplates;
+
+        std::mutex mutex;
     };
 
     struct Instance
@@ -140,13 +162,13 @@ public:
 
     void Clear();
 
-    const std::vector<DrawCallData>& GetOpaqueDrawCallData() { return _opaqueDrawCallDatas; }
-    const std::vector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
-    const std::vector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
-    const std::vector<Instance>& GetInstances() { return _instances; }
-    Instance& GetInstance(size_t index) { return _instances[index]; }
-    const std::vector<Terrain::PlacementDetails>& GetPlacementDetails() { return _complexModelPlacementDetails; }
-    const std::vector<CModel::CullingData>& GetCullingData() { return _cullingDatas; }
+    SafeVector<DrawCallData>& GetOpaqueDrawCallData() { return _opaqueDrawCallDatas; }
+    SafeVector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
+    SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
+    SafeVector<Instance>& GetInstances() { return _instances; }
+    const Instance& GetInstance(size_t index) { return _instances.ReadGet(index); }
+    const SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _complexModelPlacementDetails; }
+    const SafeVector<CModel::CullingData>& GetCullingData() { return _cullingDatas; }
 
     void AddAnimationRequest(AnimationRequest request)
     {
@@ -154,27 +176,37 @@ public:
     }
     u32 GetNumSequencesForModelId(u32 modelId)
     {
-        return _animationModelInfo[modelId].numSequences;
+        return _animationModelInfo.ReadGet(modelId).numSequences;
     }
 
-    u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.size()); }
-    u32 GetNumCModelPlacements() { return static_cast<u32>(_instances.size()); }
+    u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.Size()); }
+    u32 GetNumCModelPlacements() { return static_cast<u32>(_instances.Size()); }
     u32 GetModelIndexByDrawCallDataIndex(u32 index, bool isOpaque)
     {
         u32 modelIndex = std::numeric_limits<u32>().max();
 
         if (isOpaque)
-            modelIndex = _opaqueDrawCallDataIndexToLoadedModelIndex[index];
+        {
+            _opaqueDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32> opaqueDrawCallDataIndexToLoadedModelIndex)
+            {
+                modelIndex = opaqueDrawCallDataIndexToLoadedModelIndex[index];
+            });
+        }
         else
-            modelIndex = _transparentDrawCallDataIndexToLoadedModelIndex[index];
-
+        {
+            _transparentDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32> transparentDrawCallDataIndexToLoadedModelIndex)
+            {
+                modelIndex = transparentDrawCallDataIndexToLoadedModelIndex[index];
+            });
+        }
+            
         return modelIndex;
     }
     
     // Drawcall stats
-    u32 GetNumOpaqueDrawCalls() { return static_cast<u32>(_opaqueDrawCalls.size()); }
+    u32 GetNumOpaqueDrawCalls() { return static_cast<u32>(_opaqueDrawCalls.Size()); }
     u32 GetNumOpaqueSurvivingDrawCalls() { return _numOpaqueSurvivingDrawCalls; }
-    u32 GetNumTransparentDrawCalls() { return static_cast<u32>(_transparentDrawCalls.size()); }
+    u32 GetNumTransparentDrawCalls() { return static_cast<u32>(_transparentDrawCalls.Size()); }
     u32 GetNumTransparentSurvivingDrawCalls() { return _numTransparentSurvivingDrawCalls; }
 
     // Triangle stats
@@ -314,7 +346,7 @@ private:
 
     bool IsRenderBatchTransparent(const CModel::ComplexRenderBatch& renderBatch, const CModel::ComplexModel& cModel);
 
-    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement);
+    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, u32& instanceIndex);
 
     void CreateBuffers();
 
@@ -330,38 +362,41 @@ private:
     robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
     std::shared_mutex _uniqueIdCounterMutex;
 
-    std::vector<Terrain::PlacementDetails> _complexModelPlacementDetails;
+    SafeVector<Terrain::PlacementDetails> _complexModelPlacementDetails;
 
-    moodycamel::ConcurrentQueue<ComplexModelToBeLoaded> _complexModelsToBeLoaded;
-    std::vector<LoadedComplexModel> _loadedComplexModels;
-    robin_hood::unordered_map<u32, u32> _nameHashToIndexMap;
-    robin_hood::unordered_map<u32, u32> _opaqueDrawCallDataIndexToLoadedModelIndex;
-    robin_hood::unordered_map<u32, u32> _transparentDrawCallDataIndexToLoadedModelIndex;
+    SafeVector<ComplexModelToBeLoaded> _complexModelsToBeLoaded;
+    SafeVector<LoadedComplexModel> _loadedComplexModels;
+    SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
+    SafeUnorderedMap<u32, u32> _opaqueDrawCallDataIndexToLoadedModelIndex;
+    SafeUnorderedMap<u32, u32> _transparentDrawCallDataIndexToLoadedModelIndex;
 
-    std::vector<CModel::ComplexVertex> _vertices;
-    std::vector<u16> _indices;
-    std::vector<TextureUnit> _textureUnits;
-    std::vector<Instance> _instances;
-    std::vector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
-    std::vector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;
-    std::vector<CModel::CullingData> _cullingDatas;
+    SafeVector<CModel::ComplexVertex> _vertices;
+    SafeVector<u16> _indices;
+    SafeVector<TextureUnit> _textureUnits;
+    SafeVector<Instance> _instances;
+    SafeVector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
+    SafeVector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;
+    SafeVector<CModel::CullingData> _cullingDatas;
 
-    std::vector<AnimationSequence> _animationSequence;
-    std::vector<AnimationModelInfo> _animationModelInfo;
-    std::vector<AnimationBoneInfo> _animationBoneInfo;
-    std::vector<AnimationBoneInstance> _animationBoneInstances;
+    SafeVector<AnimationSequence> _animationSequence;
+    SafeVector<AnimationModelInfo> _animationModelInfo;
+    SafeVector<AnimationBoneInfo> _animationBoneInfo;
+    SafeVector<AnimationBoneInstance> _animationBoneInstances;
+
     std::vector<AnimationTrackInfo> _animationTrackInfo;
     std::vector<u32> _animationTrackTimestamps;
     std::vector<vec4> _animationTrackValues;
+    std::mutex _animationTrackMutex;
+
     BufferRangeAllocator _animationBoneDeformRangeAllocator;
     BufferRangeAllocator _animationBoneInstancesRangeAllocator;
     moodycamel::ConcurrentQueue<AnimationRequest> _animationRequests;
 
-    std::vector<DrawCall> _opaqueDrawCalls;
-    std::vector<DrawCallData> _opaqueDrawCallDatas;
+    SafeVector<DrawCall> _opaqueDrawCalls;
+    SafeVector<DrawCallData> _opaqueDrawCallDatas;
 
-    std::vector<DrawCall> _transparentDrawCalls;
-    std::vector<DrawCallData> _transparentDrawCallDatas;
+    SafeVector<DrawCall> _transparentDrawCalls;
+    SafeVector<DrawCallData> _transparentDrawCallDatas;
 
     Renderer::BufferID _vertexBuffer;
     Renderer::BufferID _indexBuffer;

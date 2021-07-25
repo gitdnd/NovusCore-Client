@@ -27,8 +27,7 @@
 #include "RenderResources.h"
 
 #define USE_PACKED_HEIGHT_RANGE 1
-#define PARALLEL_LOADING 1
-
+#define PARALLEL_LOADING 0
 
 AutoCVar_Int CVAR_OcclusionCullingEnabled("terrain.occlusionCull.Enable", "enable culling of terrain tiles", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_CullingEnabled("terrain.culling.Enable", "enable culling of terrain tiles", 1, CVarFlags::EditCheckbox);

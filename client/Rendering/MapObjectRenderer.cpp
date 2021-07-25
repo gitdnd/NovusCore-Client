@@ -19,7 +19,7 @@
 #include "../Utils/ServiceLocator.h"
 #include "CVar/CVarSystem.h"
 
-#define PARALLEL_LOADING 1
+#define PARALLEL_LOADING 0
 
 namespace fs = std::filesystem;
 
@@ -423,10 +423,10 @@ void MapObjectRenderer::ExecuteLoad()
                         shouldLoad = true;
                         
                         _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
-                            {
-                                mapObjectID = static_cast<u32>(loadedMapObjects.size());
-                                mapObject = &loadedMapObjects.emplace_back();
-                            });
+                        {
+                            mapObjectID = static_cast<u32>(loadedMapObjects.size());
+                            mapObject = &loadedMapObjects.emplace_back();
+                        });
 
                         nameHashToIndexMap[mapObjectToBeLoaded.nmorNameHash] = mapObjectID; // And set its index so the next thread to check this will find it
                     }

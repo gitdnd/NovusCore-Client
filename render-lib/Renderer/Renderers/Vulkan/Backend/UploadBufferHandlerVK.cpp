@@ -132,6 +132,7 @@ namespace Renderer
                 }
                 else
                 {
+                    //DebugHandler::Print("Executing StagingBuffer %u", i);
                     ExecuteStagingBuffer(commandBuffer, stagingBuffer);
                 }
             }
@@ -183,6 +184,8 @@ namespace Renderer
             {
                 std::scoped_lock lock(stagingBuffer.handleLock);
                 stagingBuffer.activeHandles++;
+
+                //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
             }
 
             std::shared_ptr<UploadBuffer> uploadBuffer(new UploadBuffer(),
@@ -196,9 +199,12 @@ namespace Renderer
                         // Decrement the number of active handles into this staging buffer
                         if (--stagingBuffer.activeHandles == 0)
                         {
+                            //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
+
                             // If we are the last active handle and the staging buffer is full, execute it
                             if (stagingBuffer.isFull)
                             {
+                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
                                 ExecuteStagingBuffer(stagingBuffer);
                                 stagingBuffer.isFull = false;
                             }
@@ -239,6 +245,8 @@ namespace Renderer
             {
                 std::scoped_lock lock(stagingBuffer.handleLock);
                 stagingBuffer.activeHandles++;
+
+                //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
             }
 
             std::shared_ptr<UploadBuffer> uploadBuffer(new UploadBuffer(),
@@ -255,10 +263,14 @@ namespace Renderer
                                 UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
 
                                 std::scoped_lock submitLock(data->submitMutex);
+
+                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
                                 ExecuteStagingBuffer(stagingBuffer);
                                 stagingBuffer.isFull = false;
                             }
                         }
+
+                        //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
                     }
                     delete buffer;
                 });
@@ -318,6 +330,7 @@ namespace Renderer
                             stagingBuffer->isFull = true;
                             if (stagingBuffer->activeHandles == 0)
                             {
+                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
                                 ExecuteStagingBuffer(*stagingBuffer);
                             }
                         }

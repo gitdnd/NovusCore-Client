@@ -30,7 +30,7 @@
 #include "../Gameplay/Map/Map.h"
 #include "CVar/CVarSystem.h"
 
-#
+#define PARALLEL_LOADING 0
 
 namespace fs = std::filesystem;
 
@@ -61,42 +61,45 @@ void CModelRenderer::Update(f32 deltaTime)
     bool drawBoundingBoxes = CVAR_ComplexModelDrawBoundingBoxes.Get() == 1;
     if (drawBoundingBoxes)
     {
-        for (const Terrain::PlacementDetails& placementDetails : _complexModelPlacementDetails)
+        _complexModelPlacementDetails.ReadLock([&](const std::vector<Terrain::PlacementDetails>& complexModelPlacementDetails)
         {
-            Instance& instance = _instances[placementDetails.instanceIndex];
-            LoadedComplexModel& loadedComplexModel = _loadedComplexModels[placementDetails.loadedIndex];
+            for (const Terrain::PlacementDetails& placementDetails : complexModelPlacementDetails)
+            {
+                const Instance& instance = _instances.ReadGet(placementDetails.instanceIndex);
+                const LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(placementDetails.loadedIndex);
 
-            // Particle Emitters have no culling data
-            if (loadedComplexModel.cullingDataID == std::numeric_limits<u32>().max())
-                continue;
+                // Particle Emitters have no culling data
+                if (loadedComplexModel.cullingDataID == std::numeric_limits<u32>().max())
+                    continue;
 
-            CModel::CullingData& cullingData = _cullingDatas[loadedComplexModel.cullingDataID];
+                const CModel::CullingData& cullingData = _cullingDatas.ReadGet(loadedComplexModel.cullingDataID);
 
-            vec3 minBoundingBox = cullingData.minBoundingBox;
-            vec3 maxBoundingBox = cullingData.maxBoundingBox;
+                vec3 minBoundingBox = cullingData.minBoundingBox;
+                vec3 maxBoundingBox = cullingData.maxBoundingBox;
 
-            vec3 center = (minBoundingBox + maxBoundingBox) * 0.5f;
-            vec3 extents = maxBoundingBox - center;
+                vec3 center = (minBoundingBox + maxBoundingBox) * 0.5f;
+                vec3 extents = maxBoundingBox - center;
 
-            // transform center
-            mat4x4& m = instance.instanceMatrix;
-            vec3 transformedCenter = vec3(m * vec4(center, 1.0f));
+                // transform center
+                const mat4x4& m = instance.instanceMatrix;
+                vec3 transformedCenter = vec3(m * vec4(center, 1.0f));
 
-            // Transform extents (take maximum)
-            glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(m[0])), glm::abs(vec3(m[1])), glm::abs(vec3(m[2])));
-            vec3 transformedExtents = absMatrix * extents;
+                // Transform extents (take maximum)
+                glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(m[0])), glm::abs(vec3(m[1])), glm::abs(vec3(m[2])));
+                vec3 transformedExtents = absMatrix * extents;
 
-            // Transform to min/max box representation
-            vec3 transformedMin = transformedCenter - transformedExtents;
-            vec3 transformedMax = transformedCenter + transformedExtents;
+                // Transform to min/max box representation
+                vec3 transformedMin = transformedCenter - transformedExtents;
+                vec3 transformedMax = transformedCenter + transformedExtents;
 
-            _debugRenderer->DrawAABB3D(transformedMin, transformedMax, 0xff00ffff);
-        }
+                _debugRenderer->DrawAABB3D(transformedMin, transformedMax, 0xff00ffff);
+            }
+        });
     }
 
     // Read back from the culling counters
-    u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.size());
-    u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.size());
+    u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+    u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
 
     _numOpaqueSurvivingDrawCalls = numOpaqueDrawCalls;
     _numTransparentSurvivingDrawCalls = numTransparentDrawCalls;
@@ -177,41 +180,42 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 AnimationRequest animationRequest;
                 while (_animationRequests.try_dequeue(animationRequest))
                 {
-                    Instance& instance = _instances[animationRequest.instanceId];
+                    const Instance& instance = _instances.ReadGet(animationRequest.instanceId);
 
-                    LoadedComplexModel& complexModel = _loadedComplexModels[instance.modelId];
-                    AnimationModelInfo& modelInfo = _animationModelInfo[instance.modelId];
+                    const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(instance.modelId);
+                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(instance.modelId);
 
                     u32 sequenceIndex = animationRequest.sequenceId;
                     if (!complexModel.isAnimated)
                         continue;
 
-                    if (animationRequest.flags.isPlaying)
+                    _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
                     {
-                        AnimationSequence& animationSequence = _animationSequence[modelInfo.sequenceOffset + sequenceIndex];
-
-                        for (u32 i = 0; i < modelInfo.numBones; i++)
+                        if (animationRequest.flags.isPlaying)
                         {
-                            AnimationBoneInstance& boneInstance = _animationBoneInstances[instance.boneInstanceDataOffset + i];
-                            bool animationIsLooping = animationRequest.flags.isLooping;
+                            for (u32 i = 0; i < modelInfo.numBones; i++)
+                            {
+                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                bool animationIsLooping = animationRequest.flags.isLooping;
 
-                            boneInstance.animationProgress = 0.f;
-                            boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                            boneInstance.sequenceIndex = sequenceIndex;
+                                boneInstance.animationProgress = 0.f;
+                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                boneInstance.sequenceIndex = sequenceIndex;
+                            }
                         }
-                    }
-                    else
-                    {
-                        for (u32 i = 0; i < modelInfo.numBones; i++)
+                        else
                         {
-                            AnimationBoneInstance& boneInstance = _animationBoneInstances[instance.boneInstanceDataOffset + i];
-                            boneInstance.animationProgress = 0.f;
-                            boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                            boneInstance.sequenceIndex = 0;
+                            for (u32 i = 0; i < modelInfo.numBones; i++)
+                            {
+                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                boneInstance.animationProgress = 0.f;
+                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                boneInstance.sequenceIndex = 0;
+                            }
                         }
-                    }
 
-                    commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &_animationBoneInstances[instance.boneInstanceDataOffset]);
+                        commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
+                    });
                 }
 
                 commandList.PopMarker();
@@ -263,9 +267,9 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 _cullConstants.cameraPos = camera->GetPosition();
             }
 
-            const u32 numInstances = static_cast<u32>(_instances.size());
-            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.size());
-            const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.size());
+            const u32 numInstances = static_cast<u32>(_instances.Size());
+            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+            const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
 
             if (numInstances == 0)
             {
@@ -650,9 +654,9 @@ void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, Ren
             u32 isTransparent;
         };
 
-        const u32 numInstances = static_cast<u32>(_instances.size());
-        const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.size());
-        const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.size());
+        const u32 numInstances = static_cast<u32>(_instances.Size());
+        const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+        const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
 
         // Set Opaque Pipeline
         if (numOpaqueDrawCalls > 0)
@@ -838,12 +842,10 @@ void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& ch
             std::unique_lock lock(_uniqueIdCounterMutex);
             if (_uniqueIdCounter[uniqueID]++ == 0)
             {
-                ComplexModelToBeLoaded modelToBeLoaded;
+                ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
                 modelToBeLoaded.placement = &placement;
                 modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
                 modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
-
-                _complexModelsToBeLoaded.enqueue(modelToBeLoaded);
             }
         }
     }
@@ -858,40 +860,83 @@ void CModelRenderer::ExecuteLoad()
     _animationBoneDeformRangeAllocator.Reset();
     _animationBoneInstancesRangeAllocator.Reset();
 
-    ComplexModelToBeLoaded modelToBeLoaded;
-    while (_complexModelsToBeLoaded.try_dequeue(modelToBeLoaded))
+    _complexModelsToBeLoaded.WriteLock([&](std::vector<ComplexModelToBeLoaded>& complexModelsToBeLoaded)
     {
-        ZoneScoped;
-        ZoneText(modelToBeLoaded.name->c_str(), modelToBeLoaded.name->length());
+        size_t numComplexModelsToBeLoaded = complexModelsToBeLoaded.size();
 
-        // Placements reference a path to a ComplexModel, several placements can reference the same object
-        // Because of this we want only the first load to actually load the object, subsequent loads should reuse the loaded version
-        u32 modelID;
-
-        auto it = _nameHashToIndexMap.find(modelToBeLoaded.nameHash);
-        if (it == _nameHashToIndexMap.end())
+        _loadedComplexModels.WriteLock([&](std::vector<LoadedComplexModel>& loadedComplexModels)
         {
-            modelID = static_cast<u32>(_loadedComplexModels.size());
-            LoadedComplexModel& complexModel = _loadedComplexModels.emplace_back();
-            complexModel.objectID = modelID;
-            LoadComplexModel(modelToBeLoaded, complexModel);
+            loadedComplexModels.reserve(numComplexModelsToBeLoaded);
+        });
 
-            _nameHashToIndexMap[modelToBeLoaded.nameHash] = modelID;
-        }
-        else
+#if PARALLEL_LOADING
+        tf::Taskflow tf;
+        tf.parallel_for(complexModelsToBeLoaded.begin(), complexModelsToBeLoaded.end(), [&](ComplexModelToBeLoaded& modelToBeLoaded)
+#else
+        for (ComplexModelToBeLoaded& modelToBeLoaded : complexModelsToBeLoaded)
+#endif // PARALLEL_LOAD
         {
-            modelID = it->second;
+            ZoneScoped;
+            ZoneText(modelToBeLoaded.name->c_str(), modelToBeLoaded.name->length());
+
+            // Placements reference a path to a ComplexModel, several placements can reference the same object
+            // Because of this we want only the first load to actually load the object, subsequent loads should reuse the loaded version
+            u32 modelID;
+            LoadedComplexModel* complexModel = nullptr;
+
+            bool shouldLoad = false;
+            _nameHashToIndexMap.WriteLock([&](robin_hood::unordered_map<u32, u32>& nameHashToIndexMap)
+            {
+                // See if anything has already loaded this one
+                auto it = nameHashToIndexMap.find(modelToBeLoaded.nameHash);
+                if (it == nameHashToIndexMap.end())
+                {
+                    // If it hasn't, we should load it
+                    shouldLoad = true;
+
+                    _loadedComplexModels.WriteLock([&](std::vector<LoadedComplexModel>& loadedComplexModels)
+                    {
+                        modelID = static_cast<u32>(loadedComplexModels.size());
+                        complexModel = &loadedComplexModels.emplace_back();
+                        
+                    });
+
+                    nameHashToIndexMap[modelToBeLoaded.nameHash] = modelID;
+                }
+                else
+                {
+                    _loadedComplexModels.WriteLock([&](std::vector<LoadedComplexModel>& loadedComplexModels)
+                    {
+                        modelID = it->second;
+                        complexModel = &loadedComplexModels[it->second];
+                    });
+                }
+            });
+
+            std::scoped_lock lock(complexModel->mutex);
+
+            if (shouldLoad)
+            {
+                complexModel->objectID = modelID;
+                LoadComplexModel(modelToBeLoaded, *complexModel);
+            }
+
+            // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
+            Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.EmplaceBack();
+            placementDetails.loadedIndex = modelID;
+
+            // Add placement as an instance
+            AddInstance(*complexModel, *modelToBeLoaded.placement, placementDetails.instanceIndex);
+
+            numComplexModelsToLoad++;
         }
+#if PARALLEL_LOADING
+        );
+        tf.wait_for_all();
+#endif // PARALLEL_LOADING
+    });
 
-        // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
-        Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.emplace_back();
-        placementDetails.loadedIndex = modelID;
-        placementDetails.instanceIndex = static_cast<u32>(_instances.size());
-
-        // Add placement as an instance
-        AddInstance(_loadedComplexModels[modelID], *modelToBeLoaded.placement);
-        numComplexModelsToLoad++;
-    }
+    _complexModelsToBeLoaded.Clear();
 
     if (numComplexModelsToLoad == 0)
         return;
@@ -904,14 +949,21 @@ void CModelRenderer::ExecuteLoad()
         _numOpaqueTriangles = 0;
         _numTransparentTriangles = 0;
 
-        for (const DrawCall& drawCall : _opaqueDrawCalls)
+        _opaqueDrawCalls.ReadLock([&](const std::vector<DrawCall>& opaqueDrawCalls)
         {
-            _numOpaqueTriangles += drawCall.indexCount / 3;
-        }
-        for (const DrawCall& drawCall : _transparentDrawCalls)
+            for (const DrawCall& drawCall : opaqueDrawCalls)
+            {
+                _numOpaqueTriangles += drawCall.indexCount / 3;
+            }
+        });
+        
+        _transparentDrawCalls.ReadLock([&](const std::vector<DrawCall>& transparentDrawCalls)
         {
-            _numTransparentTriangles += drawCall.indexCount / 3;
-        }
+            for (const DrawCall& drawCall : transparentDrawCalls)
+            {
+                _numTransparentTriangles += drawCall.indexCount / 3;
+            }
+        });
     }
 }
 
@@ -922,29 +974,29 @@ void CModelRenderer::Clear()
         _uniqueIdCounter.clear();
     }
     
-    _complexModelPlacementDetails.clear();
-    _loadedComplexModels.clear();
-    _nameHashToIndexMap.clear();
-    _opaqueDrawCallDataIndexToLoadedModelIndex.clear();
-    _transparentDrawCallDataIndexToLoadedModelIndex.clear();
+    _complexModelPlacementDetails.Clear();
+    _loadedComplexModels.Clear();
+    _nameHashToIndexMap.Clear();
+    _opaqueDrawCallDataIndexToLoadedModelIndex.Clear();
+    _transparentDrawCallDataIndexToLoadedModelIndex.Clear();
 
-    _vertices.clear();
-    _indices.clear();
-    _textureUnits.clear();
-    _instances.clear();
-    _cullingDatas.clear();
+    _vertices.Clear();
+    _indices.Clear();
+    _textureUnits.Clear();
+    _instances.Clear();
+    _cullingDatas.Clear();
 
-    _animationModelInfo.clear();
-    _animationBoneInfo.clear();
+    _animationModelInfo.Clear();
+    _animationBoneInfo.Clear();
     _animationTrackInfo.clear();
     _animationTrackTimestamps.clear();
     _animationTrackValues.clear();
 
-    _opaqueDrawCalls.clear();
-    _opaqueDrawCallDatas.clear();
+    _opaqueDrawCalls.Clear();
+    _opaqueDrawCallDatas.Clear();
 
-    _transparentDrawCalls.clear();
-    _transparentDrawCallDatas.clear();
+    _transparentDrawCalls.Clear();
+    _transparentDrawCallDatas.Clear();
 
     _renderer->UnloadTexturesInArray(_cModelTextures, 0);
 }
@@ -1050,11 +1102,11 @@ void CModelRenderer::CreatePermanentResources()
     //modelToBeLoaded.name = new std::string("Creature/LichKingMurloc/LichKingMurloc.cmodel");
     //modelToBeLoaded.name = new std::string("World/SkillActivated/CONTAINERS/TreasureChest01.cmodel");
 
-    for (u32 x = 0; x < 10; x++)
+    /*for (u32 x = 0; x < 10; x++)
     {
         for (u32 y = 0; y < 10; y++)
         {
-            ComplexModelToBeLoaded modelToBeLoaded;
+            ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
             
             Terrain::Placement* placement = new Terrain::Placement();
             placement->position = vec3(x * 3.f, y * 3.f, 0.f);
@@ -1062,10 +1114,8 @@ void CModelRenderer::CreatePermanentResources()
             modelToBeLoaded.placement = placement;
             modelToBeLoaded.name = new std::string("Creature/DruidCat/DruidCat.cmodel");
             modelToBeLoaded.nameHash = x + (y * 10);
-
-            _complexModelsToBeLoaded.enqueue(modelToBeLoaded);
         }
-    }
+    }*/
 
     ExecuteLoad();
 }
@@ -1086,39 +1136,43 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
     entt::registry* registry = ServiceLocator::GetGameRegistry();
     TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
 
-    AnimationModelInfo& animationModelInfo = _animationModelInfo.emplace_back();
+    AnimationModelInfo& animationModelInfo = _animationModelInfo.EmplaceBack();
 
     // Add Sequences
     {
-        size_t numSequenceInfoBefore = _animationSequence.size();
-        size_t numSequencesToAdd = cModel.sequences.size();
-
-        animationModelInfo.numSequences = static_cast<u16>(numSequencesToAdd);
-        animationModelInfo.sequenceOffset = static_cast<u32>(numSequenceInfoBefore);
-
-        _animationSequence.resize(numSequenceInfoBefore + numSequencesToAdd);
-
-        for (u32 i = 0; i < numSequencesToAdd; i++)
+        _animationSequence.WriteLock([&](std::vector<AnimationSequence>& animationSequence)
         {
-            AnimationSequence& sequence = _animationSequence[numSequenceInfoBefore + i];
-            CModel::ComplexAnimationSequence& cmodelSequence = cModel.sequences[i];
+            size_t numSequenceInfoBefore = animationSequence.size();
+            size_t numSequencesToAdd = cModel.sequences.size();
 
-            sequence.animationId = cmodelSequence.id;
-            sequence.animationSubId = cmodelSequence.subId;
-            sequence.nextSubAnimationId = cmodelSequence.nextVariationId;
-            sequence.nextAliasId = cmodelSequence.nextAliasId;
-            sequence.flags = cmodelSequence.flags.isAlwaysPlaying | cmodelSequence.flags.isAlias | cmodelSequence.flags.blendTransition;
-            sequence.duration = static_cast<float>(cmodelSequence.duration) / 1000.f;
-            sequence.repeatMin = cmodelSequence.repetitionRange.x;
-            sequence.repeatMax = cmodelSequence.repetitionRange.y;
-            sequence.blendTimeStart = cmodelSequence.blendTimeStart;
-            sequence.blendTimeEnd = cmodelSequence.blendTimeEnd;
-        }
+            animationModelInfo.numSequences = static_cast<u16>(numSequencesToAdd);
+            animationModelInfo.sequenceOffset = static_cast<u32>(numSequenceInfoBefore);
+
+            animationSequence.resize(numSequenceInfoBefore + numSequencesToAdd);
+
+            for (u32 i = 0; i < numSequencesToAdd; i++)
+            {
+                AnimationSequence& sequence = animationSequence[numSequenceInfoBefore + i];
+                CModel::ComplexAnimationSequence& cmodelSequence = cModel.sequences[i];
+
+                sequence.animationId = cmodelSequence.id;
+                sequence.animationSubId = cmodelSequence.subId;
+                sequence.nextSubAnimationId = cmodelSequence.nextVariationId;
+                sequence.nextAliasId = cmodelSequence.nextAliasId;
+                sequence.flags = cmodelSequence.flags.isAlwaysPlaying | cmodelSequence.flags.isAlias | cmodelSequence.flags.blendTransition;
+                sequence.duration = static_cast<float>(cmodelSequence.duration) / 1000.f;
+                sequence.repeatMin = cmodelSequence.repetitionRange.x;
+                sequence.repeatMax = cmodelSequence.repetitionRange.y;
+                sequence.blendTimeStart = cmodelSequence.blendTimeStart;
+                sequence.blendTimeEnd = cmodelSequence.blendTimeEnd;
+            }
+        });
     }
 
     // Add Bones
+    _animationBoneInfo.WriteLock([&](std::vector<AnimationBoneInfo>& animationBoneInfo)
     {
-        size_t numBoneInfoBefore = _animationBoneInfo.size();
+        size_t numBoneInfoBefore = animationBoneInfo.size();
         size_t numBonesToAdd = cModel.bones.size();
 
         complexModel.numBones = static_cast<u32>(numBonesToAdd);
@@ -1129,15 +1183,17 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         u32 numSequences = 0;
         u32 numTracksWithValues = 0;
 
-        _animationBoneInfo.resize(numBoneInfoBefore + numBonesToAdd);
+        animationBoneInfo.resize(numBoneInfoBefore + numBonesToAdd);
         for (u32 i = 0; i < numBonesToAdd; i++)
         {
-            AnimationBoneInfo& boneInfo = _animationBoneInfo[numBoneInfoBefore + i];
+            AnimationBoneInfo& boneInfo = animationBoneInfo[numBoneInfoBefore + i];
             CModel::ComplexBone& bone = cModel.bones[i];
 
             boneInfo.numTranslationSequences = static_cast<u16>(bone.translation.tracks.size());
             if (boneInfo.numTranslationSequences > 0)
             {
+                std::scoped_lock lock(_animationTrackMutex);
+
                 boneInfo.translationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
                 for (u32 j = 0; j < boneInfo.numTranslationSequences; j++)
                 {
@@ -1181,6 +1237,8 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
             boneInfo.numRotationSequences = static_cast<u16>(bone.rotation.tracks.size());
             if (boneInfo.numRotationSequences > 0)
             {
+                std::scoped_lock lock(_animationTrackMutex);
+
                 boneInfo.rotationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
                 for (u32 j = 0; j < boneInfo.numRotationSequences; j++)
                 {
@@ -1220,6 +1278,8 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
             boneInfo.numScaleSequences = static_cast<u16>(bone.scale.tracks.size());
             if (boneInfo.numScaleSequences > 0)
             {
+                std::scoped_lock lock(_animationTrackMutex);
+
                 boneInfo.scaleSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
                 for (u32 j = 0; j < boneInfo.numScaleSequences; j++)
                 {
@@ -1275,21 +1335,29 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
 
         // We also need to account for the possibility that a model comes with no included values due to the values being found in a separate '.anim' file
         complexModel.isAnimated = complexModel.numBones > 0 && numSequences > 0 && numTracksWithValues > 0;
-    }
+    });
 
     // Add vertices
-    size_t numVerticesBeforeAdd = _vertices.size();
-    size_t numVerticesToAdd = cModel.vertices.size();
+    size_t numVerticesBeforeAdd = 0;
+    _vertices.WriteLock([&](std::vector<CModel::ComplexVertex>& vertices)
+    {
+        numVerticesBeforeAdd = vertices.size();
+        size_t numVerticesToAdd = cModel.vertices.size();
 
-    _vertices.resize(numVerticesBeforeAdd + numVerticesToAdd);
-    memcpy(&_vertices[numVerticesBeforeAdd], cModel.vertices.data(), numVerticesToAdd * sizeof(CModel::ComplexVertex));
+        vertices.resize(numVerticesBeforeAdd + numVerticesToAdd);
+        memcpy(&vertices[numVerticesBeforeAdd], cModel.vertices.data(), numVerticesToAdd * sizeof(CModel::ComplexVertex));
+    });
 
     // Handle the CullingData
-    size_t numCullingDataBeforeAdd = _cullingDatas.size();
-    complexModel.cullingDataID = static_cast<u32>(numCullingDataBeforeAdd);
+    size_t numCullingDataBeforeAdd = 0;
+    _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
+    {
+        numCullingDataBeforeAdd = cullingDatas.size();
+        complexModel.cullingDataID = static_cast<u32>(numCullingDataBeforeAdd);
 
-    CModel::CullingData& cullingData = _cullingDatas.emplace_back();
-    cullingData = cModel.cullingData;
+        CModel::CullingData& cullingData = cullingDatas.emplace_back();
+        cullingData = cModel.cullingData;
+    });
 
     // Handle this models renderbatches
     size_t numRenderBatches = static_cast<u32>(cModel.modelData.renderBatches.size());
@@ -1320,59 +1388,69 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         drawCallTemplate.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
 
         // Add indices
-        size_t numIndicesBeforeAdd = _indices.size();
-        size_t numIndicesToAdd = renderBatch.indexCount;
+        size_t numIndicesBeforeAdd = 0;
+        size_t numIndicesToAdd = 0;
+        _indices.WriteLock([&](std::vector<u16>& indices)
+        {
+            numIndicesBeforeAdd = indices.size();
+            numIndicesToAdd = renderBatch.indexCount;
 
-        _indices.resize(numIndicesBeforeAdd + numIndicesToAdd);
-        memcpy(&_indices[numIndicesBeforeAdd], &cModel.modelData.indices[renderBatch.indexStart], numIndicesToAdd * sizeof(u16));
-
+            indices.resize(numIndicesBeforeAdd + numIndicesToAdd);
+            memcpy(&indices[numIndicesBeforeAdd], &cModel.modelData.indices[renderBatch.indexStart], numIndicesToAdd * sizeof(u16));
+        });
+        
         drawCallTemplate.firstIndex = static_cast<u32>(numIndicesBeforeAdd);
         drawCallTemplate.indexCount = static_cast<u32>(numIndicesToAdd);
 
         // Add texture units
-        size_t numTextureUnitsBeforeAdd = _textureUnits.size();
-        size_t numTextureUnitsToAdd = renderBatch.textureUnits.size();
-
-        _textureUnits.resize(numTextureUnitsBeforeAdd + numTextureUnitsToAdd);
-        for (size_t j = 0; j < numTextureUnitsToAdd; j++)
+        size_t numTextureUnitsBeforeAdd = 0;
+        size_t numTextureUnitsToAdd = 0;
+        _textureUnits.WriteLock([&](std::vector<TextureUnit>& textureUnits)
         {
-            TextureUnit& textureUnit = _textureUnits[numTextureUnitsBeforeAdd + j];
+            numTextureUnitsBeforeAdd = textureUnits.size();
+            numTextureUnitsToAdd = renderBatch.textureUnits.size();
 
-            CModel::ComplexTextureUnit& complexTextureUnit = renderBatch.textureUnits[j];
-            CModel::ComplexMaterial& complexMaterial = cModel.materials[complexTextureUnit.materialIndex];
-
-            bool isProjectedTexture = (static_cast<u8>(complexTextureUnit.flags) & static_cast<u8>(CModel::ComplexTextureUnitFlag::PROJECTED_TEXTURE)) != 0;
-            u16 materialFlag = *reinterpret_cast<u16*>(&complexMaterial.flags) << 1;
-            u16 blendingMode = complexMaterial.blendingMode << 11;
-
-            textureUnit.data = static_cast<u16>(isProjectedTexture) | materialFlag | blendingMode;
-            textureUnit.materialType = complexTextureUnit.shaderId;
-
-            // Load Textures into Texture Array
+            textureUnits.resize(numTextureUnitsBeforeAdd + numTextureUnitsToAdd);
+            for (size_t j = 0; j < numTextureUnitsToAdd; j++)
             {
-                // TODO: Wotlk only supports 2 textures, when we upgrade to cata+ this might need to be reworked
-                for (u32 t = 0; t < complexTextureUnit.textureCount; t++)
-                {
-                    // Load Texture
-                    CModel::ComplexTexture& complexTexture = cModel.textures[complexTextureUnit.textureIndices[t]];
+                TextureUnit& textureUnit = textureUnits[numTextureUnitsBeforeAdd + j];
 
-                    if (complexTexture.type == CModel::ComplexTextureType::NONE)
+                CModel::ComplexTextureUnit& complexTextureUnit = renderBatch.textureUnits[j];
+                CModel::ComplexMaterial& complexMaterial = cModel.materials[complexTextureUnit.materialIndex];
+
+                bool isProjectedTexture = (static_cast<u8>(complexTextureUnit.flags) & static_cast<u8>(CModel::ComplexTextureUnitFlag::PROJECTED_TEXTURE)) != 0;
+                u16 materialFlag = *reinterpret_cast<u16*>(&complexMaterial.flags) << 1;
+                u16 blendingMode = complexMaterial.blendingMode << 11;
+
+                textureUnit.data = static_cast<u16>(isProjectedTexture) | materialFlag | blendingMode;
+                textureUnit.materialType = complexTextureUnit.shaderId;
+
+                // Load Textures into Texture Array
+                {
+                    // TODO: Wotlk only supports 2 textures, when we upgrade to cata+ this might need to be reworked
+                    for (u32 t = 0; t < complexTextureUnit.textureCount; t++)
                     {
-                        Renderer::TextureDesc textureDesc;
-                        textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
-                        _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                    }
-                    else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
-                    {
-                        Renderer::TextureDesc textureDesc;
-                        //textureDesc.path = modelTexturePath.replace_filename("SahauginskinBlue.dds").string();
-                        //textureDesc.path = modelTexturePath.replace_filename("SnakeSkinBlack.dds").string();
-                        textureDesc.path = modelTexturePath.replace_filename("druidcatskinpurple.dds").string();
-                        _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                        // Load Texture
+                        CModel::ComplexTexture& complexTexture = cModel.textures[complexTextureUnit.textureIndices[t]];
+
+                        if (complexTexture.type == CModel::ComplexTextureType::NONE)
+                        {
+                            Renderer::TextureDesc textureDesc;
+                            textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
+                            _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                        }
+                        else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
+                        {
+                            Renderer::TextureDesc textureDesc;
+                            //textureDesc.path = modelTexturePath.replace_filename("SahauginskinBlue.dds").string();
+                            //textureDesc.path = modelTexturePath.replace_filename("SnakeSkinBlack.dds").string();
+                            textureDesc.path = modelTexturePath.replace_filename("druidcatskinpurple.dds").string();
+                            _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                        }
                     }
                 }
             }
-        }
+        });
 
         drawCallDataTemplate.cullingDataID = static_cast<u32>(numCullingDataBeforeAdd);
         drawCallDataTemplate.textureUnitOffset = static_cast<u16>(numTextureUnitsBeforeAdd);
@@ -1692,12 +1770,16 @@ bool CModelRenderer::IsRenderBatchTransparent(const CModel::ComplexRenderBatch& 
     return false;
 }
 
-void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement)
+void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, u32& instanceIndex)
 {
-    // Add the instance
-    size_t numInstancesBeforeAdd = _instances.size();
-    Instance& instance = _instances.emplace_back();
+    Instance* instance = nullptr;
+    _instances.WriteLock([&](std::vector<Instance>& instances)
+    {
+        instanceIndex = static_cast<u32>(instances.size());
+        instance = &instances.emplace_back();
+    });
 
+    // Add the instance
     vec3 pos = placement.position;
     vec3 rot = glm::radians(placement.rotation);
     vec3 scale = vec3(placement.scale) / 1024.0f;
@@ -1705,11 +1787,11 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
     mat4x4 rotationMatrix = glm::eulerAngleZYX(rot.z, -rot.y, -rot.x);
     mat4x4 scaleMatrix = glm::scale(mat4x4(1.0f), scale);
 
-    instance.modelId = complexModel.objectID;
-    instance.instanceMatrix = glm::translate(mat4x4(1.0f), pos) * rotationMatrix * scaleMatrix;
+    instance->modelId = complexModel.objectID;
+    instance->instanceMatrix = glm::translate(mat4x4(1.0f), pos) * rotationMatrix * scaleMatrix;
 
-    BufferRangeFrame& boneDeformRangeFrame = _instanceBoneDeformRangeFrames.emplace_back();
-    BufferRangeFrame& boneInstanceRangeFrame = _instanceBoneInstanceRangeFrames.emplace_back();
+    BufferRangeFrame& boneDeformRangeFrame = _instanceBoneDeformRangeFrames.EmplaceBack();
+    BufferRangeFrame& boneInstanceRangeFrame = _instanceBoneInstanceRangeFrames.EmplaceBack();
 
     if (complexModel.isAnimated)
     {
@@ -1766,160 +1848,206 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
         }
 
         assert(boneDeformRangeFrame.offset % sizeof(mat4x4) == 0);
-        instance.boneDeformOffset = static_cast<u32>(boneDeformRangeFrame.offset) / sizeof(mat4x4);
+        instance->boneDeformOffset = static_cast<u32>(boneDeformRangeFrame.offset) / sizeof(mat4x4);
 
         assert(boneInstanceRangeFrame.offset % sizeof(AnimationBoneInstance) == 0);
-        instance.boneInstanceDataOffset = static_cast<u32>(boneInstanceRangeFrame.offset) / sizeof(AnimationBoneInstance);
+        instance->boneInstanceDataOffset = static_cast<u32>(boneInstanceRangeFrame.offset) / sizeof(AnimationBoneInstance);
 
-        _animationBoneInstances.resize(instance.boneInstanceDataOffset);
+        _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
+        {
+            animationBoneInstances.resize(instance->boneInstanceDataOffset);
+        });
     }
     else
     {
-        instance.boneDeformOffset = std::numeric_limits<u32>().max();
-        instance.boneInstanceDataOffset = std::numeric_limits<u32>().max();
+        instance->boneDeformOffset = std::numeric_limits<u32>().max();
+        instance->boneInstanceDataOffset = std::numeric_limits<u32>().max();
     }
 
     // Add the opaque DrawCalls and DrawCallDatas
-    size_t numOpaqueDrawCallsBeforeAdd = _opaqueDrawCalls.size();
-    for (u32 i = 0; i < complexModel.numOpaqueDrawCalls; i++)
+    _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
     {
-        const DrawCall& drawCallTemplate = complexModel.opaqueDrawCallTemplates[i];
-        const DrawCallData& drawCallDataTemplate = complexModel.opaqueDrawCallDataTemplates[i];
+        _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
+        {
+            size_t numOpaqueDrawCallsBeforeAdd = opaqueDrawCalls.size();
+            for (u32 i = 0; i < complexModel.numOpaqueDrawCalls; i++)
+            {
+                const DrawCall& drawCallTemplate = complexModel.opaqueDrawCallTemplates[i];
+                const DrawCallData& drawCallDataTemplate = complexModel.opaqueDrawCallDataTemplates[i];
 
-        DrawCall& drawCall = _opaqueDrawCalls.emplace_back();
-        DrawCallData& drawCallData = _opaqueDrawCallDatas.emplace_back();
+                DrawCall& drawCall = opaqueDrawCalls.emplace_back();
+                DrawCallData& drawCallData = opaqueDrawCallDatas.emplace_back();
 
-        _opaqueDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numOpaqueDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                _opaqueDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& opaqueDrawCallDataIndexToLoadedModelIndex)
+                {
+                    opaqueDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numOpaqueDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                });
 
-        // Copy data from the templates
-        drawCall.firstIndex = drawCallTemplate.firstIndex;
-        drawCall.indexCount = drawCallTemplate.indexCount;
-        drawCall.instanceCount = drawCallTemplate.instanceCount;
-        drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+                // Copy data from the templates
+                drawCall.firstIndex = drawCallTemplate.firstIndex;
+                drawCall.indexCount = drawCallTemplate.indexCount;
+                drawCall.instanceCount = drawCallTemplate.instanceCount;
+                drawCall.vertexOffset = drawCallTemplate.vertexOffset;
 
-        drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
-        drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
-        drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
-        drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
+                drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
+                drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
+                drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
 
-        // Fill in the data that shouldn't be templated
-        drawCall.firstInstance = static_cast<u32>(numOpaqueDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
-        drawCallData.instanceID = static_cast<u32>(numInstancesBeforeAdd);
-    }
+                // Fill in the data that shouldn't be templated
+                drawCall.firstInstance = static_cast<u32>(numOpaqueDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
+                drawCallData.instanceID = static_cast<u32>(instanceIndex);
+            }
+        });
+    });
 
     // Add the transparent DrawCalls and DrawCallDatas
-    size_t numTransparentDrawCallsBeforeAdd = _transparentDrawCalls.size();
-    for (u32 i = 0; i < complexModel.numTransparentDrawCalls; i++)
+    _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& transparentDrawCalls)
     {
-        const DrawCall& drawCallTemplate = complexModel.transparentDrawCallTemplates[i];
-        const DrawCallData& drawCallDataTemplate = complexModel.transparentDrawCallDataTemplates[i];
+        _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
+        {
+            size_t numTransparentDrawCallsBeforeAdd = transparentDrawCalls.size();
+            for (u32 i = 0; i < complexModel.numTransparentDrawCalls; i++)
+            {
+                const DrawCall& drawCallTemplate = complexModel.transparentDrawCallTemplates[i];
+                const DrawCallData& drawCallDataTemplate = complexModel.transparentDrawCallDataTemplates[i];
 
-        DrawCall& drawCall = _transparentDrawCalls.emplace_back();
-        DrawCallData& drawCallData = _transparentDrawCallDatas.emplace_back();
-        _transparentDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numTransparentDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                DrawCall& drawCall = transparentDrawCalls.emplace_back();
+                DrawCallData& drawCallData = transparentDrawCallDatas.emplace_back();
 
-        // Copy data from the templates
-        drawCall.firstIndex = drawCallTemplate.firstIndex;
-        drawCall.indexCount = drawCallTemplate.indexCount;
-        drawCall.instanceCount = drawCallTemplate.instanceCount;
-        drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+                _transparentDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& transparentDrawCallDataIndexToLoadedModelIndex)
+                {
+                    transparentDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numTransparentDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                });
 
-        drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
-        drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
-        drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
-        drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                // Copy data from the templates
+                drawCall.firstIndex = drawCallTemplate.firstIndex;
+                drawCall.indexCount = drawCallTemplate.indexCount;
+                drawCall.instanceCount = drawCallTemplate.instanceCount;
+                drawCall.vertexOffset = drawCallTemplate.vertexOffset;
 
-        // Fill in the data that shouldn't be templated
-        drawCall.firstInstance = static_cast<u32>(numTransparentDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
-        drawCallData.instanceID = static_cast<u32>(numInstancesBeforeAdd);
-    }
+                drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
+                drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
+                drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
+                drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+
+                // Fill in the data that shouldn't be templated
+                drawCall.firstInstance = static_cast<u32>(numTransparentDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
+                drawCallData.instanceID = static_cast<u32>(instanceIndex);
+            }
+        });
+    });
 }
 
 void CModelRenderer::CreateBuffers()
 {
     // Create Vertex buffer
     {
-        Renderer::BufferDesc desc;
-        desc.name = "CModelVertexBuffer";
-        desc.size = sizeof(CModel::ComplexVertex) * _vertices.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+        _vertices.WriteLock([&](std::vector<CModel::ComplexVertex>& vertices)
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelVertexBuffer";
+            desc.size = sizeof(CModel::ComplexVertex) * vertices.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
-        _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, _vertices.data(), desc.size);
+            _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, vertices.data(), desc.size);
+        });
     }
     
     // Create Index buffer
     {
-        Renderer::BufferDesc desc;
-        desc.name = "CModelIndexBuffer";
-        desc.size = sizeof(u16) * _indices.size();
-        desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _indexBuffer = _renderer->CreateAndFillBuffer(_indexBuffer, desc, _indices.data(), desc.size);
+        _indices.WriteLock([&](std::vector<u16>& indices)
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelIndexBuffer";
+            desc.size = sizeof(u16) * indices.size();
+            desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _indexBuffer = _renderer->CreateAndFillBuffer(_indexBuffer, desc, indices.data(), desc.size);
+        });
     }
 
     // Create TextureUnit buffer
     {
-        Renderer::BufferDesc desc;
-        desc.name = "CModelTextureUnitBuffer";
-        desc.size = sizeof(TextureUnit) * _textureUnits.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _textureUnitBuffer = _renderer->CreateAndFillBuffer(_textureUnitBuffer, desc, _textureUnits.data(), desc.size);
+        _textureUnits.WriteLock([&](std::vector<TextureUnit>& textureUnits)
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelTextureUnitBuffer";
+            desc.size = sizeof(TextureUnit) * textureUnits.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _textureUnitBuffer = _renderer->CreateAndFillBuffer(_textureUnitBuffer, desc, textureUnits.data(), desc.size);
+        });
     }
 
     // Create Instance buffer
     {
-        Renderer::BufferDesc desc;
-        desc.name = "CModelInstanceBuffer";
-        desc.size = sizeof(Instance) * _instances.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _instanceBuffer = _renderer->CreateAndFillBuffer(_instanceBuffer, desc, _instances.data(), desc.size);
+        _instances.WriteLock([&](std::vector<Instance>& instances)
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelInstanceBuffer";
+            desc.size = sizeof(Instance) * instances.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _instanceBuffer = _renderer->CreateAndFillBuffer(_instanceBuffer, desc, instances.data(), desc.size);
+        });
     }
 
     // Create CullingData buffer
     {
-        Renderer::BufferDesc desc;
-        desc.name = "CModelCullDataBuffer";
-        desc.size = sizeof(CModel::CullingData) * _cullingDatas.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _cullingDataBuffer = _renderer->CreateAndFillBuffer(_cullingDataBuffer, desc, _cullingDatas.data(), desc.size);
+        _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelCullDataBuffer";
+            desc.size = sizeof(CModel::CullingData) * cullingDatas.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _cullingDataBuffer = _renderer->CreateAndFillBuffer(_cullingDataBuffer, desc, cullingDatas.data(), desc.size);
+        });
     }
 
     // Create AnimationSequence buffer
     {
-        size_t numSequences = _animationSequence.size();
-        if (numSequences > 0)
+        _animationSequence.WriteLock([&](std::vector<AnimationSequence>& animationSequence)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationSequenceBuffer";
-            desc.size = sizeof(AnimationSequence) * numSequences;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _animationSequenceBuffer = _renderer->CreateAndFillBuffer(_animationSequenceBuffer, desc, _animationSequence.data(), desc.size);
-        }
+            size_t numSequences = animationSequence.size();
+            if (numSequences > 0)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationSequenceBuffer";
+                desc.size = sizeof(AnimationSequence) * numSequences;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _animationSequenceBuffer = _renderer->CreateAndFillBuffer(_animationSequenceBuffer, desc, animationSequence.data(), desc.size);
+            }
+        });
     }    
     
     // Create AnimationModelInfo buffer
     {
-        size_t numModelInfo = _animationModelInfo.size();
-        if (numModelInfo > 0)
+        _animationModelInfo.WriteLock([&](std::vector<AnimationModelInfo>& animationModelInfo)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationModelInfoBuffer";
-            desc.size = sizeof(AnimationModelInfo) * numModelInfo;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _animationModelInfoBuffer = _renderer->CreateAndFillBuffer(_animationModelInfoBuffer, desc, _animationModelInfo.data(), desc.size);
-        }
+            size_t numModelInfo = animationModelInfo.size();
+            if (numModelInfo > 0)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationModelInfoBuffer";
+                desc.size = sizeof(AnimationModelInfo) * numModelInfo;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _animationModelInfoBuffer = _renderer->CreateAndFillBuffer(_animationModelInfoBuffer, desc, animationModelInfo.data(), desc.size);
+            }
+        });
     }    
     
     // Create AnimationBoneInfo buffer
     {
-        size_t numBoneInfo = _animationBoneInfo.size();
-        if (numBoneInfo > 0)
+        _animationBoneInfo.WriteLock([&](std::vector<AnimationBoneInfo>& animationBoneInfo)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationBoneInfoBuffer";
-            desc.size = sizeof(AnimationBoneInfo) * numBoneInfo;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _animationBoneInfoBuffer = _renderer->CreateAndFillBuffer(_animationBoneInfoBuffer, desc, _animationBoneInfo.data(), desc.size);
-        }
+            size_t numBoneInfo = animationBoneInfo.size();
+            if (numBoneInfo > 0)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationBoneInfoBuffer";
+                desc.size = sizeof(AnimationBoneInfo) * numBoneInfo;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _animationBoneInfoBuffer = _renderer->CreateAndFillBuffer(_animationBoneInfoBuffer, desc, animationBoneInfo.data(), desc.size);
+            }
+        });
     }
 
     // Create AnimationSequence buffer
@@ -1961,100 +2089,109 @@ void CModelRenderer::CreateBuffers()
         }
     }
 
-    if (_opaqueDrawCalls.size() > 0)
+    _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
     {
-        // Create OpaqueDrawCall and OpaqueCulledDrawCall buffer
+        if (opaqueDrawCalls.size() > 0)
         {
-            Renderer::BufferDesc desc;
-            desc.name = "CModelOpaqueDrawCallBuffer";
-            desc.size = sizeof(DrawCall) * _opaqueDrawCalls.size();
-            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _opaqueDrawCallBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallBuffer, desc, _opaqueDrawCalls.data(), desc.size);
+            // Create OpaqueDrawCall and OpaqueCulledDrawCall buffer
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "CModelOpaqueDrawCallBuffer";
+                desc.size = sizeof(DrawCall) * opaqueDrawCalls.size();
+                desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _opaqueDrawCallBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallBuffer, desc, opaqueDrawCalls.data(), desc.size);
 
-            desc.name = "CModelOpaqueCullDrawCallBuffer";
-            _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
+                desc.name = "CModelOpaqueCullDrawCallBuffer";
+                _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
+            }
+
+            _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
+                {
+                    // Create OpaqueDrawCallData buffer
+                    {
+                        Renderer::BufferDesc desc;
+                        desc.name = "CModelOpaqueDrawCallDataBuffer";
+                        desc.size = sizeof(DrawCallData) * opaqueDrawCallDatas.size();
+                        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                        _opaqueDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallDataBuffer, desc, opaqueDrawCallDatas.data(), desc.size);
+                    }
+                });
         }
-
-        // Create OpaqueDrawCallData buffer
-        {
-            Renderer::BufferDesc desc;
-            desc.name = "CModelOpaqueDrawCallDataBuffer";
-            desc.size = sizeof(DrawCallData) * _opaqueDrawCallDatas.size();
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _opaqueDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallDataBuffer, desc, _opaqueDrawCallDatas.data(), desc.size);
-        }
-    }
-
-    // Destroy TransparentDrawCall buffer
-    if (_transparentDrawCalls.size() > 0)
+    });
+    
+    _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& transparentDrawCalls)
     {
-        // Create TransparentDrawCall, TransparentCulledDrawCall and TransparentSortedCulledDrawCall buffer
+        if (transparentDrawCalls.size() > 0)
         {
-            u32 size = sizeof(DrawCall) * static_cast<u32>(_transparentDrawCalls.size());
+            // Create TransparentDrawCall, TransparentCulledDrawCall and TransparentSortedCulledDrawCall buffer
+            {
+                u32 size = sizeof(DrawCall) * static_cast<u32>(transparentDrawCalls.size());
 
-            Renderer::BufferDesc desc;
-            desc.name = "CModelAlphaCullDrawCalls";
-            desc.size = size;
-            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
+                Renderer::BufferDesc desc;
+                desc.name = "CModelAlphaCullDrawCalls";
+                desc.size = size;
+                desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
 
-            desc.name = "CModelAlphaSortCullDrawCalls";
-            _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
+                desc.name = "CModelAlphaSortCullDrawCalls";
+                _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
 
-            desc.name = "CModelAlphaDrawCalls";
-            desc.usage |= Renderer::BufferUsage::TRANSFER_SOURCE;
-            _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, _transparentDrawCalls.data(), desc.size);
+                desc.name = "CModelAlphaDrawCalls";
+                desc.usage |= Renderer::BufferUsage::TRANSFER_SOURCE;
+                _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, transparentDrawCalls.data(), desc.size);
+            }
+
+            // Create TransparentDrawCallData buffer
+            _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "CModelAlphaDrawCallDataBuffer";
+                desc.size = sizeof(DrawCallData) * transparentDrawCallDatas.size();
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, transparentDrawCallDatas.data(), desc.size);
+            });
+
+            // Create transparent sort keys/values buffer
+            {
+                u32 numDrawCalls = static_cast<u32>(transparentDrawCalls.size());
+                u32 keysSize = sizeof(u64) * numDrawCalls;
+                u32 valuesSize = sizeof(u32) * numDrawCalls;
+
+                Renderer::BufferDesc desc;
+                desc.name = "CModelAlphaSortKeys";
+                desc.size = keysSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
+
+                desc.name = "CModelAlphaSortValues";
+                desc.size = valuesSize;
+                _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+            }
         }
-
-        // Create TransparentDrawCallData buffer
+        else
         {
-            Renderer::BufferDesc desc;
-            desc.name = "CModelAlphaDrawCallDataBuffer";
-            desc.size = sizeof(DrawCallData) * _transparentDrawCallDatas.size();
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, _transparentDrawCallDatas.data(), desc.size);
+            // Create transparent sort keys/values buffer
+            {
+                u32 keysSize = sizeof(u64) * 1;
+                u32 valuesSize = sizeof(u32) * 1;
+
+                Renderer::BufferDesc desc;
+                desc.name = "CModelAlphaSortKeys";
+                desc.size = keysSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
+
+                desc.name = "CModelAlphaSortValues";
+                desc.size = valuesSize;
+                _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+            }
         }
-
-        // Create transparent sort keys/values buffer
-        {
-            u32 numDrawCalls = static_cast<u32>(_transparentDrawCalls.size());
-            u32 keysSize = sizeof(u64) * numDrawCalls;
-            u32 valuesSize = sizeof(u32) * numDrawCalls;
-
-            Renderer::BufferDesc desc;
-            desc.name = "CModelAlphaSortKeys";
-            desc.size = keysSize;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
-
-            desc.name = "CModelAlphaSortValues";
-            desc.size = valuesSize;
-            _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
-        }
-    }
-    else
-    {
-        // Create transparent sort keys/values buffer
-        {
-            u32 keysSize = sizeof(u64) * 1;
-            u32 valuesSize = sizeof(u32) * 1;
-
-            Renderer::BufferDesc desc;
-            desc.name = "CModelAlphaSortKeys";
-            desc.size = keysSize;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-            _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
-
-            desc.name = "CModelAlphaSortValues";
-            desc.size = valuesSize;
-            _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
-        }
-    }
+    });
 
     {
         Renderer::BufferDesc desc;
         desc.name = "CModelVisibleInstanceMaskBuffer";
-        desc.size = sizeof(u32) * ((_instances.size() + 31) / 32);
+        desc.size = sizeof(u32) * ((_instances.Size() + 31) / 32);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _visibleInstanceMaskBuffer = _renderer->CreateBuffer(_visibleInstanceMaskBuffer, desc);
     }
@@ -2068,7 +2205,7 @@ void CModelRenderer::CreateBuffers()
     {
         Renderer::BufferDesc desc;
         desc.name = "CModelVisibleInstanceIndexBuffer";
-        desc.size = sizeof(u32) * _instances.size();
+        desc.size = sizeof(u32) * _instances.Size();
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER;
         _visibleInstanceIndexBuffer = _renderer->CreateBuffer(_visibleInstanceIndexBuffer, desc);
     }
