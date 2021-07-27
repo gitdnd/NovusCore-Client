@@ -1,5 +1,6 @@
 #pragma once
 #include <NovusTypes.h>
+#include <Utils/StringUtils.h>
 #include "robin_hood.h"
 
 class Window;
@@ -29,8 +30,33 @@ typedef bool CharInputCallbackFunc(u32 unicode);
 class KeybindGroup
 {
 public:
+    struct Keybind
+    {
+        std::string keybindName;
+        u32 keybindNameHash;
+        i32 glfwKey;
+        KeybindAction actionMask;
+        KeybindModifier modifierMask;
+        bool isPressed;
+
+        std::function<KeyboardInputCallbackFunc> callback;
+    };
+
+    struct InputConsumedInfo
+    {
+        const std::string* keybindGroupName = nullptr;
+        u32 keybindGroupNameHash = 0;
+
+        const std::string* keybindName = nullptr;
+        u32 keybindNameHash = 0;
+    };
+
+public:
     const std::string& GetDebugName();
+    const u32& GetDebugNameHash();
     const u32& GetPriority();
+    const std::vector<Keybind*>& GetKeybinds();
+
     bool IsActive();
     void SetActive(bool state);
 
@@ -44,35 +70,28 @@ public:
     bool IsKeybindPressed(u32 keybindNameHash);
 
 private:
-    bool MousePositionUpdate(f32 x, f32 y, bool wasAbsorbed);
-    bool MouseScrollUpdate(f32 x, f32 y, bool wasAbsorbed);
-    bool MouseInputHandler(i32 button, i32 actionMask, i32 modifierMask, bool wasAbsorbed);
-    bool KeyboardInputCallback(i32 glfwKey, i32 actionMask, i32 modifierMask, bool wasAbsorbed);
-    bool CharInputCallback(u32 unicodeKey);
+    bool MousePositionUpdate(f32 x, f32 y, bool wasConsumed, InputConsumedInfo& inputConsumedInfo);
+    bool MouseScrollUpdate(f32 x, f32 y, bool wasConsumed, InputConsumedInfo& inputConsumedInfo);
+    bool MouseInputHandler(i32 button, i32 actionMask, i32 modifierMask, bool wasConsumed, InputConsumedInfo& inputConsumedInfo);
+    bool KeyboardInputCallback(i32 glfwKey, i32 actionMask, i32 modifierMask, bool wasConsumed, InputConsumedInfo& inputConsumedInfo);
+    bool CharInputCallback(u32 unicodeKey, InputConsumedInfo& inputConsumedInfo);
 
 private:
-    struct Keybind
-    {
-        std::string keybindName;
-        u32 keybindNameHash;
-        i32 glfwKey;
-        KeybindAction actionMask;
-        KeybindModifier modifierMask;
-        bool isPressed;
-
-        std::function<KeyboardInputCallbackFunc> callback;
-    };
-
     KeybindGroup(const std::string& debugName, u32 priority);
 
     friend class InputManager;
 private:
+    const std::string* consumerInfoNameAnyKeyboardInput = new std::string("Any Keyboard Input");
+    const std::string* consumerInfoNameAnyUnicodeInput = new std::string("Any Unicode Input");
+    const u32 consumerInfoNameHashAnyKeyboardInput = "Any Keyboard Input"_h;
+    const u32 consumerInfoNameHashAnyUnicodeInput = "Any Unicode Input"_h;
+
     std::string _debugName;
     u32 _debugNameHash;
     u32 _priority;
     bool _isActive = false;
 
-    std::vector<Keybind> _keybinds;
+    std::vector<Keybind*> _keybinds;
     robin_hood::unordered_map<u32, std::function<CharInputCallbackFunc>> _unicodeToCallback;
 
     Keybind* _anyKeyboardInputKeybind = nullptr;

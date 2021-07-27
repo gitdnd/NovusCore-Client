@@ -247,6 +247,7 @@ namespace UIInput
     {
         InputManager* inputManager = ServiceLocator::GetInputManager();
         KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("UI Input", 10);
+        keybindGroup->SetActive(true);
 
         keybindGroup->AddKeyboardCallback("Mouse Left", GLFW_MOUSE_BUTTON_LEFT, KeybindAction::Click, KeybindModifier::Any, std::bind(&OnMouseClick, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
         keybindGroup->AddAnyKeyboardCallback("Keyboard Input", std::bind(&OnKeyboardInput, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));

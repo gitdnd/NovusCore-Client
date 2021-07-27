@@ -37,7 +37,7 @@ void MovementSystem::Init(entt::registry& registry)
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Movement", 0);
     keybindGroup->SetActive(true);
 
-    keybindGroup->AddKeyboardCallback("Movement : Increase Speed", GLFW_KEY_PAGE_UP, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Increase Speed", GLFW_KEY_PAGE_UP, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
         if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
@@ -48,7 +48,7 @@ void MovementSystem::Init(entt::registry& registry)
     
         return true;
     });
-    keybindGroup->AddKeyboardCallback("Movement : Decrease Speed", GLFW_KEY_PAGE_DOWN, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Decrease Speed", GLFW_KEY_PAGE_DOWN, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
         if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
@@ -58,7 +58,7 @@ void MovementSystem::Init(entt::registry& registry)
         transform.moveSpeed = glm::max(transform.moveSpeed - 7.1111f, 7.1111f);
         return true;
     });
-    keybindGroup->AddKeyboardCallback("Movement : Auto Run", GLFW_KEY_HOME, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Auto Run", GLFW_KEY_HOME, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
         if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
@@ -68,11 +68,11 @@ void MovementSystem::Init(entt::registry& registry)
         return true;
     });
     
-    keybindGroup->AddKeyboardCallback("Movement : Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::None, nullptr);
-    keybindGroup->AddKeyboardCallback("Movement : Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::None, nullptr);
-    keybindGroup->AddKeyboardCallback("Movement : Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::None, nullptr);
-    keybindGroup->AddKeyboardCallback("Movement : Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::None, nullptr);
-    keybindGroup->AddKeyboardCallback("Movement : Jump", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Jump", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::None, nullptr);
 }
 
 void MovementSystem::Update(entt::registry& registry)
@@ -100,7 +100,7 @@ void MovementSystem::Update(entt::registry& registry)
     Terrain::MapUtils::GetTriangleFromWorldPosition(transform.position, triangle, terrainHeight);
 
     bool isGrounded = transform.position.z <= terrainHeight;
-    bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("CameraOrbital : Right Mouse"_h);
+    bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
     if (isRightClickDown)
     {
         transform.yaw = camera->GetYaw();
@@ -120,10 +120,10 @@ void MovementSystem::Update(entt::registry& registry)
         i8 moveAlongVerticalAxis = 0;
         bool isMoving = false;
 
-        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Movement : Left"_h);
-        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Movement : Right"_h);
-        moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Movement : Forward"_h);
-        moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Movement : Backward"_h);
+        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Left"_h);
+        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Right"_h);
+        moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Forward"_h);
+        moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Backward"_h);
         isMoving = moveAlongHorizontalAxis + moveAlongVerticalAxis;
 
         // Handle Move Direction
@@ -151,7 +151,7 @@ void MovementSystem::Update(entt::registry& registry)
             }
 
             // JUMP
-            bool isPressingJump = movementKeybindGroup->IsKeybindPressed("Movement : Jump"_h);;
+            bool isPressingJump = movementKeybindGroup->IsKeybindPressed("Jump"_h);;
             isJumping = isPressingJump && localplayerSingleton.movement.flags.canJump;
 
             // This ensures we have to stop pressing "Move Jump" and press it again to jump

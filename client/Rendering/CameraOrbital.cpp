@@ -80,12 +80,12 @@ void CameraOrbital::Init()
 
         return _captureMouse;
     });
-    keybindGroup->AddKeyboardCallback("CameraOrbital : Left Mouse", GLFW_MOUSE_BUTTON_LEFT, KeybindAction::Click, KeybindModifier::None, [this, inputManager, keybindGroup](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Left Mouse", GLFW_MOUSE_BUTTON_LEFT, KeybindAction::Click, KeybindModifier::None, [this, inputManager, keybindGroup](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
     
-        if (keybindGroup->IsKeybindPressed("CameraOrbital : Right Mouse"_h))
+        if (keybindGroup->IsKeybindPressed("Right Mouse"_h))
             return false;
     
         if (action == KeybindAction::Press)
@@ -113,12 +113,12 @@ void CameraOrbital::Init()
     
         return true;
     });
-    keybindGroup->AddKeyboardCallback("CameraOrbital : Right Mouse", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::None, [this, inputManager, keybindGroup](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Right Mouse", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::None, [this, inputManager, keybindGroup](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
 
-        if (keybindGroup->IsKeybindPressed("CameraOrbital : Left Mouse"_h))
+        if (keybindGroup->IsKeybindPressed("Left Mouse"_h))
             return false;
     
         if (action == KeybindAction::Press)

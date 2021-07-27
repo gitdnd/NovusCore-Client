@@ -181,7 +181,7 @@ bool EngineLoop::Init()
         cameraOrbital->SetActive(true);
 
         // Bind Switch Camera Key
-        keybindGroup->AddKeyboardCallback("Debug : Switch Camera Mode", GLFW_KEY_C, KeybindAction::Press, KeybindModifier::Any, [this, cameraFreeLook, cameraOrbital](i32 key, KeybindAction action, KeybindModifier modifier)
+        keybindGroup->AddKeyboardCallback("Switch Camera Mode", GLFW_KEY_C, KeybindAction::Press, KeybindModifier::Any, [this, cameraFreeLook, cameraOrbital](i32 key, KeybindAction action, KeybindModifier modifier)
         {
             if (cameraFreeLook->IsActive())
             {
@@ -596,6 +596,7 @@ void EngineLoop::DrawEngineStats(EngineStatsSingleton* stats)
                 AreaUpdateSingleton& areaUpdateSingleton = registry->ctx<AreaUpdateSingleton>();
                 
                 size_t numLights = areaUpdateSingleton.totalLightDatas.size();
+                ImGui::Spacing();
                 ImGui::Text("Lights (Total: %u)", numLights);
                 ImGui::Separator();
 
@@ -627,6 +628,87 @@ void EngineLoop::DrawEngineStats(EngineStatsSingleton* stats)
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Input Info"))
+            {
+                ImGui::Spacing();
+
+                InputManager* inputManager = ServiceLocator::GetInputManager();
+
+                const std::vector<KeybindGroup*> keybindGroups = inputManager->GetKeybindGroups();
+
+                u32 numKeybindGroups = static_cast<u32>(keybindGroups.size());
+                u32 numActiveKeybindGroups = 0;
+                u32 numInactiveKeybindGroups = 0;
+
+                for (u32 i = 0; i < numKeybindGroups; i++)
+                {
+                    KeybindGroup* keybindGroup = keybindGroups[i];
+                    if (!keybindGroup->IsActive())
+                        continue;
+
+                    numActiveKeybindGroups++;
+                }
+
+                numInactiveKeybindGroups = numKeybindGroups - numActiveKeybindGroups;
+                ImGui::Text("Keybind Groups (Total: %u, Active: %u, Inactive: %u)", numKeybindGroups, numActiveKeybindGroups, numInactiveKeybindGroups);
+                ImGui::Separator();
+
+                ImGui::Text("Input Consumed Information");
+
+                auto& mouseInputConsumeInfo = inputManager->GetMouseInputConsumeInfo();
+                auto& mousePositionConsumeInfo = inputManager->GetMousePositionConsumeInfo();
+                auto& mouseScrollConsumeInfo = inputManager->GetMouseScrollConsumeInfo();
+                auto& keyboardInputConsumeInfo = inputManager->GetKeyboardInputConsumeInfo();
+                auto& unicodeInputConsumeInfo = inputManager->GetUnicodeInputConsumeInfo();
+
+                ImGui::Text("- Mouse Input: (Group: %s, Keybind: %s)", mouseInputConsumeInfo.keybindGroupName->c_str(), mouseInputConsumeInfo.keybindName->c_str());
+                ImGui::Text("- Mouse Position: (Group: %s, Keybind: %s)", mousePositionConsumeInfo.keybindGroupName->c_str(), mousePositionConsumeInfo.keybindName->c_str());
+                ImGui::Text("- Mouse Scroll: (Group: %s, Keybind: %s)", mouseScrollConsumeInfo.keybindGroupName->c_str(), mouseScrollConsumeInfo.keybindName->c_str());
+                ImGui::Text("- Keyboard Input: (Group: %s, Keybind: %s)", keyboardInputConsumeInfo.keybindGroupName->c_str(), keyboardInputConsumeInfo.keybindName->c_str());
+                ImGui::Text("- Unicode Input: (Group: %s, Keybind: %s)", unicodeInputConsumeInfo.keybindGroupName->c_str(), unicodeInputConsumeInfo.keybindName->c_str());
+
+                ImGui::Separator();
+
+                if (numActiveKeybindGroups)
+                {
+                    ImGui::Text("Active Keybind Groups");
+
+                    for (u32 i = 0; i < numKeybindGroups; i++)
+                    {
+                        KeybindGroup* keybindGroup = keybindGroups[i];
+                        if (!keybindGroup->IsActive())
+                            continue;
+
+                        const std::vector<KeybindGroup::Keybind*>& keybinds = keybindGroup->GetKeybinds();
+                        u32 numKeybinds = static_cast<u32>(keybinds.size());
+
+                        ImGui::Text("- %s (Priority: %u, Keybinds: %u)", keybindGroup->GetDebugName().c_str(), keybindGroup->GetPriority(), numKeybinds);
+                    }
+                    
+                    ImGui::Separator();
+                }
+
+                if (numInactiveKeybindGroups)
+                {
+                    ImGui::Text("Inactive Keybind Groups");
+
+                    for (u32 i = 0; i < numKeybindGroups; i++)
+                    {
+                        KeybindGroup* keybindGroup = keybindGroups[i];
+                        if (keybindGroup->IsActive())
+                            continue;
+
+                        const std::vector<KeybindGroup::Keybind*>& keybinds = keybindGroup->GetKeybinds();
+                        u32 numKeybinds = static_cast<u32>(keybinds.size());
+
+                        ImGui::Text("- %s (Priority: %u, Keybinds: %u)", keybindGroup->GetDebugName().c_str(), keybindGroup->GetPriority(), numKeybinds);
+                    }
+                    
+                    ImGui::Separator();
+                }
+
+                ImGui::EndTabItem();
+            }
             if (ImGui::BeginTabItem("Position"))
             {
                 ImGui::Spacing();

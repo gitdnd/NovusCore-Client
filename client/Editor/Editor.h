@@ -5,7 +5,6 @@
 #include <InputManager.h>
 
 class Window;
-class Keybind;
 class DebugRenderer;
 
 namespace Terrain

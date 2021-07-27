@@ -22,13 +22,13 @@ void CameraFreeLook::Init()
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("CameraFreeLook", 10);
 
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Upwards", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook : Downwards", GLFW_KEY_LEFT_CONTROL, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("CameraFreeLook ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [this](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("Upwards", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("Downwards", GLFW_KEY_LEFT_CONTROL, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddKeyboardCallback("ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [this](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -51,7 +51,7 @@ void CameraFreeLook::Init()
     
         return true;
     });
-    keybindGroup->AddKeyboardCallback("CameraFreeLook Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [this, inputManager](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [this, inputManager](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -165,27 +165,27 @@ void CameraFreeLook::Update(f32 deltaTime, float fovInDegrees, float aspectRatio
     f32 speed = CVAR_CameraSpeed.GetFloat();
 
     // Movement
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Forward"_h))
+    if (keybindGroup->IsKeybindPressed("Forward"_h))
     {
         _position += _front * speed * deltaTime;
     }
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Backward"_h))
+    if (keybindGroup->IsKeybindPressed("Backward"_h))
     {
         _position -= _front * speed * deltaTime;
     }
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Left"_h))
+    if (keybindGroup->IsKeybindPressed("Left"_h))
     {
         _position += _left * speed * deltaTime;
     }
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Right"_h))
+    if (keybindGroup->IsKeybindPressed("Right"_h))
     {
         _position -= _left * speed * deltaTime;
     }
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Upwards"_h))
+    if (keybindGroup->IsKeybindPressed("Upwards"_h))
     {
         _position += worldUp * speed * deltaTime;
     }
-    if (keybindGroup->IsKeybindPressed("CameraFreeLook : Downwards"_h))
+    if (keybindGroup->IsKeybindPressed("Downwards"_h))
     {
         _position -= worldUp * speed * deltaTime;
     }
