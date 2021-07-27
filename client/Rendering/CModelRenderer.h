@@ -89,6 +89,7 @@ public:
 
         u32 objectID;
         std::string debugName = "";
+        bool failedToLoad = false;
 
         u32 cullingDataID = std::numeric_limits<u32>().max();
         u32 numBones = 0;

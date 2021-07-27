@@ -11,17 +11,18 @@ struct TextureUnit
     uint padding;
 };
 
-struct Constants
-{
-    uint isTransparent;
-};
-
 [[vk::binding(9, PER_PASS)]] StructuredBuffer<TextureUnit> _textureUnits;
 [[vk::binding(10, PER_PASS)]] SamplerState _sampler;
 [[vk::binding(11, PER_PASS)]] Texture2D<float4> _ambientOcclusion;
 [[vk::binding(12, PER_PASS)]] Texture2D<float4> _textures[4096];
 
+#if COLOR_PASS
+struct Constants
+{
+    uint isTransparent;
+};
 [[vk::push_constant]] Constants _constants;
+#endif
 
 enum PixelShaderID
 {
@@ -267,7 +268,6 @@ PSOutput main(PSInput input)
     float4 color = float4(0, 0, 0, 0);
     float3 specular = float3(0, 0, 0);
     bool isUnlit = false;
-    bool isTransparent = _constants.isTransparent;
 
     PSOutput output;
 
@@ -307,7 +307,9 @@ PSOutput main(PSInput input)
     }
 
 #if COLOR_PASS
+    bool isTransparent = _constants.isTransparent;
     float ambientOcclusion = 1.0f;
+
     if (!isTransparent)
     {
         ambientOcclusion = _ambientOcclusion.Load(float3(input.position.xy, 0)).x;

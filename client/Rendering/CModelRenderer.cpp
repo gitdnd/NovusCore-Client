@@ -255,11 +255,6 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
             // Render targets
             pipelineDesc.depthStencil = data.depth;
 
-            struct Constants
-            {
-                u32 isTransparent;
-            };
-
             if (cullingEnabled && !lockFrustum)
             {
                 Camera* camera = ServiceLocator::GetCamera();
@@ -566,10 +561,6 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 _passDescriptorSet.Bind("_instances", _instanceBuffer);
                 _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                Constants* constants = graphResources.FrameNew<Constants>();
-                constants->isTransparent = false;
-                commandList.PushConstant(constants, 0, sizeof(Constants));
 
                 commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
 
@@ -912,7 +903,6 @@ void CModelRenderer::ExecuteLoad()
                     {
                         modelID = static_cast<u32>(loadedComplexModels.size());
                         complexModel = &loadedComplexModels.emplace_back();
-                        
                     });
 
                     nameHashToIndexMap[modelToBeLoaded.nameHash] = modelID;
@@ -932,7 +922,17 @@ void CModelRenderer::ExecuteLoad()
             if (shouldLoad)
             {
                 complexModel->objectID = modelID;
-                LoadComplexModel(modelToBeLoaded, *complexModel);
+                if (!LoadComplexModel(modelToBeLoaded, *complexModel))
+                {
+                    complexModel->failedToLoad = true;
+                    DebugHandler::PrintError("Failed to load Complex Model: %s", complexModel->debugName.c_str());
+                }
+            }
+
+            if (complexModel->failedToLoad)
+            {
+                DebugHandler::PrintWarning("Failed to Add Instance of Complex Model: %s", complexModel->debugName.c_str());
+                continue;
             }
 
             // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
@@ -1118,7 +1118,11 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
 
     complexModel.debugName = modelPath;
 
+    // This needs to run before LoadFile until we have a proper fix for LoadFile failing
+    AnimationModelInfo& animationModelInfo = _animationModelInfo.EmplaceBack();
+
     CModel::ComplexModel cModel;
+    cModel.name = complexModel.debugName.data();
     fs::path modelTexturePath = "Data/extracted/Textures/" + modelPath;
     if (!LoadFile(modelPath, cModel))
         return false;
@@ -1128,7 +1132,6 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
     entt::registry* registry = ServiceLocator::GetGameRegistry();
     TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
 
-    AnimationModelInfo& animationModelInfo = _animationModelInfo.EmplaceBack();
 
     // Add Sequences
     {
@@ -1477,7 +1480,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     cModelFile.Close();
 
     if (!cModelBuffer.Get(cModel.header))
+    {
+        DebugHandler::PrintFatal("Failed to load Header for Complex Model: %s", cModel.name);
         return false;
+    }
 
     if (cModel.header.typeID != CModel::COMPLEX_MODEL_TOKEN)
     {
@@ -1497,13 +1503,19 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     }
 
     if (!cModelBuffer.Get(cModel.flags))
+    {
+        DebugHandler::PrintError("Failed to load Flags for Complex Model: %s", cModel.name);
         return false;
+    }
 
     // Read Sequences
     {
         u32 numSequences = 0;
         if (!cModelBuffer.GetU32(numSequences))
+        {
+            DebugHandler::PrintError("Failed to load Sequences for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numSequences > 0)
         {
@@ -1516,7 +1528,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numBones = 0;
         if (!cModelBuffer.GetU32(numBones))
+        {
+            DebugHandler::PrintError("Failed to load Bones for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numBones > 0)
         {
@@ -1527,28 +1542,52 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
                 CModel::ComplexBone& bone = cModel.bones[i];
 
                 if (!cModelBuffer.GetI32(bone.primaryBoneIndex))
+                {
+                    DebugHandler::PrintError("Failed to load Primary Bone Index for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.Get(bone.flags))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Flags for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetI16(bone.parentBoneId))
+                {
+                    DebugHandler::PrintError("Failed to load Parent Bone Id for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetU16(bone.submeshId))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Submesh Id for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!bone.translation.Deserialize(&cModelBuffer))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Translation Track for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!bone.rotation.Deserialize(&cModelBuffer))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Rotation Track for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!bone.scale.Deserialize(&cModelBuffer))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Scale Track for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.Get(bone.pivot))
+                {
+                    DebugHandler::PrintError("Failed to load Bone Pivot for Complex Model: %s", cModel.name);
                     return false;
+                }
             }
         }
     }
@@ -1557,11 +1596,17 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numVertices = 0;
         if (!cModelBuffer.GetU32(numVertices))
+        {
+            DebugHandler::PrintError("Failed to load Vertices for Complex Model: %s", cModel.name);
             return false;
+        }
 
         // If there are no vertices, we don't need to render it
         if (numVertices == 0)
+        {
+            DebugHandler::PrintError("Complex Model has no vertices: %s", cModel.name);
             return false;
+        }
 
         cModel.vertices.resize(numVertices);
         cModelBuffer.GetBytes(reinterpret_cast<u8*>(cModel.vertices.data()), numVertices * sizeof(CModel::ComplexVertex));
@@ -1571,7 +1616,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numTextures = 0;
         if (!cModelBuffer.GetU32(numTextures))
+        {
+            DebugHandler::PrintError("Failed to load Textures for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numTextures > 0)
         {
@@ -1584,7 +1632,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numMaterials = 0;
         if (!cModelBuffer.GetU32(numMaterials))
+        {
+            DebugHandler::PrintError("Failed to load Materials for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numMaterials > 0)
         {
@@ -1597,7 +1648,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numElements = 0;
         if (!cModelBuffer.GetU32(numElements))
+        {
+            DebugHandler::PrintError("Failed to load Texture Index Table for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numElements > 0)
         {
@@ -1610,7 +1664,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numElements = 0;
         if (!cModelBuffer.GetU32(numElements))
+        {
+            DebugHandler::PrintError("Failed to load Texture Unit Table for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numElements > 0)
         {
@@ -1623,7 +1680,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numElements = 0;
         if (!cModelBuffer.GetU32(numElements))
+        {
+            DebugHandler::PrintError("Failed to load Texture Transparency Table for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numElements > 0)
         {
@@ -1636,7 +1696,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     {
         u32 numElements = 0;
         if (!cModelBuffer.GetU32(numElements))
+        {
+            DebugHandler::PrintError("Failed to load Texture Combiner for Complex Model: %s", cModel.name);
             return false;
+        }
 
         if (numElements > 0)
         {
@@ -1648,13 +1711,19 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
     // Read Model Data
     {
         if (!cModelBuffer.Get(cModel.modelData.header))
+        {
+            DebugHandler::PrintError("Failed to load Model Data for Complex Model: %s", cModel.name);
             return false;
+        }
 
         // Read Vertex Lookup Ids
         {
             u32 numElements = 0;
             if (!cModelBuffer.GetU32(numElements))
+            {
+                DebugHandler::PrintError("Failed to Vertex Lookup Table for Complex Model: %s", cModel.name);
                 return false;
+            }
 
             if (numElements > 0)
             {
@@ -1667,7 +1736,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
         {
             u32 numElements = 0;
             if (!cModelBuffer.GetU32(numElements))
+            {
+                DebugHandler::PrintError("Failed to load Indices for Complex Model: %s", cModel.name);
                 return false;
+            }
 
             if (numElements > 0)
             {
@@ -1680,7 +1752,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
         {
             u32 numRenderBatches = 0;
             if (!cModelBuffer.GetU32(numRenderBatches))
+            {
+                DebugHandler::PrintError("Failed to load Renderbatches for Complex Model: %s", cModel.name);
                 return false;
+            }
 
             cModel.modelData.renderBatches.reserve(numRenderBatches);
             for (u32 i = 0; i < numRenderBatches; i++)
@@ -1688,25 +1763,43 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
                 CModel::ComplexRenderBatch& renderBatch = cModel.modelData.renderBatches.emplace_back();
 
                 if (!cModelBuffer.GetU16(renderBatch.groupId))
+                {
+                    DebugHandler::PrintError("Failed to load Renderbatch Group Id for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetU32(renderBatch.vertexStart))
+                {
+                    DebugHandler::PrintError("Failed to load Renderbatch Vertex Start Index for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetU32(renderBatch.vertexCount))
+                {
+                    DebugHandler::PrintError("Failed to load Renderbatch Vertex Count for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetU32(renderBatch.indexStart))
+                {
+                    DebugHandler::PrintError("Failed to load Renderbatch Indices Start Index for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 if (!cModelBuffer.GetU32(renderBatch.indexCount))
+                {
+                    DebugHandler::PrintError("Failed to load Renderbatch Indices Count for Complex Model: %s", cModel.name);
                     return false;
+                }
 
                 // Read Texture Units
                 {
                     u32 numTextureUnits = 0;
                     if (!cModelBuffer.GetU32(numTextureUnits))
+                    {
+                        DebugHandler::PrintError("Failed to load Texture Units for Complex Model: %s", cModel.name);
                         return false;
+                    }
 
                     renderBatch.textureUnits.reserve(numTextureUnits);
 
@@ -1715,28 +1808,52 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
                         CModel::ComplexTextureUnit& textureUnit = renderBatch.textureUnits.emplace_back();
 
                         if (!cModelBuffer.Get(textureUnit.flags))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Flags for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetU16(textureUnit.shaderId))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Shader Id for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetU16(textureUnit.materialIndex))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Material Index for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetU16(textureUnit.materialLayer))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Material Layer for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetU16(textureUnit.textureCount))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Texture Count for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetBytes(reinterpret_cast<u8*>(&textureUnit.textureIndices), textureUnit.textureCount * sizeof(u16)))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Texture Indices for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetBytes(reinterpret_cast<u8*>(&textureUnit.textureUVAnimationIndices), textureUnit.textureCount * sizeof(u16)))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Texture UV Animation Indices for Complex Model: %s", cModel.name);
                             return false;
+                        }
 
                         if (!cModelBuffer.GetU16(textureUnit.textureUnitLookupId))
+                        {
+                            DebugHandler::PrintError("Failed to load Texture Units Texture Unit Table for Complex Model: %s", cModel.name);
                             return false;
+                        }
                     }
                 }
             }
@@ -1745,7 +1862,10 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
 
     // Read Culling Data
     if (!cModelBuffer.GetBytes(reinterpret_cast<u8*>(&cModel.cullingData), sizeof(CModel::CullingData)))
+    {
+        DebugHandler::PrintError("Failed to load Culling Data for Complex Model: %s", cModel.name);
         return false;
+    }
 
     return true;
 }
