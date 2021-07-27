@@ -29,7 +29,7 @@ void CameraFreeLook::Init()
     keybindGroup->AddKeyboardCallback("Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Upwards", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Downwards", GLFW_KEY_LEFT_CONTROL, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [this](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -52,7 +52,7 @@ void CameraFreeLook::Init()
     
         return true;
     });
-    keybindGroup->AddKeyboardCallback("Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [this](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -60,6 +60,8 @@ void CameraFreeLook::Init()
         if (!_captureMouse)
         {
             _captureMouse = true;
+
+            InputManager* inputManager = ServiceLocator::GetInputManager();
             _prevMousePosition = vec2(inputManager->GetMousePositionX(), inputManager->GetMousePositionY());
     
             glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -69,7 +71,7 @@ void CameraFreeLook::Init()
         }
         return true;
     });
-    keybindGroup->AddMousePositionCallback([&](f32 xPos, f32 yPos)
+    keybindGroup->AddMousePositionCallback([this](f32 xPos, f32 yPos)
     {
         if (!IsActive())
             return false;
@@ -107,7 +109,8 @@ void CameraFreeLook::Init()
         KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraFreeLook"_h);
         if (keybindGroup->IsKeybindPressed("Alt"_h))
         {
-            f32 newSpeed = CVAR_CameraSpeed.GetFloat() + (7.1111f * y);
+            f32 currentSpeed = CVAR_CameraSpeed.GetFloat();
+            f32 newSpeed = currentSpeed + ((currentSpeed / 10) * y);
             newSpeed = glm::max(newSpeed, 7.1111f);
             CVAR_CameraSpeed.Set(newSpeed);
 
