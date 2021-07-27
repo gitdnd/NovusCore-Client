@@ -5,7 +5,7 @@
 class CameraOrbital : public Camera
 {
 public:
-    CameraOrbital() : Camera(true) { }
+    CameraOrbital() : Camera() { }
     
     void Init() override;
     void Enabled() override;

@@ -773,7 +773,7 @@ namespace Terrain
             const vec3& oneOverDir = 1.0f / dir;
             vec3 triangleNormal = triangle.GetNormal();
 
-            if (backFaceCulling && glm::dot(triangleNormal, dir) >= 0.0f)
+            if (backFaceCulling && glm::dot(triangleNormal, dir) <= 0.0f)
                 return 0;
 
             return TestSeperationAxes(boxScale, triangle, triangleNormal, dir, oneOverDir, maxDist, outDistToCollision);
@@ -866,10 +866,10 @@ namespace Terrain
             vec3 offsets[5] =
             {
                 {0, 0, 0},
-                {-scale.x, 0, -scale.z},
-                {scale.x, 0, -scale.z},
-                {-scale.x, 0, scale.z},
-                {scale.x, 0, scale.z}
+                {-scale.x, -scale.z, 0},
+                {scale.x, -scale.z, 0},
+                {-scale.x, scale.z, 0},
+                {scale.x, scale.z, 0}
             };
 
 

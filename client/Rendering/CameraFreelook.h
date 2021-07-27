@@ -5,8 +5,8 @@
 class CameraFreeLook : public Camera
 {
 public:
-    CameraFreeLook() : Camera(false) { _position = vec3(0.0f, 0.0f, 0.0f); }
-    CameraFreeLook(const vec3& pos) : Camera(false) { _position = pos; }
+    CameraFreeLook() : Camera() { _position = vec3(0.0f, 0.0f, 0.0f); }
+    CameraFreeLook(const vec3& pos) : Camera() { _position = pos; }
     
     void Init() override;
     void Enabled() override;

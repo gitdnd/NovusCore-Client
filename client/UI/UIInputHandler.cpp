@@ -29,7 +29,7 @@
 
 namespace UIInput
 {
-    bool OnMouseClick(Window* window, std::shared_ptr<Keybind> keybind)
+    bool OnMouseClick(i32 key, KeybindAction action, KeybindModifier modifier)
     {
         ZoneScoped;
         const hvec2 mouse = UIUtils::Transform::WindowPositionToUIPosition(ServiceLocator::GetInputManager()->GetMousePosition());
@@ -45,7 +45,7 @@ namespace UIInput
             dataSingleton.focusedWidget = entt::null;
         }
 
-        if (dataSingleton.draggedWidget != entt::null && keybind->state == GLFW_RELEASE)
+        if (dataSingleton.draggedWidget != entt::null && action == KeybindAction::Release)
         {
             auto [elementInfo, events] = registry->get<UIComponent::ElementInfo, UIComponent::TransformEvents>(dataSingleton.draggedWidget);
             UIUtils::ExecuteEvent(elementInfo.scriptingObject, events.onDragEndedCallback);
@@ -71,7 +71,7 @@ namespace UIInput
             if (lastFocusedWidget == entity || !events.flags)
                 return true;
 
-            if (keybind->state == GLFW_PRESS)
+            if (action == KeybindAction::Press)
             {
                 if (events.IsDraggable())
                 {
@@ -82,15 +82,15 @@ namespace UIInput
                     UIUtils::ExecuteEvent(elementInfo.scriptingObject, events.onDragStartedCallback);
                 }
             }
-            else if (keybind->state == GLFW_RELEASE)
+            else if (action == KeybindAction::Release)
             {
                 if (events.IsFocusable())
                 {
                     dataSingleton.focusedWidget = entity;
-
+            
                     UIUtils::ExecuteEvent(elementInfo.scriptingObject, events.onFocusGainedCallback);
                 }
-
+            
                 if (events.IsClickable())
                 {
                     if (elementInfo.type == UI::ElementType::UITYPE_CHECKBOX)
@@ -113,7 +113,7 @@ namespace UIInput
         return false;
     }
 
-    void OnMousePositionUpdate(Window* window, f32 x, f32 y)
+    bool OnMousePositionUpdate(f32 x, f32 y)
     {
         ZoneScoped;
 
@@ -145,6 +145,8 @@ namespace UIInput
             UIUtils::MarkChildrenDirty(registry, dataSingleton.draggedWidget);
             UIUtils::Transform::UpdateChildPositions(registry, dataSingleton.draggedWidget);
             UIUtils::Collision::MarkBoundsDirty(registry, dataSingleton.draggedWidget);
+
+            return true;
         }
 
         // Handle hover.
@@ -169,9 +171,11 @@ namespace UIInput
 
             break;
         }
+
+        return false;
     }
 
-    bool OnKeyboardInput(Window* window, i32 key, i32 action, i32 modifiers)
+    bool OnKeyboardInput(i32 key, KeybindAction action, KeybindModifier modifiers)
     {
         ZoneScoped;
         entt::registry* registry = ServiceLocator::GetUIRegistry();
@@ -180,7 +184,7 @@ namespace UIInput
         if (dataSingleton.focusedWidget == entt::null)
             return false;
 
-        if (action == GLFW_RELEASE)
+        if (action == KeybindAction::Release)
             return true;
 
         const UIComponent::ElementInfo& elementInfo = registry->get<UIComponent::ElementInfo>(dataSingleton.focusedWidget);
@@ -218,7 +222,7 @@ namespace UIInput
         return true;
     }
 
-    bool OnCharInput(Window* window, u32 unicodeKey)
+    bool OnCharInput(u32 unicodeKey)
     {
         ZoneScoped;
         entt::registry* registry = ServiceLocator::GetUIRegistry();
@@ -242,10 +246,12 @@ namespace UIInput
     void RegisterCallbacks()
     {
         InputManager* inputManager = ServiceLocator::GetInputManager();
-        inputManager->RegisterKeybind("UI Click Checker", GLFW_MOUSE_BUTTON_LEFT, KEYBIND_ACTION_CLICK, KEYBIND_MOD_ANY, std::bind(&OnMouseClick, std::placeholders::_1, std::placeholders::_2));
-        inputManager->RegisterMousePositionCallback("UI Mouse Position Checker", std::bind(&OnMousePositionUpdate, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-        inputManager->RegisterKeyboardInputCallback("UI Keyboard Input Checker"_h, std::bind(&OnKeyboardInput, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-        inputManager->RegisterCharInputCallback("UI Char Input Checker"_h, std::bind(&OnCharInput, std::placeholders::_1, std::placeholders::_2));
+        KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("UI Input", 10);
+
+        keybindGroup->AddKeyboardCallback("Mouse Left", GLFW_MOUSE_BUTTON_LEFT, KeybindAction::Click, KeybindModifier::Any, std::bind(&OnMouseClick, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+        keybindGroup->AddAnyKeyboardCallback("Keyboard Input", std::bind(&OnKeyboardInput, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+        keybindGroup->AddAnyUnicodeCallback(std::bind(&OnCharInput, std::placeholders::_1));
+        keybindGroup->AddMousePositionCallback(std::bind(&OnMousePositionUpdate, std::placeholders::_1, std::placeholders::_2));
 
         // Create mouse group upfront. Reduces hitching from first mouse input.
         auto eventGroup = ServiceLocator::GetUIRegistry()->group<>(entt::get<UIComponent::TransformEvents, UIComponent::ElementInfo, UIComponent::SortKey, UIComponent::Collision, UIComponent::Collidable, UIComponent::Visible, UIComponent::NotCulled>);

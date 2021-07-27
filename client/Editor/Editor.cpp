@@ -13,7 +13,6 @@
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
 #include <CVar/CVarSystem.h>
-#include <InputManager.h>
 #include <GLFW/glfw3.h>
 #include <entt.hpp>
 #include <tracy/Tracy.hpp>
@@ -30,7 +29,10 @@ namespace Editor
     Editor::Editor()
     {
         InputManager* inputManager = ServiceLocator::GetInputManager();
-        inputManager->RegisterKeybind("Editor: Mouse Left Click", GLFW_MOUSE_BUTTON_LEFT, KEYBIND_ACTION_RELEASE, KEYBIND_MOD_NONE | KEYBIND_MOD_SHIFT, std::bind(&Editor::OnMouseClickLeft, this, std::placeholders::_1, std::placeholders::_2));
+        KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Editor", 5);
+        keybindGroup->SetActive(true);
+
+        keybindGroup->AddKeyboardCallback("Mouse Left", GLFW_MOUSE_BUTTON_LEFT, KeybindAction::Press, KeybindModifier::None | KeybindModifier::Shift, std::bind(&Editor::OnMouseClickLeft, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     }
 
     void Editor::Update(f32 deltaTime)
@@ -498,7 +500,7 @@ namespace Editor
         return true;
     }
 
-    bool Editor::OnMouseClickLeft(Window* window, std::shared_ptr<Keybind> keybind)
+    bool Editor::OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!CVAR_EditorEnabled.Get())
             return false;
@@ -526,7 +528,7 @@ namespace Editor
         }
 
         // Shift Click clears selection
-        if (keybind->currentModifierMask & KEYBIND_MOD_SHIFT)
+        if ((modifier & KeybindModifier::Shift) != KeybindModifier::Invalid)
         {
             if (_activeToken != 0)
             {

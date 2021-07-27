@@ -1431,14 +1431,14 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                             textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
                             _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
                         }
-                        else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
+                        /*else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
                         {
                             Renderer::TextureDesc textureDesc;
                             //textureDesc.path = modelTexturePath.replace_filename("SahauginskinBlue.dds").string();
                             //textureDesc.path = modelTexturePath.replace_filename("SnakeSkinBlack.dds").string();
                             textureDesc.path = modelTexturePath.replace_filename("druidcatskinpurple.dds").string();
                             _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                        }
+                        }*/
                     }
                 }
             }

@@ -13,7 +13,6 @@ class DebugRenderer;
 struct RenderResources;
 
 class Window;
-class Keybind;
 class UIRenderer
 {
 public:

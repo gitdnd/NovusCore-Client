@@ -19,24 +19,25 @@
 void SimulateDebugCubeSystem::Init(entt::registry& registry)
 {
     InputManager* inputManager = ServiceLocator::GetInputManager();
+    KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("Debug"_h);
 
-    inputManager->RegisterKeybind("SpawnDebugBox", GLFW_KEY_B, KEYBIND_ACTION_PRESS, KEYBIND_MOD_ANY, [&registry](Window* window, std::shared_ptr<Keybind> keybind)
+    keybindGroup->AddKeyboardCallback("SpawnDebugBox", GLFW_KEY_B, KeybindAction::Press, KeybindModifier::Any, [&registry](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         Camera* camera = ServiceLocator::GetCamera();
-
+    
         // Create ENTT entity
         entt::entity entity = registry.create();
-
+    
         Transform& transform = registry.emplace<Transform>(entity);
         transform.position = camera->GetPosition();
         transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
         transform.isDirty = true;
-
+    
         registry.emplace<Rigidbody>(entity);
         registry.emplace<DebugBox>(entity);
-
+    
         DebugHandler::Print("Spawned debug cube!");
-
+    
         return true;
     });
 }
@@ -62,14 +63,15 @@ void SimulateDebugCubeSystem::Update(entt::registry& registry, DebugRenderer* de
         f32 height = 0;
 
         vec3 distToCollision;
-        if (Terrain::MapUtils::Intersect_AABB_TERRAIN_SWEEP(box, triangle, vec3(0, -1, 0), height, dist, distToCollision))
+        if (Terrain::MapUtils::Intersect_AABB_TERRAIN_SWEEP(box, triangle, vec3(0, 0, -1), height, dist, distToCollision))
         {
             transform.position += distToCollision;
             registry.remove<Rigidbody>(entity);
         }
         else
-            transform.position.y -= dist;
-
+        {
+            transform.position.z -= dist;
+        }
     });
 
     auto debugCubeView = registry.view<Transform, DebugBox>();

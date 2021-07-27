@@ -26,17 +26,29 @@ class Window;
 class Camera
 {
 public:
-    Camera(bool isActive);
+    Camera();
 
-    virtual void Init() = 0;
-    virtual void Enabled() = 0;
-    virtual void Disabled() = 0;
     virtual void Update(f32 deltaTime, float fovInDegrees, float aspectRatioWH) = 0;
 
     void SetWindow(Window* window) { _window = window; }
     Window* GetWindow() { return _window; }
 
-    void SetActive(bool state) { _active = state; }
+    void SetActive(bool state) 
+    { 
+        if (state == _active)
+            return;
+
+        _active = state;
+
+        if (state)
+        {
+            Enabled();
+        }
+        else
+        {
+            Disabled();
+        }
+    }
     bool IsActive() { return _active; }
 
     void SetNearClip(f32 value) { *CVarSystem::Get()->GetFloatCVar("camera.nearClip") = value; }
@@ -78,13 +90,17 @@ public:
     bool GetCapturedMouseMoved() const { return _captureMouseHasMoved; }
 
 protected:
+    virtual void Init() = 0;
+    virtual void Enabled() = 0;
+    virtual void Disabled() = 0;
+
     void UpdateCameraVectors();
     void UpdateFrustumPlanes(const mat4x4& m);
 
 protected:
     Window* _window = nullptr;
 
-    bool _active;
+    bool _active = false;
     f32 _nearClip = 1.0f;
     f32 _farClip = 100000.0f;
 

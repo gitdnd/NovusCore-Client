@@ -2,6 +2,7 @@
 #include <NovusTypes.h>
 #include <Math/Geometry.h>
 #include "NDBC/NDBCEditorHandler.h"
+#include <InputManager.h>
 
 class Window;
 class Keybind;
@@ -43,7 +44,7 @@ namespace Editor
         void ComplexModelSelectionDrawImGui();
 
         bool IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& boundingBox, f32& t);
-        bool OnMouseClickLeft(Window* window, std::shared_ptr<Keybind> keybind);
+        bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
 
         NDBCEditorHandler _ndbcEditorHandler;
     private:

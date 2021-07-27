@@ -39,32 +39,27 @@ u32 DEPTH_PREPASS_RENDER_LAYER = "DepthPrepass"_h; // _h will compiletime hash t
 
 void KeyCallback(GLFWwindow* window, i32 key, i32 scancode, i32 action, i32 modifiers)
 {
-    Window* userWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
-    ServiceLocator::GetInputManager()->KeyboardInputHandler(userWindow, key, scancode, action, modifiers);
+    ServiceLocator::GetInputManager()->KeyboardInputHandler(key, scancode, action, modifiers);
 }
 
 void CharCallback(GLFWwindow* window, u32 unicodeKey)
 {
-    Window* userWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
-    ServiceLocator::GetInputManager()->CharInputHandler(userWindow, unicodeKey);
+    ServiceLocator::GetInputManager()->CharInputHandler(unicodeKey);
 }
 
 void MouseCallback(GLFWwindow* window, i32 button, i32 action, i32 modifiers)
 {
-    Window* userWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
-    ServiceLocator::GetInputManager()->MouseInputHandler(userWindow, button, action, modifiers);
+    ServiceLocator::GetInputManager()->MouseInputHandler(button, action, modifiers);
 }
 
 void CursorPositionCallback(GLFWwindow* window, f64 x, f64 y)
 {
-    Window* userWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
-    ServiceLocator::GetInputManager()->MousePositionHandler(userWindow, static_cast<f32>(x), static_cast<f32>(y));
+    ServiceLocator::GetInputManager()->MousePositionHandler(static_cast<f32>(x), static_cast<f32>(y));
 }
 
 void ScrollCallback(GLFWwindow* window, f64 x, f64 y)
 {
-    Window* userWindow = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
-    ServiceLocator::GetInputManager()->MouseScrollHandler(userWindow, static_cast<f32>(x), static_cast<f32>(y));
+    ServiceLocator::GetInputManager()->MouseScrollHandler(static_cast<f32>(x), static_cast<f32>(y));
 }
 
 void WindowIconifyCallback(GLFWwindow* window, int iconified)

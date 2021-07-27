@@ -3,6 +3,7 @@
 #include <Utils/ByteBuffer.h>
 #include <Utils/StringUtils.h>
 #include <Networking/Opcode.h>
+#include <Window/Window.h>
 #include <InputManager.h>
 #include "../../Utils/ServiceLocator.h"
 #include "../../Utils/MapUtils.h"
@@ -20,67 +21,9 @@
 
 void MovementSystem::Init(entt::registry& registry)
 {
-    InputManager* inputManager = ServiceLocator::GetInputManager();
-
-    inputManager->RegisterKeybind("MovementSystem Forward", GLFW_KEY_W, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE);
-    inputManager->RegisterKeybind("MovementSystem Backward", GLFW_KEY_S, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE);
-    inputManager->RegisterKeybind("MovementSystem Left", GLFW_KEY_A, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE);
-    inputManager->RegisterKeybind("MovementSystem Right", GLFW_KEY_D, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE);
-    inputManager->RegisterKeybind("MovementSystem Jump", GLFW_KEY_SPACE, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE);
-
-    inputManager->RegisterKeybind("MovementSystem Increase Speed", GLFW_KEY_PAGE_UP, KEYBIND_ACTION_PRESS, KEYBIND_MOD_ANY, [](Window* window, std::shared_ptr<Keybind> keybind)
-    {
-        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
-        if (!camera->IsActive())
-            return false;
-
-        entt::registry* registry = ServiceLocator::GetGameRegistry();
-
-        LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
-        if (localplayerSingleton.entity == entt::null)
-            return false;
-
-        Transform& transform = registry->get<Transform>(localplayerSingleton.entity);
-        transform.moveSpeed += 7.1111f;
-
-        return true;
-    });
-    inputManager->RegisterKeybind("MovementSystem Decrease Speed", GLFW_KEY_PAGE_DOWN, KEYBIND_ACTION_PRESS, KEYBIND_MOD_ANY, [](Window* window, std::shared_ptr<Keybind> keybind)
-    {
-        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
-        if (!camera->IsActive())
-            return false;
-
-        entt::registry* registry = ServiceLocator::GetGameRegistry();
-
-        LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
-        if (localplayerSingleton.entity == entt::null)
-            return false;
-
-        Transform& transform = registry->get<Transform>(localplayerSingleton.entity);
-        transform.moveSpeed = glm::max(transform.moveSpeed - 7.1111f, 7.1111f);
-
-        return true;
-    });
-    inputManager->RegisterKeybind("MovementSystem Auto Run", GLFW_KEY_HOME, KEYBIND_ACTION_PRESS, KEYBIND_MOD_ANY, [](Window* window, std::shared_ptr<Keybind> keybind)
-    {
-        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
-        if (!camera->IsActive())
-            return false;
-
-        entt::registry* registry = ServiceLocator::GetGameRegistry();
-
-        LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
-        if (localplayerSingleton.entity == entt::null)
-            return false;
-
-        localplayerSingleton.movementProperties.autoRun = !localplayerSingleton.movementProperties.autoRun;
-        return true;
-    });
-
     LocalplayerSingleton& localplayerSingleton = registry.set<LocalplayerSingleton>();
-    localplayerSingleton.movementProperties.canJump = true;
-    localplayerSingleton.movementProperties.canChangeDirection = true;
+    localplayerSingleton.movement.flags.canJump = true;
+    localplayerSingleton.movement.flags.canChangeDirection = true;
 
     // This allows us to move around in the world "offline" (The server will automatically override this when connecting
     localplayerSingleton.entity = registry.create();
@@ -89,20 +32,62 @@ void MovementSystem::Init(entt::registry& registry)
     Transform& transform = registry.emplace<Transform>(localplayerSingleton.entity);
     transform.position = vec3(-9249.f, 87.f, 79.f);
     transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
+
+    InputManager* inputManager = ServiceLocator::GetInputManager();
+    KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Movement", 0);
+    keybindGroup->SetActive(true);
+
+    keybindGroup->AddKeyboardCallback("Movement : Increase Speed", GLFW_KEY_PAGE_UP, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    {
+        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
+        if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
+            return false;
+    
+        Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
+        transform.moveSpeed += 7.1111f;
+    
+        return true;
+    });
+    keybindGroup->AddKeyboardCallback("Movement : Decrease Speed", GLFW_KEY_PAGE_DOWN, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    {
+        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
+        if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
+            return false;
+    
+        Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
+        transform.moveSpeed = glm::max(transform.moveSpeed - 7.1111f, 7.1111f);
+        return true;
+    });
+    keybindGroup->AddKeyboardCallback("Movement : Auto Run", GLFW_KEY_HOME, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    {
+        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
+        if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
+            return false;
+    
+        localplayerSingleton.movement.flags.autoRun = !localplayerSingleton.movement.flags.autoRun;
+        return true;
+    });
+    
+    keybindGroup->AddKeyboardCallback("Movement : Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Movement : Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Movement : Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Movement : Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("Movement : Jump", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::None, nullptr);
 }
 
 void MovementSystem::Update(entt::registry& registry)
 {
-    LocalplayerSingleton& localplayerSingleton = registry.ctx<LocalplayerSingleton>();
-    if (localplayerSingleton.entity == entt::null)
-        return;
-
     CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
-    if (!camera->IsActive())
+    LocalplayerSingleton& localplayerSingleton = registry.ctx<LocalplayerSingleton>();
+
+    if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
         return;
 
     InputManager* inputManager = ServiceLocator::GetInputManager();
     TimeSingleton& timeSingleton = registry.ctx<TimeSingleton>();
+
+    KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
+    KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
 
     // Here we save our original movement flags to know if we have "changed" direction, and have to update the server, otherwise we can continue sending heartbeats
@@ -115,7 +100,7 @@ void MovementSystem::Update(entt::registry& registry)
     Terrain::MapUtils::GetTriangleFromWorldPosition(transform.position, triangle, terrainHeight);
 
     bool isGrounded = transform.position.z <= terrainHeight;
-    bool isRightClickDown = inputManager->IsKeyPressed("CameraOrbital Right Mouseclick"_h);
+    bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("CameraOrbital : Right Mouse"_h);
     if (isRightClickDown)
     {
         transform.yaw = camera->GetYaw();
@@ -131,17 +116,15 @@ void MovementSystem::Update(entt::registry& registry)
     // Handle Input
     {
         vec3 moveDirection = vec3(0.f, 0.f, 0.f);
-        i8 moveAlongVerticalAxis = 0;
         i8 moveAlongHorizontalAxis = 0;
+        i8 moveAlongVerticalAxis = 0;
         bool isMoving = false;
 
-        moveAlongVerticalAxis += inputManager->IsKeyPressed("MovementSystem Forward"_h);
-        moveAlongVerticalAxis -= inputManager->IsKeyPressed("MovementSystem Backward"_h);
-
-        moveAlongHorizontalAxis += inputManager->IsKeyPressed("MovementSystem Left"_h);
-        moveAlongHorizontalAxis -= inputManager->IsKeyPressed("MovementSystem Right"_h);
-
-        isMoving = moveAlongVerticalAxis + moveAlongHorizontalAxis;
+        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Movement : Left"_h);
+        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Movement : Right"_h);
+        moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Movement : Forward"_h);
+        moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Movement : Backward"_h);
+        isMoving = moveAlongHorizontalAxis + moveAlongVerticalAxis;
 
         // Handle Move Direction
         {
@@ -168,11 +151,11 @@ void MovementSystem::Update(entt::registry& registry)
             }
 
             // JUMP
-            bool isPressingJump = inputManager->IsKeyPressed("MovementSystem Jump"_h);
-            isJumping = isPressingJump && localplayerSingleton.movementProperties.canJump;
+            bool isPressingJump = movementKeybindGroup->IsKeybindPressed("Movement : Jump"_h);;
+            isJumping = isPressingJump && localplayerSingleton.movement.flags.canJump;
 
             // This ensures we have to stop pressing "Move Jump" and press it again to jump
-            localplayerSingleton.movementProperties.canJump = !isPressingJump;
+            localplayerSingleton.movement.flags.canJump = !isPressingJump;
 
             f32 moveDirectionLength = glm::length2(moveDirection);
             if (moveDirectionLength != 0)
@@ -183,7 +166,7 @@ void MovementSystem::Update(entt::registry& registry)
 
         if (isGrounded)
         {
-            localplayerSingleton.movementProperties.canChangeDirection = true;
+            localplayerSingleton.movement.flags.canChangeDirection = true;
             transform.velocity = vec3(0.f, 0.f, 0.f);
             transform.fallSpeed = 19.5f;
 
@@ -204,7 +187,7 @@ void MovementSystem::Update(entt::registry& registry)
                 transform.velocity += transform.up * 8.f;
 
                 // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
-                localplayerSingleton.movementProperties.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
+                localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
             }
         }
         else
@@ -212,9 +195,9 @@ void MovementSystem::Update(entt::registry& registry)
             movementFlags.GROUNDED = false;
 
             // Check if we can change direction
-            if (isMoving && localplayerSingleton.movementProperties.canChangeDirection)
+            if (isMoving && localplayerSingleton.movement.flags.canChangeDirection)
             {
-                localplayerSingleton.movementProperties.canChangeDirection = false;
+                localplayerSingleton.movement.flags.canChangeDirection = false;
 
                 f32 moveSpeed = transform.moveSpeed;
 

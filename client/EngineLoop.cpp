@@ -14,6 +14,7 @@
 #include "Rendering/CameraFreelook.h"
 #include "Rendering/CameraOrbital.h"
 #include "Editor/Editor.h"
+#include "Window/Window.h"
 
 // Loaders
 #include "Loaders/LoaderSystem.h"
@@ -163,6 +164,10 @@ bool EngineLoop::Init()
     _clientRenderer = new ClientRenderer();
     _editor = new Editor::Editor();
 
+    InputManager* inputManager = ServiceLocator::GetInputManager();
+    KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Debug", 0);
+    keybindGroup->SetActive(true);
+
     // Initialize Cameras (Must happen after ClientRenderer is created)
     {
         Window* mainWindow = ServiceLocator::GetWindow();
@@ -172,15 +177,17 @@ bool EngineLoop::Init()
         cameraFreeLook->Init();
         cameraOrbital->Init();
 
+        // Camera Orbital is default active
+        cameraOrbital->SetActive(true);
+
         // Bind Switch Camera Key
-        InputManager* inputManager = ServiceLocator::GetInputManager();
-        inputManager->RegisterKeybind("Switch Camera Mode", GLFW_KEY_C, KEYBIND_ACTION_PRESS, KEYBIND_MOD_NONE, [this, cameraFreeLook, cameraOrbital](Window* window, std::shared_ptr<Keybind> keybind)
+        keybindGroup->AddKeyboardCallback("Debug : Switch Camera Mode", GLFW_KEY_C, KeybindAction::Press, KeybindModifier::Any, [this, cameraFreeLook, cameraOrbital](i32 key, KeybindAction action, KeybindModifier modifier)
         {
             if (cameraFreeLook->IsActive())
             {
                 cameraFreeLook->SetActive(false);
                 cameraFreeLook->Disabled();
-
+        
                 cameraOrbital->SetActive(true);
                 cameraOrbital->Enabled();
             }
@@ -188,11 +195,11 @@ bool EngineLoop::Init()
             {
                 cameraOrbital->SetActive(false);
                 cameraOrbital->Disabled();
-
+        
                 cameraFreeLook->SetActive(true);
                 cameraFreeLook->Enabled();
             }
-
+        
             return true;
         });
     }
