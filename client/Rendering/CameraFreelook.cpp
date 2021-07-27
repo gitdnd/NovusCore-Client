@@ -22,13 +22,14 @@ void CameraFreeLook::Init()
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("CameraFreeLook", 10);
 
+    keybindGroup->AddKeyboardCallback("Alt", GLFW_KEY_LEFT_ALT, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Forward", GLFW_KEY_W, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Backward", GLFW_KEY_S, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Upwards", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::Any, nullptr);
     keybindGroup->AddKeyboardCallback("Downwards", GLFW_KEY_LEFT_CONTROL, KeybindAction::Press, KeybindModifier::Any, nullptr);
-    keybindGroup->AddKeyboardCallback("ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [this](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("ToggleMouseCapture", GLFW_KEY_ESCAPE, KeybindAction::Press, KeybindModifier::Any, [&](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -51,7 +52,7 @@ void CameraFreeLook::Init()
     
         return true;
     });
-    keybindGroup->AddKeyboardCallback("Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [this, inputManager](i32 key, KeybindAction action, KeybindModifier modifier)
+    keybindGroup->AddKeyboardCallback("Right Mouseclick", GLFW_MOUSE_BUTTON_RIGHT, KeybindAction::Click, KeybindModifier::Any, [&](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         if (!IsActive())
             return false;
@@ -68,7 +69,7 @@ void CameraFreeLook::Init()
         }
         return true;
     });
-    keybindGroup->AddMousePositionCallback([this](f32 xPos, f32 yPos)
+    keybindGroup->AddMousePositionCallback([&](f32 xPos, f32 yPos)
     {
         if (!IsActive())
             return false;
@@ -96,6 +97,24 @@ void CameraFreeLook::Init()
         }
 
         return _captureMouse;
+    });
+    keybindGroup->AddMouseScrollCallback([this](f32 x, f32 y) 
+    {
+        if (!IsActive())
+            return false;
+
+        InputManager* inputManager = ServiceLocator::GetInputManager();
+        KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraFreeLook"_h);
+        if (keybindGroup->IsKeybindPressed("Alt"_h))
+        {
+            f32 newSpeed = CVAR_CameraSpeed.GetFloat() + (7.1111f * y);
+            newSpeed = glm::max(newSpeed, 7.1111f);
+            CVAR_CameraSpeed.Set(newSpeed);
+
+            return true;
+        }
+
+        return false;
     });
     
     keybindGroup->AddKeyboardCallback("IncreaseCameraSpeed", GLFW_KEY_PAGE_UP, KeybindAction::Press, KeybindModifier::None, [this](i32 key, KeybindAction action, KeybindModifier modifier)
