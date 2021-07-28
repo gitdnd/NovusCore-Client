@@ -2,6 +2,7 @@
 #include "DebugRenderer.h"
 #include "ClientRenderer.h"
 #include "CModelRenderer.h"
+#include "SortUtils.h"
 
 #include <filesystem>
 #include <Renderer/Renderer.h>
@@ -21,7 +22,7 @@
 #include "../Utils/ServiceLocator.h"
 #include "CVar/CVarSystem.h"
 
-#define PARALLEL_LOADING 0
+#define PARALLEL_LOADING 1
 
 namespace fs = std::filesystem;
 
@@ -29,6 +30,7 @@ AutoCVar_Int CVAR_MapObjectOcclusionCullEnabled("mapObjects.occlusionCullEnable"
 AutoCVar_Int CVAR_MapObjectCullingEnabled("mapObjects.cullEnable", "enable culling of map objects", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_MapObjectLockCullingFrustum("mapObjects.lockCullingFrustum", "lock frustrum for map object culling", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_MapObjectDrawBoundingBoxes("mapObjects.drawBoundingBoxes", "draw bounding boxes for mapobjects", 0, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_MapObjectDeterministicOrder("mapObjects.deterministicOrder", "sort drawcalls by instanceID", 0, CVarFlags::EditCheckbox);
 
 MapObjectRenderer::MapObjectRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
     : _renderer(renderer)
@@ -53,12 +55,12 @@ void MapObjectRenderer::Update(f32 deltaTime)
     if (drawBoundingBoxes)
     {
         // Draw bounding boxes
-        _drawParameters.ReadLock([&](const std::vector<DrawParameters>& drawParameters)
+        _drawCalls.ReadLock([&](const std::vector<DrawCall>& drawCalls)
         {
-            for (u32 i = 0; i < drawParameters.size(); i++)
+            for (u32 i = 0; i < drawCalls.size(); i++)
             {
-                const DrawParameters& drawParameter = drawParameters[i];
-                u32 instanceID = drawParameter.firstInstance;
+                const DrawCall& drawCall = drawCalls[i];
+                u32 instanceID = drawCall.firstInstance;
 
                 const InstanceLookupData& instanceLookupData = _instanceLookupData.ReadGet(instanceID);
 
@@ -87,7 +89,7 @@ void MapObjectRenderer::Update(f32 deltaTime)
     }
 
     // Read back from the culling counter
-    u32 numDrawCalls = static_cast<u32>(_drawParameters.Size());
+    u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
     _numSurvivingDrawCalls = numDrawCalls;
     _numSurvivingTriangles = _numTriangles;
 
@@ -127,6 +129,7 @@ void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGr
 
         const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
         const bool lockFrustum = CVAR_MapObjectLockCullingFrustum.Get();
+        const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
 
         renderGraph->AddPass<MapObjectDepthPrepassData>("MapObject Depth Prepass",
             [=](MapObjectDepthPrepassData& data, Renderer::RenderGraphBuilder& builder) // Setup
@@ -139,70 +142,143 @@ void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGr
             {
                 GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
 
-                u32 drawCount = static_cast<u32>(_drawParameters.Size());
+                u32 drawCount = static_cast<u32>(_drawCalls.Size());
                 if (drawCount == 0)
                     return;
 
                 // -- Cull MapObjects --
                 if (cullingEnabled)
                 {
-                    // Reset the counters
-                    commandList.FillBuffer(_drawCountBuffer, 0, 4, 0);
-                    commandList.FillBuffer(_triangleCountBuffer, 0, 4, 0);
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _drawCountBuffer);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _triangleCountBuffer);
-
-                    // Do culling
-                    Renderer::ComputePipelineDesc pipelineDesc;
-                    graphResources.InitializePipelineDesc(pipelineDesc);
-
-                    Renderer::ComputeShaderDesc shaderDesc;
-                    shaderDesc.path = "mapObjectCulling.cs.hlsl";
-                    pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-                    Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
-                    commandList.BeginPipeline(pipeline);
-
-                    if (!lockFrustum)
+                    // Cull
                     {
-                        Camera* camera = ServiceLocator::GetCamera();
-                        memcpy(_cullingConstantBuffer->resource.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
-                        _cullingConstantBuffer->resource.cameraPos = camera->GetPosition();
-                        _cullingConstantBuffer->resource.maxDrawCount = drawCount;
-                        _cullingConstantBuffer->resource.occlusionEnabled = CVAR_MapObjectOcclusionCullEnabled.Get();
-                        _cullingConstantBuffer->Apply(frameIndex);
+                        // Reset the counters
+                        commandList.FillBuffer(_drawCountBuffer, 0, 4, 0);
+                        commandList.FillBuffer(_triangleCountBuffer, 0, 4, 0);
+
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _drawCountBuffer);
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _triangleCountBuffer);
+
+                        // Do culling
+                        Renderer::ComputePipelineDesc pipelineDesc;
+                        graphResources.InitializePipelineDesc(pipelineDesc);
+
+                        Renderer::ComputeShaderDesc shaderDesc;
+                        shaderDesc.path = "mapObjectCulling.cs.hlsl";
+                        shaderDesc.AddPermutationField("DETERMINISTIC_ORDER", std::to_string((int)deterministicOrder));
+
+                        pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                        Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                        commandList.BeginPipeline(pipeline);
+
+                        if (!lockFrustum)
+                        {
+                            Camera* camera = ServiceLocator::GetCamera();
+                            memcpy(_cullingConstantBuffer->resource.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
+                            _cullingConstantBuffer->resource.cameraPos = camera->GetPosition();
+                            _cullingConstantBuffer->resource.maxDrawCount = drawCount;
+                            _cullingConstantBuffer->resource.occlusionEnabled = CVAR_MapObjectOcclusionCullEnabled.Get();
+                            _cullingConstantBuffer->Apply(frameIndex);
+                        }
+
+                        _cullingDescriptorSet.Bind("_constants", _cullingConstantBuffer->GetBuffer(frameIndex));
+                        _cullingDescriptorSet.Bind("_drawCommands", _argumentBuffer);
+                        _cullingDescriptorSet.Bind("_culledDrawCommands", _culledArgumentBuffer);
+                        _cullingDescriptorSet.Bind("_drawCount", _drawCountBuffer);
+                        _cullingDescriptorSet.Bind("_triangleCount", _triangleCountBuffer);
+                        if (deterministicOrder)
+                        {
+                            _cullingDescriptorSet.Bind("_sortKeys", _sortKeysBuffer);
+                            _cullingDescriptorSet.Bind("_sortValues", _sortValuesBuffer);
+                        }
+
+                        Renderer::SamplerDesc samplerDesc;
+                        samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+
+                        samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+                        samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+                        samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+                        samplerDesc.minLOD = 0.f;
+                        samplerDesc.maxLOD = 16.f;
+                        samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+                        Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
+
+                        _cullingDescriptorSet.Bind("_depthSampler", occlusionSampler);
+                        _cullingDescriptorSet.Bind("_depthPyramid", resources.depthPyramid);
+
+                        commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
+                        commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                        commandList.Dispatch((drawCount + 31) / 32, 1, 1);
+
+                        commandList.EndPipeline(pipeline);
+                    }
+                    
+                    // Sort if they should be deterministic
+                    if (deterministicOrder)
+                    {
+                        commandList.PushMarker("Sort", Color::White);
+
+                        u32 numDraws = static_cast<u32>(_drawCalls.Size());
+
+                        // First we sort our list of keys and values
+                        {
+                            // Barriers
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _culledArgumentBuffer);
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _drawCountBuffer);
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortKeysBuffer);
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortValuesBuffer);
+
+                            SortUtils::SortIndirectCountParams sortParams;
+                            sortParams.maxNumKeys = numDraws;
+                            sortParams.maxThreadGroups = 800; // I am not sure why this is set to 800, but the sample code used this value so I'll go with it
+
+                            sortParams.numKeysBuffer = _drawCountBuffer;
+                            sortParams.keysBuffer = _sortKeysBuffer;
+                            sortParams.valuesBuffer = _sortValuesBuffer;
+
+                            SortUtils::SortIndirectCount(_renderer, graphResources, commandList, frameIndex, sortParams);
+                        }
+
+                        // Then we apply it to our drawcalls
+                        {
+                            commandList.PushMarker("ApplySort", Color::White);
+
+                            // Barriers
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortKeysBuffer);
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortValuesBuffer);
+
+                            Renderer::ComputeShaderDesc shaderDesc;
+                            shaderDesc.path = "mapObjectApplySort.cs.hlsl";
+                            Renderer::ComputePipelineDesc pipelineDesc;
+                            pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                            Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                            commandList.BeginPipeline(pipeline);
+
+                            _sortingDescriptorSet.Bind("_sortValues", _sortValuesBuffer);
+                            _sortingDescriptorSet.Bind("_culledDrawCount", _drawCountBuffer);
+                            _sortingDescriptorSet.Bind("_culledDrawCalls", _culledArgumentBuffer);
+                            _sortingDescriptorSet.Bind("_sortedCulledDrawCalls", _culledSortedArgumentBuffer);
+                            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_sortingDescriptorSet, frameIndex);
+
+                            commandList.Dispatch((numDraws + 31) / 32, 1, 1);
+
+                            commandList.EndPipeline(pipeline);
+
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledSortedArgumentBuffer);
+
+                            commandList.PopMarker();
+                        }
+
+                        commandList.PopMarker();
+                    }
+                    else
+                    {
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledArgumentBuffer);
                     }
 
-                    _cullingDescriptorSet.Bind("_constants", _cullingConstantBuffer->GetBuffer(frameIndex));
-                    _cullingDescriptorSet.Bind("_drawCommands", _argumentBuffer);
-                    _cullingDescriptorSet.Bind("_culledDrawCommands", _culledArgumentBuffer);
-                    _cullingDescriptorSet.Bind("_drawCount", _drawCountBuffer);
-                    _cullingDescriptorSet.Bind("_triangleCount", _triangleCountBuffer);
-
-                    Renderer::SamplerDesc samplerDesc;
-                    samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
-
-                    samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.minLOD = 0.f;
-                    samplerDesc.maxLOD = 16.f;
-                    samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
-
-                    Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
-
-                    _cullingDescriptorSet.Bind("_depthSampler", occlusionSampler);
-                    _cullingDescriptorSet.Bind("_depthPyramid", resources.depthPyramid);
-
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-                    commandList.Dispatch((drawCount + 31) / 32, 1, 1);
-
-                    commandList.EndPipeline(pipeline);
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledArgumentBuffer);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _drawCountBuffer);
                 }
                 else
@@ -250,7 +326,23 @@ void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGr
 
                 commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
 
-                Renderer::BufferID argumentBuffer = (cullingEnabled) ? _culledArgumentBuffer : _argumentBuffer;
+                Renderer::BufferID argumentBuffer;
+                if (cullingEnabled)
+                {
+                    if (deterministicOrder)
+                    {
+                        argumentBuffer = _culledSortedArgumentBuffer;
+                    }
+                    else
+                    {
+                        argumentBuffer = _culledArgumentBuffer;
+                    }
+                }
+                else
+                {
+                    argumentBuffer = _argumentBuffer;
+                }
+                
                 commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
 
                 commandList.EndPipeline(pipeline);
@@ -279,6 +371,7 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
 
         const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
         const bool lockFrustum = CVAR_MapObjectLockCullingFrustum.Get();
+        const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
 
         renderGraph->AddPass<MapObjectPassData>("MapObject Pass",
             [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
@@ -293,7 +386,7 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
 
-            u32 drawCount = static_cast<u32>(_drawParameters.Size());
+            u32 drawCount = static_cast<u32>(_drawCalls.Size());
             if (drawCount == 0)
                 return;
 
@@ -339,7 +432,23 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
 
             commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
 
-            Renderer::BufferID argumentBuffer = (cullingEnabled) ? _culledArgumentBuffer : _argumentBuffer;
+            Renderer::BufferID argumentBuffer;
+            if (cullingEnabled)
+            {
+                if (deterministicOrder)
+                {
+                    argumentBuffer = _culledSortedArgumentBuffer;
+                }
+                else
+                {
+                    argumentBuffer = _culledArgumentBuffer;
+                }
+            }
+            else
+            {
+                argumentBuffer = _argumentBuffer;
+            }
+
             commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
 
             commandList.EndPipeline(pipeline);
@@ -391,86 +500,101 @@ void MapObjectRenderer::ExecuteLoad()
     std::atomic<size_t> numMapObjectsToLoad = 0;
 
     _mapObjectsToBeLoaded.WriteLock([&](std::vector<MapObjectToBeLoaded>& mapObjectsToBeLoaded)
-        {
-            size_t numMapObjectsToBeLoaded = mapObjectsToBeLoaded.size();
+    {
+        size_t numMapObjectsToBeLoaded = mapObjectsToBeLoaded.size();
 
-            _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
+        _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
+        {
+            loadedMapObjects.reserve(numMapObjectsToBeLoaded);
+        });
+
+        _instances.WriteLock([&](std::vector<InstanceData>& instances)
+        {
+            instances.reserve(numMapObjectsToBeLoaded);
+        });
+
+        _instanceLookupData.WriteLock([&](std::vector<InstanceLookupData>& instanceLookupData)
+        {
+            instanceLookupData.reserve(numMapObjectsToBeLoaded);
+        });
+
+        _mapObjectPlacementDetails.WriteLock([&](std::vector<Terrain::PlacementDetails>& mapObjectPlacementDetails)
+        {
+            mapObjectPlacementDetails.reserve(numMapObjectsToBeLoaded);
+        });
+        
+#if PARALLEL_LOADING
+        tf::Taskflow tf;
+        tf.parallel_for(mapObjectsToBeLoaded.begin(), mapObjectsToBeLoaded.end(), [&](MapObjectToBeLoaded& mapObjectToBeLoaded)
+#else
+        for (MapObjectToBeLoaded& mapObjectToBeLoaded : mapObjectsToBeLoaded)
+#endif // PARALLEL_LOAD
+        {
+            ZoneScoped;
+            ZoneText(mapObjectToBeLoaded.nmorName->c_str(), mapObjectToBeLoaded.nmorName->length());
+
+            // Placements reference a path to a MapObject, several placements can reference the same object
+            // Because of this we want only the first load to actually load the object, subsequent loads should just return the id to the already loaded version
+            u32 mapObjectID;
+            LoadedMapObject* mapObject = nullptr;
+
+            bool shouldLoad = false;
+            _nameHashToIndexMap.WriteLock([&](robin_hood::unordered_map<u32, u32>& nameHashToIndexMap)
             {
-                loadedMapObjects.reserve(numMapObjectsToBeLoaded);
+                // See if anything has already loaded this one
+                auto it = nameHashToIndexMap.find(mapObjectToBeLoaded.nmorNameHash);
+                if (it == nameHashToIndexMap.end())
+                {
+                    // If it hasn't, we should load it
+                    shouldLoad = true;
+                        
+                    _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
+                    {
+                        mapObjectID = static_cast<u32>(loadedMapObjects.size());
+                        mapObject = &loadedMapObjects.emplace_back();
+                    });
+
+                    nameHashToIndexMap[mapObjectToBeLoaded.nmorNameHash] = mapObjectID; // And set its index so the next thread to check this will find it
+                }
+                else
+                {
+                    _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
+                    {
+                        mapObject = &loadedMapObjects[it->second];
+                    });
+                }
             });
 
-#if PARALLEL_LOADING
-            tf::Taskflow tf;
-            tf.parallel_for(mapObjectsToBeLoaded.begin(), mapObjectsToBeLoaded.end(), [&](MapObjectToBeLoaded& mapObjectToBeLoaded)
-#else
-            for (MapObjectToBeLoaded& mapObjectToBeLoaded : mapObjectsToBeLoaded)
-#endif // PARALLEL_LOAD
+            std::scoped_lock lock(mapObject->mutex);
+
+            if (shouldLoad)
             {
-                ZoneScoped;
-                ZoneText(mapObjectToBeLoaded.nmorName->c_str(), mapObjectToBeLoaded.nmorName->length());
-
-                // Placements reference a path to a MapObject, several placements can reference the same object
-                // Because of this we want only the first load to actually load the object, subsequent loads should just return the id to the already loaded version
-                u32 mapObjectID;
-                LoadedMapObject* mapObject = nullptr;
-
-                bool shouldLoad = false;
-                _nameHashToIndexMap.WriteLock([&](robin_hood::unordered_map<u32, u32>& nameHashToIndexMap)
+                mapObject->objectID = mapObjectID;
+                if (!LoadMapObject(mapObjectToBeLoaded, *mapObject))
                 {
-                    // See if anything has already loaded this one
-                    auto it = nameHashToIndexMap.find(mapObjectToBeLoaded.nmorNameHash);
-                    if (it == nameHashToIndexMap.end())
-                    {
-                        // If it hasn't, we should load it
-                        shouldLoad = true;
-                        
-                        _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
-                        {
-                            mapObjectID = static_cast<u32>(loadedMapObjects.size());
-                            mapObject = &loadedMapObjects.emplace_back();
-                        });
-
-                        nameHashToIndexMap[mapObjectToBeLoaded.nmorNameHash] = mapObjectID; // And set its index so the next thread to check this will find it
-                    }
-                    else
-                    {
-                        _loadedMapObjects.WriteLock([&](std::vector<LoadedMapObject>& loadedMapObjects)
-                        {
-                            mapObject = &loadedMapObjects[it->second];
-                        });
-                    }
-                });
-
-                std::scoped_lock lock(mapObject->mutex);
-
-                if (shouldLoad)
-                {
-                    mapObject->objectID = mapObjectID;
-                    if (!LoadMapObject(mapObjectToBeLoaded, *mapObject))
-                    {
-                        //_loadedMapObjects.pop_back(); // Is this needed?
+                    //_loadedMapObjects.pop_back(); // Is this needed?
 #if PARALLEL_LOADING
-                        return;
+                    return;
 #else
-                        continue;
+                    continue;
 #endif // PARALLEL_LOADING
-                    }
                 }
-
-                // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
-                Terrain::PlacementDetails& placementDetails = _mapObjectPlacementDetails.EmplaceBack();
-                placementDetails.loadedIndex = mapObjectID;
-
-                // Add placement as an instance here
-                AddInstance(*mapObject, mapObjectToBeLoaded.placement, placementDetails.instanceIndex);
-
-                numMapObjectsToLoad++;
             }
+
+            // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
+            Terrain::PlacementDetails& placementDetails = _mapObjectPlacementDetails.EmplaceBack();
+            placementDetails.loadedIndex = mapObjectID;
+
+            // Add placement as an instance here
+            AddInstance(*mapObject, mapObjectToBeLoaded.placement, placementDetails.instanceIndex);
+
+            numMapObjectsToLoad++;
+        }
 #if PARALLEL_LOADING
-            );
-        tf.wait_for_all();
+        );
+    tf.wait_for_all();
 #endif // PARALLEL_LOADING
-        });
+    });
 
     _mapObjectsToBeLoaded.Clear();
 
@@ -485,11 +609,11 @@ void MapObjectRenderer::ExecuteLoad()
         // Calculate triangles
         _numTriangles = 0;
 
-        _drawParameters.ReadLock([&](const std::vector<DrawParameters>& drawParameters)
+        _drawCalls.ReadLock([&](const std::vector<DrawCall>& drawCalls)
             {
-                for (const DrawParameters& drawParameter : drawParameters)
+                for (const DrawCall& drawCall : drawCalls)
                 {
-                    _numTriangles += drawParameter.indexCount / 3;
+                    _numTriangles += drawCall.indexCount / 3;
                 }
             });
         
@@ -504,7 +628,7 @@ void MapObjectRenderer::Clear()
     _nameHashToIndexMap.Clear();
     _indices.Clear();
     _vertices.Clear();
-    _drawParameters.Clear();
+    _drawCalls.Clear();
     _instances.Clear();
     _instanceLookupData.Clear();
     _materials.Clear();
@@ -1018,34 +1142,32 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
         Terrain::RenderBatch& renderBatch = mapObject.renderBatches[i];
         RenderBatchOffsets& renderBatchOffsets = mapObject.renderBatchOffsets[i];
 
-        u32 drawParameterID;
-        DrawParameters* drawParameter = nullptr;
-
-        _drawParameters.WriteLock([&](std::vector<DrawParameters>& drawParameters)
+        _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
         {
-            drawParameterID = static_cast<u32>(drawParameters.size());
-            drawParameter = &drawParameters.emplace_back();
+            u32 drawCallID = static_cast<u32>(drawCalls.size());
+            DrawCall& drawCall = drawCalls.emplace_back();
+
+            InstanceLookupData& instanceLookupData = _instanceLookupData.EmplaceBack();
+        
+            mapObject.drawCallIDs.push_back(drawCallID);
+
+            drawCall.vertexOffset = renderBatchOffsets.baseVertexOffset;
+            drawCall.firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
+            drawCall.indexCount = renderBatch.indexCount;
+            drawCall.firstInstance = drawCallID;
+            drawCall.instanceCount = 1;
+
+            instanceLookupData.loadedObjectID = mapObject.objectID;
+            instanceLookupData.instanceID = instanceIndex;
+            instanceLookupData.materialParamID = mapObject.materialParameterIDs[i];
+            instanceLookupData.cullingDataID = mapObject.baseCullingDataOffset;
+
+            instanceLookupData.vertexColorTextureID0 = static_cast<u16>(mapObject.vertexColorTextureIDs[0]);
+            instanceLookupData.vertexColorTextureID1 = static_cast<u16>(mapObject.vertexColorTextureIDs[1]);
+            instanceLookupData.vertexOffset = renderBatchOffsets.baseVertexOffset;
+            instanceLookupData.vertexColor1Offset = renderBatchOffsets.baseVertexColor1Offset;
+            instanceLookupData.vertexColor2Offset = renderBatchOffsets.baseVertexColor2Offset;
         });
-
-        mapObject.drawParameterIDs.push_back(drawParameterID);
-
-        drawParameter->vertexOffset = renderBatchOffsets.baseVertexOffset;
-        drawParameter->firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
-        drawParameter->indexCount = renderBatch.indexCount;
-        drawParameter->firstInstance = drawParameterID;
-        drawParameter->instanceCount = 1;
-
-        InstanceLookupData& instanceLookupData = _instanceLookupData.EmplaceBack(); // NOTE: If things load in weird places, investigate this
-        instanceLookupData.loadedObjectID = mapObject.objectID;
-        instanceLookupData.instanceID = instanceIndex;
-        instanceLookupData.materialParamID = mapObject.materialParameterIDs[i];
-        instanceLookupData.cullingDataID = mapObject.baseCullingDataOffset;
-
-        instanceLookupData.vertexColorTextureID0 = static_cast<u16>(mapObject.vertexColorTextureIDs[0]);
-        instanceLookupData.vertexColorTextureID1 = static_cast<u16>(mapObject.vertexColorTextureIDs[1]);
-        instanceLookupData.vertexOffset = renderBatchOffsets.baseVertexOffset;
-        instanceLookupData.vertexColor1Offset = renderBatchOffsets.baseVertexColor1Offset;
-        instanceLookupData.vertexColor2Offset = renderBatchOffsets.baseVertexColor2Offset;
     }
 
     // Load Decorations
@@ -1082,7 +1204,7 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
                 cmodelRenderer->RegisterLoadFromDecoration(modelPath, modelPathHash, translation, rotation, decoration.scale);
             }
 
-            if (placement->doodadSet != 0)
+            if (numDecorationSets > 1 && placement->doodadSet != 0)
             {
                 MapObjectDecorationSet& usedDecorationSet = mapObject.decorationSets[placement->doodadSet];
 
@@ -1130,18 +1252,22 @@ void MapObjectRenderer::CreateBuffers()
     });
     
     
-    _drawParameters.WriteLock([&](std::vector<DrawParameters>& drawParameters)
+    _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
     {
         // Create Indirect Argument buffer
         Renderer::BufferDesc desc;
         desc.name = "MapObjectIndirectArgs";
-        desc.size = sizeof(DrawParameters) * drawParameters.size();
+        desc.size = sizeof(DrawCall) * drawCalls.size();
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
-        _argumentBuffer = _renderer->CreateAndFillBuffer(_argumentBuffer, desc, drawParameters.data(), desc.size);
+        _argumentBuffer = _renderer->CreateAndFillBuffer(_argumentBuffer, desc, drawCalls.data(), desc.size);
 
         // Create Culled Indirect Argument buffer
         desc.name = "MapObjectCulledIndirectArgs";
-        _culledArgumentBuffer = _renderer->CreateAndFillBuffer(_culledArgumentBuffer, desc, drawParameters.data(), desc.size);
+        _culledArgumentBuffer = _renderer->CreateAndFillBuffer(_culledArgumentBuffer, desc, drawCalls.data(), desc.size);
+
+        // Create Culled Sorted Indirect Argument Buffer
+        desc.name = "MapObjectCulledSortedIndirectArgs";
+        _culledSortedArgumentBuffer = _renderer->CreateAndFillBuffer(_culledSortedArgumentBuffer, desc, drawCalls.data(), desc.size);
     });
 
     // Create Vertex buffer
@@ -1214,4 +1340,21 @@ void MapObjectRenderer::CreateBuffers()
 
         _cullingDescriptorSet.Bind("_packedCullingData", _cullingDataBuffer);
     });
+
+    // Create SortKeys and SortValues buffer
+    {
+        u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
+        u32 keysSize = sizeof(u64) * numDrawCalls;
+        u32 valuesSize = sizeof(u32) * numDrawCalls;
+
+        Renderer::BufferDesc desc;
+        desc.name = "MapObjectSortKeys";
+        desc.size = keysSize;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+        _sortKeysBuffer = _renderer->CreateBuffer(_sortKeysBuffer, desc);
+
+        desc.name = "MapObjectSortValues";
+        desc.size = valuesSize;
+        _sortValuesBuffer = _renderer->CreateBuffer(_sortValuesBuffer, desc);
+    }
 }

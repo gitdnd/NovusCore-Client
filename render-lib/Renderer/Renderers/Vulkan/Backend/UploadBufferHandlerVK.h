@@ -40,6 +40,8 @@ namespace Renderer
             void ExecuteStagingBuffer(StagingBuffer& stagingBuffer);
             void WaitForStagingBuffer(StagingBuffer& stagingBuffer);
 
+            void RunSubmitThread();
+
         private:
             RenderDeviceVK* _device;
             BufferHandlerVK* _bufferHandler;

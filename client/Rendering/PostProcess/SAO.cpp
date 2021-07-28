@@ -124,7 +124,7 @@ namespace PostProcess
 
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &data.linearizeDepthDescriptorSet, frameIndex);
 
-            struct Constants
+            /*struct Constants
             {
                 f32 nearPlane;
                 f32 farPlane;
@@ -134,7 +134,7 @@ namespace PostProcess
             constants->nearPlane = params.nearPlane;
             constants->farPlane = params.farPlane;
 
-            commandList.PushConstant(constants, 0, sizeof(Constants));
+            commandList.PushConstant(constants, 0, sizeof(Constants));*/
 
             vec2 resolution = renderer->GetImageDimension(data.linearizedDepthImage, 0);
             uvec2 dispatchCount = ((resolution + vec2(31, 31)) / vec2(32, 32));

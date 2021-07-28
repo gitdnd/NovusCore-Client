@@ -1,3 +1,5 @@
+permutation DETERMINISTIC_ORDER = [0, 1];
+
 #include "globalData.inc.hlsl"
 #include "pyramidCulling.inc.hlsl"
 #include "mapObject.inc.hlsl"
@@ -54,9 +56,13 @@ struct InstanceData
 
 [[vk::binding(7, PER_PASS)]] ConstantBuffer<Constants> _constants;
 
-
 [[vk::binding(8, PER_PASS)]] SamplerState _depthSampler;
 [[vk::binding(9, PER_PASS)]] Texture2D<float> _depthPyramid;
+
+#if DETERMINISTIC_ORDER
+[[vk::binding(10, PER_PASS)]] RWStructuredBuffer<uint64_t> _sortKeys;
+[[vk::binding(11, PER_PASS)]] RWStructuredBuffer<uint> _sortValues;
+#endif // DETERMINISTIC_ORDER
 
 CullingData LoadCullingData(uint instanceIndex)
 {
@@ -174,9 +180,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint outTriangles;
     _triangleCount.InterlockedAdd(0, command.indexCount/3, outTriangles);
-    
+
     uint outIndex;
 	_drawCount.InterlockedAdd(0, 1, outIndex);
     
 	_culledDrawCommands[outIndex] = command;
+
+#if DETERMINISTIC_ORDER
+    // We want to set up sort keys and values so we can sort our drawcalls by firstInstance
+    _sortKeys[outIndex] = command.firstInstance;
+    _sortValues[outIndex] = outIndex;
+#endif // DETERMINISTIC_ORDER
 }

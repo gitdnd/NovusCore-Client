@@ -30,7 +30,7 @@
 #include "../Gameplay/Map/Map.h"
 #include "CVar/CVarSystem.h"
 
-#define PARALLEL_LOADING 0
+#define PARALLEL_LOADING 1
 
 namespace fs = std::filesystem;
 
@@ -874,6 +874,16 @@ void CModelRenderer::ExecuteLoad()
             loadedComplexModels.reserve(numComplexModelsToBeLoaded);
         });
 
+        _animationModelInfo.WriteLock([&](std::vector<AnimationModelInfo>& animationModelInfo)
+        {
+            animationModelInfo.reserve(numComplexModelsToBeLoaded);
+        });
+
+        _complexModelPlacementDetails.WriteLock([&](std::vector<Terrain::PlacementDetails>& complexModelPlacementDetails)
+        {
+            complexModelPlacementDetails.reserve(numComplexModelsToBeLoaded);
+        });
+
 #if PARALLEL_LOADING
         tf::Taskflow tf;
         tf.parallel_for(complexModelsToBeLoaded.begin(), complexModelsToBeLoaded.end(), [&](ComplexModelToBeLoaded& modelToBeLoaded)
@@ -931,11 +941,16 @@ void CModelRenderer::ExecuteLoad()
 
             if (complexModel->failedToLoad)
             {
-                DebugHandler::PrintWarning("Failed to Add Instance of Complex Model: %s", complexModel->debugName.c_str());
+                //DebugHandler::PrintWarning("Failed to Add Instance of Complex Model: %s", complexModel->debugName.c_str());
+
+#if PARALLEL_LOADING
+                return;
+#else // PARALLEL_LOADING
                 continue;
+#endif // PARALLEL_LOADING
             }
 
-            // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
+            // Add Placement Details (This is used to go from a placement to LoadedComplexModel or InstanceData
             Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.EmplaceBack();
             placementDetails.loadedIndex = modelID;
 
@@ -1115,7 +1130,6 @@ void CModelRenderer::CreatePermanentResources()
 bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, LoadedComplexModel& complexModel)
 {
     const std::string& modelPath = *toBeLoaded.name;
-
     complexModel.debugName = modelPath;
 
     // This needs to run before LoadFile until we have a proper fix for LoadFile failing

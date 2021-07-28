@@ -15,6 +15,13 @@ namespace Renderer
 {
     namespace Backend
     {
+        enum BufferStatus : u8
+        {
+            READY, // Ready to be used
+            CLOSED, // Closed and waiting for execution
+            SUBMITTED // Has been executed, but hasn't finished executing
+        };
+
         struct UploadToBufferTask
         {
             BufferID targetBuffer;
@@ -30,6 +37,11 @@ namespace Renderer
             size_t stagingBufferOffset;
         };
 
+        struct SubmitTask
+        {
+            u32 stagingBufferID;
+        };
+
         struct StagingBuffer
         {
             BufferID buffer = BufferID::Invalid();
@@ -39,13 +51,11 @@ namespace Renderer
             moodycamel::ConcurrentQueue<UploadToBufferTask> uploadToBufferTasks;
             moodycamel::ConcurrentQueue<UploadToTextureTask> uploadToTextureTasks;
 
-            bool isFirstThreadToReach = true;
-            
-            std::atomic<bool> isSubmitted = false;
+            std::atomic<BufferStatus> bufferStatus = BufferStatus::READY;
 
-            std::mutex handleLock;
+            std::mutex mutex;
             i32 activeHandles = 0;
-            bool isFull = false;
+            i32 totalHandles = 0;
 
             VkFence fence;
         };
@@ -55,10 +65,11 @@ namespace Renderer
             FrameResource<StagingBuffer, 3> stagingBuffers;
             std::atomic<u32> selectedStagingBuffer = 0;
 
+            moodycamel::ConcurrentQueue<SubmitTask> submitTasks;
+            std::thread submitThread;
+
             bool isDirty = true;
             SemaphoreID uploadFinishedSemaphore;
-
-            std::mutex submitMutex;
         };
 
         void UploadBufferHandlerVK::Init(RenderDeviceVK* device, BufferHandlerVK* bufferHandler, TextureHandlerVK* textureHandler, SemaphoreHandlerVK* semaphoreHandler, CommandListHandlerVK* commandListHandler)
@@ -101,6 +112,8 @@ namespace Renderer
             }
 
             data->uploadFinishedSemaphore = _semaphoreHandler->CreateNSemaphore();
+
+            data->submitThread = std::thread(&UploadBufferHandlerVK::RunSubmitThread, this);
         }
 
         void UploadBufferHandlerVK::ExecuteUploadTasks()
@@ -126,13 +139,8 @@ namespace Renderer
             {
                 StagingBuffer& stagingBuffer = data->stagingBuffers.Get(i);
 
-                if (stagingBuffer.isSubmitted)
+                if (stagingBuffer.bufferStatus == BufferStatus::READY && stagingBuffer.totalHandles > 0)
                 {
-                    WaitForStagingBuffer(stagingBuffer);
-                }
-                else
-                {
-                    //DebugHandler::Print("Executing StagingBuffer %u", i);
                     ExecuteStagingBuffer(commandBuffer, stagingBuffer);
                 }
             }
@@ -149,9 +157,7 @@ namespace Renderer
             for (u32 i = 0; i < data->stagingBuffers.Num; i++)
             {
                 StagingBuffer& stagingBuffer = data->stagingBuffers.Get(i);
-
                 stagingBuffer.allocator.Reset();
-                stagingBuffer.isSubmitted = false;
             }
 
             data->isDirty = false;
@@ -182,33 +188,19 @@ namespace Renderer
 
             // Increment number of active handles
             {
-                std::scoped_lock lock(stagingBuffer.handleLock);
+                std::scoped_lock lock(stagingBuffer.mutex);
                 stagingBuffer.activeHandles++;
-
-                //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
+                stagingBuffer.totalHandles++;
             }
 
+            u16 stagingBufferIDInt = static_cast<StagingBufferID::type>(stagingBufferID);
             std::shared_ptr<UploadBuffer> uploadBuffer(new UploadBuffer(),
-                [&](UploadBuffer* buffer)
+                [&, stagingBufferIDInt](UploadBuffer* buffer)
                 {
                     {
-                        UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
-                        std::scoped_lock submitLock(data->submitMutex); // We need to grab this one before the handelock, even if we then decide not to submit, or we might deadlock
-
-                        std::scoped_lock lock(stagingBuffer.handleLock);
+                        std::scoped_lock lock(stagingBuffer.mutex);
                         // Decrement the number of active handles into this staging buffer
-                        if (--stagingBuffer.activeHandles == 0)
-                        {
-                            //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
-
-                            // If we are the last active handle and the staging buffer is full, execute it
-                            if (stagingBuffer.isFull)
-                            {
-                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
-                                ExecuteStagingBuffer(stagingBuffer);
-                                stagingBuffer.isFull = false;
-                            }
-                        }
+                        stagingBuffer.activeHandles--;
                     }
                     delete buffer;
                 });
@@ -243,34 +235,19 @@ namespace Renderer
 
             // Increment number of active handles
             {
-                std::scoped_lock lock(stagingBuffer.handleLock);
+                std::scoped_lock lock(stagingBuffer.mutex);
                 stagingBuffer.activeHandles++;
-
-                //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
+                stagingBuffer.totalHandles++;
             }
 
+            u16 stagingBufferIDInt = static_cast<StagingBufferID::type>(stagingBufferID);
             std::shared_ptr<UploadBuffer> uploadBuffer(new UploadBuffer(),
-                [&](UploadBuffer* buffer)
+                [&, stagingBufferIDInt](UploadBuffer* buffer)
                 {
                     {
-                        std::scoped_lock lock(stagingBuffer.handleLock);
+                        std::scoped_lock lock(stagingBuffer.mutex);
                         // Decrement the number of active handles into this staging buffer
-                        if (--stagingBuffer.activeHandles == 0)
-                        {
-                            // If we are the last active handle and the staging buffer is full, execute it
-                            if (stagingBuffer.isFull)
-                            {
-                                UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
-
-                                std::scoped_lock submitLock(data->submitMutex);
-
-                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
-                                ExecuteStagingBuffer(stagingBuffer);
-                                stagingBuffer.isFull = false;
-                            }
-                        }
-
-                        //DebugHandler::Print("StagingBuffer %u: %u activeHandles", static_cast<StagingBufferID::type>(stagingBufferID), stagingBuffer.activeHandles);
+                        stagingBuffer.activeHandles--;
                     }
                     delete buffer;
                 });
@@ -299,65 +276,34 @@ namespace Renderer
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
             size_t offset = 0;
 
-            u32 selectedStagingBuffer = data->selectedStagingBuffer;
-
-            StagingBuffer* stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-
             u32 tries = 0;
-
             while (tries < 5)
             {
-                // Try to allocate in the currently selected stagingbuffer
-                if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
+                u32 selectedStagingBuffer = data->selectedStagingBuffer;
+
+                StagingBuffer* stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
+                std::scoped_lock lock(stagingBuffer->mutex);
+
+                if (stagingBuffer->bufferStatus == BufferStatus::READY)
                 {
-                    stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
-                    mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
-                    return offset;
+                    // Try to allocate in the currently selected stagingbuffer
+                    if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
+                    {
+                        stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
+                        mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
+                        return offset;
+                    }
+
+                    // If we got here, close the buffer and create a submit task
+                    stagingBuffer->bufferStatus = BufferStatus::CLOSED;
+
+                    SubmitTask submitTask;
+                    submitTask.stagingBufferID = selectedStagingBuffer;
+
+                    data->submitTasks.enqueue(submitTask);
                 }
 
-                {
-                    std::scoped_lock lock(data->submitMutex);
-
-                    // First thread to reach here should submit it
-                    if (stagingBuffer->isFirstThreadToReach)
-                    {
-                        stagingBuffer->isFirstThreadToReach = false;
-
-                        // If the buffer is full and nobody is currently writing into it, submit it.
-                        // Otherwise it gets submitted when the last writer releases their active handle
-                        {
-                            std::scoped_lock lock(stagingBuffer->handleLock);
-                            stagingBuffer->isFull = true;
-                            if (stagingBuffer->activeHandles == 0)
-                            {
-                                //DebugHandler::Print("Executing StagingBuffer %u", static_cast<StagingBufferID::type>(stagingBufferID));
-                                ExecuteStagingBuffer(*stagingBuffer);
-                            }
-                        }
-
-                        // Get for the next staging buffer
-                        selectedStagingBuffer = (selectedStagingBuffer + 1) % data->stagingBuffers.Num;
-                        data->selectedStagingBuffer = selectedStagingBuffer;
-
-                        stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-
-                        // Wait for it if needed
-                        WaitForStagingBuffer(*stagingBuffer);
-                        stagingBuffer->isFirstThreadToReach = true;
-
-                        {
-                            std::scoped_lock lock(stagingBuffer->handleLock);
-                            stagingBuffer->isFull = false;
-                        }
-                    }
-                    else
-                    {
-                        // Just grab the new stagingbuffer
-                        selectedStagingBuffer = data->selectedStagingBuffer;
-                        stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-                    }
-                }
-
+                data->selectedStagingBuffer = (selectedStagingBuffer + 1) % data->stagingBuffers.Num;
                 tries++;
             }
             
@@ -393,8 +339,6 @@ namespace Renderer
                     _textureHandler->CopyBufferToImage(commandBuffer, srcBuffer, task.stagingBufferOffset, task.targetTexture);
                 }
             }
-
-            stagingBuffer.isSubmitted = true;
         }
 
         void UploadBufferHandlerVK::ExecuteStagingBuffer(StagingBuffer& stagingBuffer)
@@ -420,7 +364,7 @@ namespace Renderer
 
         void UploadBufferHandlerVK::WaitForStagingBuffer(StagingBuffer& stagingBuffer)
         {
-            if (!stagingBuffer.isSubmitted)
+            if (stagingBuffer.bufferStatus != BufferStatus::SUBMITTED)
                 return;
 
             u64 timeout = 5000000000; // 5 seconds in nanoseconds
@@ -432,10 +376,50 @@ namespace Renderer
             }
 
             vkResetFences(_device->_device, 1, &stagingBuffer.fence);
-            stagingBuffer.isSubmitted = false;
 
             // Reset staging buffer
             stagingBuffer.allocator.Reset();
+        }
+
+        void UploadBufferHandlerVK::RunSubmitThread()
+        {
+            UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
+
+            while (true)
+            {
+                std::vector<SubmitTask> delayedSubmitTasks;
+
+                SubmitTask submitTask;
+                while (data->submitTasks.try_dequeue(submitTask))
+                {
+                    StagingBuffer& stagingBuffer = data->stagingBuffers.Get(submitTask.stagingBufferID);
+                    std::scoped_lock lock(stagingBuffer.mutex);
+
+                    // If there are still open handles to this staging buffer, delay it until the next time we check
+                    if (stagingBuffer.activeHandles > 0)
+                    {
+                        delayedSubmitTasks.push_back(submitTask);
+                        continue;
+                    }
+
+                    stagingBuffer.bufferStatus = BufferStatus::SUBMITTED;
+
+                    ExecuteStagingBuffer(stagingBuffer);
+                    WaitForStagingBuffer(stagingBuffer); // TODO: See if we can move this wait later, maybe add waitTasks?
+
+                    stagingBuffer.totalHandles = 0;
+                    stagingBuffer.bufferStatus = BufferStatus::READY;
+                }
+
+                // Push the delayed tasks back into the queue
+                for (SubmitTask& submitTask : delayedSubmitTasks)
+                {
+                    data->submitTasks.enqueue(submitTask);
+                }
+
+                //std::this_thread::sleep_for(std::chrono::microseconds(100));
+                std::this_thread::yield();
+            }
         }
     }
 }

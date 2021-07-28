@@ -72,7 +72,7 @@ class MapObjectRenderer
         std::vector<Mesh> meshes;
     };
 
-    struct DrawParameters
+    struct DrawCall
     {
         u32 indexCount;
         u32 instanceCount;
@@ -123,7 +123,7 @@ public:
         {
             objectID = other.objectID;
             debugName = other.debugName;
-            drawParameterIDs = other.drawParameterIDs;
+            drawCallIDs = other.drawCallIDs;
             materialParameterIDs = other.materialParameterIDs;
             instanceIDs = other.instanceIDs;
             instanceMaterialParameterIDs = other.instanceMaterialParameterIDs;
@@ -142,7 +142,7 @@ public:
         u32 objectID;
         std::string debugName = "";
 
-        std::vector<u32> drawParameterIDs;
+        std::vector<u32> drawCallIDs;
         std::vector<u16> materialParameterIDs;
 
         std::vector<u16> instanceIDs;
@@ -212,7 +212,7 @@ public:
     u32 GetNumMapObjectPlacements() { return static_cast<u32>(_instances.Size()); }
 
     // Drawcall stats
-    u32 GetNumDrawCalls() { return static_cast<u32>(_drawParameters.Size()); }
+    u32 GetNumDrawCalls() { return static_cast<u32>(_drawCalls.Size()); }
     u32 GetNumSurvivingDrawCalls() { return _numSurvivingDrawCalls; }
 
     // Triangle stats
@@ -267,11 +267,12 @@ private:
     Renderer::DescriptorSet _cullingDescriptorSet;
     Renderer::DescriptorSet _passDescriptorSet;
     Renderer::DescriptorSet _meshDescriptorSet;
+    Renderer::DescriptorSet _sortingDescriptorSet;
 
     SafeVector<LoadedMapObject> _loadedMapObjects;
     SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
 
-    SafeVector<DrawParameters> _drawParameters;
+    SafeVector<DrawCall> _drawCalls;
     SafeVector<u16> _indices;
     SafeVector<Terrain::MapObjectVertex> _vertices;
     SafeVector<InstanceData> _instances;
@@ -284,6 +285,7 @@ private:
 
     Renderer::BufferID _argumentBuffer;
     Renderer::BufferID _culledArgumentBuffer;
+    Renderer::BufferID _culledSortedArgumentBuffer;
     Renderer::BufferID _drawCountBuffer;
     Renderer::BufferID _drawCountReadBackBuffer;
     Renderer::BufferID _triangleCountBuffer;
@@ -296,6 +298,8 @@ private:
     Renderer::BufferID _materialBuffer;
     Renderer::BufferID _materialParametersBuffer;
     Renderer::BufferID _cullingDataBuffer;
+    Renderer::BufferID _sortKeysBuffer;
+    Renderer::BufferID _sortValuesBuffer;
 
     Renderer::TextureArrayID _mapObjectTextures;
 
