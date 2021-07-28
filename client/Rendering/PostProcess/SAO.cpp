@@ -16,8 +16,6 @@ namespace PostProcess
         Renderer::DescriptorSet downsampleDepthDescriptorSet;
         Renderer::DescriptorSet rawAODescriptorSet;
         Renderer::DescriptorSet blurDescriptorSet;
-
-        Renderer::SamplerID sampler;
     };
 
     ISAOData* SAO::_data = new SAOData();
@@ -44,18 +42,6 @@ namespace PostProcess
         imageDesc.mipLevels = NUM_MIP_LEVELS;
         imageDesc.debugName = "SAOLinearDepth";
         data.linearizedDepthImage = renderer->CreateImage(imageDesc);
-
-        Renderer::SamplerDesc samplerDesc;
-        samplerDesc.enabled = true;
-        samplerDesc.filter = Renderer::SamplerFilter::MIN_MAG_MIP_LINEAR;
-        samplerDesc.addressU = Renderer::TextureAddressMode::WRAP;
-        samplerDesc.addressV = Renderer::TextureAddressMode::WRAP;
-        samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-        samplerDesc.minLOD = 0.f;
-        samplerDesc.maxLOD = 16.f;
-        samplerDesc.shaderVisibility = Renderer::ShaderVisibility::PIXEL;
-        
-        data.sampler = renderer->CreateSampler(samplerDesc);
     }
 
     void SAO::CalculateSAO(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, u32 frameIndex, const Params& params)
@@ -118,7 +104,6 @@ namespace PostProcess
             Renderer::ComputePipelineID pipeline = renderer->CreatePipeline(pipelineDesc);
             commandList.BeginPipeline(pipeline);
 
-            data.linearizeDepthDescriptorSet.Bind("_sampler", data.sampler);
             data.linearizeDepthDescriptorSet.Bind("_depth", params.depth);
             data.linearizeDepthDescriptorSet.BindStorage("_linearDepth", data.linearizedDepthImage);
 

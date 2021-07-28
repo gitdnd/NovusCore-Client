@@ -8,9 +8,8 @@
 
 [[vk::push_constant]] Constants _constants;*/
 
-[[vk::binding(0, PER_PASS)]] SamplerState _sampler;
-[[vk::binding(1, PER_PASS)]] Texture2D<float> _depth;
-[[vk::binding(2, PER_PASS)]] RWTexture2D<float> _linearDepth;
+[[vk::binding(0, PER_PASS)]] Texture2D<float> _depth;
+[[vk::binding(1, PER_PASS)]] RWTexture2D<float> _linearDepth;
 
 /*float LinearDepth(float depth)
 {
@@ -34,7 +33,7 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 	}
 	
 	float2 uv = pixelPos / dimensions;
-	float depth = _depth.SampleLevel(_sampler, uv, 0);
+	float depth = _depth.Load(float3(pixelPos, 0));
 
 	// Not needed? o_O
 	//float linearDepth = LinearDepth(depth);
