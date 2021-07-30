@@ -1,4 +1,5 @@
 permutation COLOR_PASS = [0, 1];
+permutation EDITOR_PASS = [0, 1];
 
 #include "globalData.inc.hlsl"
 #include "mapObject.inc.hlsl"
@@ -83,7 +84,7 @@ Vertex UnpackVertex(PackedVertex packedVertex)
     vertex.position = UnpackPosition(packedVertex);
     vertex.uv = UnpackUVs(packedVertex);
 
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     vertex.normal = UnpackNormal(packedVertex);
 #endif
     
@@ -96,7 +97,7 @@ Vertex LoadVertex(uint vertexID, uint vertexColor0Offset, uint vertexColor1Offse
     
     Vertex vertex = UnpackVertex(packedVertex);
 
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     // vertexMeshOffset refers to the offset into the global vertices list where the mesh that this vertex is part of starts
     // localVertexOffset refers to the local vertex id, if the mesh starts at 300 and vertexID is 303, the localVertexOffset is 3
     uint localVertexOffset = vertexID - vertexMeshOffset;
@@ -129,6 +130,7 @@ struct VSInput
 
 struct VSOutput
 {
+#if !EDITOR_PASS
     float4 position : SV_Position;
     uint materialParamID : TEXCOORD0;
     float4 uv01 : TEXCOORD1;
@@ -137,6 +139,11 @@ struct VSOutput
     float4 color0 : TEXCOORD3;
     float4 color1 : TEXCOORD4;
     uint instanceLookupID : TEXCOORD5;
+#endif
+#endif
+
+#if EDITOR_PASS
+    float4 position : SV_Position;
 #endif
 };
 
@@ -159,6 +166,8 @@ VSOutput main(VSInput input)
     position = mul(position, instanceData.instanceMatrix);
 
     output.position = mul(position, _viewData.viewProjectionMatrix);
+
+#if !EDITOR_PASS
     output.materialParamID = materialParamID;
     output.uv01 = vertex.uv;
 
@@ -167,6 +176,7 @@ VSOutput main(VSInput input)
     output.color0 = vertex.color0;
     output.color1 = vertex.color1;
     output.instanceLookupID = input.instanceID;
+#endif
 #endif
 
     return output;

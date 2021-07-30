@@ -13,6 +13,7 @@ CameraFreeLook* ServiceLocator::_cameraFreeLook = nullptr;
 CameraOrbital* ServiceLocator::_cameraOrbital = nullptr;
 Renderer::Renderer* ServiceLocator::_renderer = nullptr;
 SceneManager* ServiceLocator::_sceneManager = nullptr;
+Editor::Editor* ServiceLocator::_editor = nullptr;
 
 moodycamel::ConcurrentQueue<Message>* ServiceLocator::_mainInputQueue = nullptr;
 
@@ -87,4 +88,10 @@ void ServiceLocator::SetSceneManager(SceneManager* sceneManager)
 {
     assert(_sceneManager == nullptr);
     _sceneManager = sceneManager;
+}
+
+void ServiceLocator::SetEditor(Editor::Editor* editor)
+{
+    assert(_editor == nullptr);
+    _editor = editor;
 }

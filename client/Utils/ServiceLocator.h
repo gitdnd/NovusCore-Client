@@ -12,6 +12,10 @@ class Camera;
 class CameraFreeLook;
 class CameraOrbital;
 class SceneManager;
+namespace Editor
+{
+    class Editor;
+}
 namespace Renderer
 {
     class Renderer;
@@ -92,6 +96,12 @@ public:
         return _sceneManager;
     }
     static void SetSceneManager(SceneManager* sceneManager);
+    static Editor::Editor* GetEditor()
+    {
+        assert(_editor != nullptr);
+        return _editor;
+    }
+    static void SetEditor(Editor::Editor* editor);
 
 private:
     ServiceLocator() { }
@@ -107,4 +117,5 @@ private:
     static moodycamel::ConcurrentQueue<Message>* _mainInputQueue;
     static Renderer::Renderer* _renderer;
     static SceneManager* _sceneManager;
+    static Editor::Editor* _editor;
 };

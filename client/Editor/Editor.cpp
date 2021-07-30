@@ -160,17 +160,6 @@ namespace Editor
                         }
 
                         TerrainSelectionDrawImGui();
-
-                        debugRenderer->DrawAABB3D(_selectedTerrainData.boundingBox.min, _selectedTerrainData.boundingBox.max, 0xFF0000FF);
-                        for (auto& triangle : _selectedTerrainData.triangles)
-                        {
-                            f32 steepnessAngle = triangle.GetSteepnessAngle();
-                            u32 color = steepnessAngle <= 50 ? 0xff00ff00 : 0xff0000ff;
-
-                            debugRenderer->DrawLine3D(triangle.vert1, triangle.vert2, color);
-                            debugRenderer->DrawLine3D(triangle.vert2, triangle.vert3, color);
-                            debugRenderer->DrawLine3D(triangle.vert3, triangle.vert1, color);
-                        }
                     }
                     else if (pixelData.type == QueryObjectType::MapObject)
                     {
@@ -224,6 +213,9 @@ namespace Editor
                             // Transform to min/max box representation
                             _selectedMapObjectData.boundingBox.min = transformedCenter - transformedExtents;
                             _selectedMapObjectData.boundingBox.max = transformedCenter + transformedExtents;
+
+                            _selectedMapObjectData.numRenderBatches = static_cast<u32>(loadedMapObject.renderBatches.size());
+                            _selectedMapObjectData.selectedRenderBatch = 1;
                         }
 
                         MapObjectSelectionDrawImGui();
@@ -245,7 +237,9 @@ namespace Editor
                             _selectedComplexModelData.drawCallDataID = pixelData.value;
                             _selectedComplexModelData.instanceID = drawCallData.instanceID;
 
-                            const mat4x4& instanceMatrix = cModelRenderer->GetInstances().ReadGet(drawCallData.instanceID).instanceMatrix;
+                            const CModelRenderer::Instance& instance = cModelRenderer->GetInstances().ReadGet(drawCallData.instanceID);
+                            const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(instance.modelId);
+                            const mat4x4& instanceMatrix = instance.instanceMatrix;
                             const CModel::CullingData& cullingData = cModelRenderer->GetCullingData().ReadGet(drawCallData.cullingDataID);
                             vec3 minBoundingBox = cullingData.minBoundingBox;
                             vec3 maxBoundingBox = cullingData.maxBoundingBox;
@@ -263,6 +257,9 @@ namespace Editor
                             // Transform to min/max box representation
                             _selectedComplexModelData.boundingBox.min = transformedCenter - transformedExtents;
                             _selectedComplexModelData.boundingBox.max = transformedCenter + transformedExtents;
+
+                            _selectedComplexModelData.numRenderBatches = isOpaque ? loadedComplexModel.numOpaqueDrawCalls : loadedComplexModel.numTransparentDrawCalls;
+                            _selectedComplexModelData.selectedRenderBatch = 1;
                         }
 
                         ComplexModelSelectionDrawImGui();
@@ -294,6 +291,18 @@ namespace Editor
             _ndbcEditorHandler.DrawImGuiMenuBar();
 
             ImGui::EndMenu();
+        }
+    }
+
+    void Editor::ClearSelection()
+    {
+        if (_activeToken != 0)
+        {
+            ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+            PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+            pixelQuery->FreeToken(_activeToken);
+            _activeToken = 0;
         }
     }
 
@@ -352,6 +361,13 @@ namespace Editor
                 
             ImGui::BulletText("Texture %u: Unused", i);
         }
+
+        ImGui::Separator();
+        bool showRenderOptions = ImGui::CollapsingHeader("Render Options");
+        if (showRenderOptions)
+        {
+            ImGui::Checkbox("Draw Wireframe", &_selectedTerrainData.drawWireframe);
+        }
     }
 
     void Editor::MapObjectSelectionDrawImGui()
@@ -382,6 +398,26 @@ namespace Editor
         ImGui::Text("Position: X: %.2f, Y: %.2f, Z: %.2f", translation.x, translation.y, translation.z);
         ImGui::Text("Scale: X: %.2f, Y: %.2f, Z: %.2f", scale.x, scale.y, scale.z);
         ImGui::Text("Rotation: X: %.2f, Y: %.2f, Z: %.2f", eulerAsDeg.x, eulerAsDeg.y, eulerAsDeg.z);
+        if (_selectedMapObjectData.numRenderBatches)
+        {
+            ImGui::Separator();
+
+            bool showRenderOptions = ImGui::CollapsingHeader("Render Options");
+            if (showRenderOptions)
+            {
+                ImGui::Text("Render Batch (%i/%u)", _selectedMapObjectData.selectedRenderBatch, _selectedMapObjectData.numRenderBatches);
+                if (ImGui::InputInt("##", &_selectedMapObjectData.selectedRenderBatch, 1, 1))
+                {
+                    i32 minValue = 1;
+                    i32 maxValue = static_cast<i32>(_selectedMapObjectData.numRenderBatches);
+
+                    _selectedMapObjectData.selectedRenderBatch = glm::clamp(_selectedMapObjectData.selectedRenderBatch, minValue, maxValue);
+                }
+
+                ImGui::Checkbox("Draw Wireframe", &_selectedMapObjectData.drawWireframe);
+                ImGui::Checkbox("Wireframe Entire Object", &_selectedMapObjectData.wireframeEntireObject);
+            }
+        }
     }
 
     void Editor::ComplexModelSelectionDrawImGui()
@@ -475,6 +511,26 @@ namespace Editor
                     }
                 }
             }
+
+            if (_selectedComplexModelData.numRenderBatches)
+            {
+                ImGui::Separator();
+                bool showRenderOptions = ImGui::CollapsingHeader("Render Options");
+                if (showRenderOptions)
+                {
+                    ImGui::Text("Render Batch (%i/%u)", _selectedComplexModelData.selectedRenderBatch, _selectedComplexModelData.numRenderBatches);
+                    if (ImGui::InputInt("##", &_selectedComplexModelData.selectedRenderBatch, 1, 1))
+                    {
+                        i32 minValue = 1;
+                        i32 maxValue = static_cast<i32>(_selectedComplexModelData.numRenderBatches);
+
+                        _selectedComplexModelData.selectedRenderBatch = glm::clamp(_selectedComplexModelData.selectedRenderBatch, minValue, maxValue);
+                    }
+
+                    ImGui::Checkbox("Draw Wireframe", &_selectedComplexModelData.drawWireframe);
+                    ImGui::Checkbox("Wireframe Entire Object", &_selectedComplexModelData.wireframeEntireObject);
+                }
+            }
         });
     }
 
@@ -517,8 +573,8 @@ namespace Editor
 
         ZoneScoped;
 
-        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
         InputManager* inputManager = ServiceLocator::GetInputManager();
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
         PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
 
         if (_queriedToken != 0)

@@ -1,7 +1,10 @@
 #include "CModelRenderer.h"
+#include "ClientRenderer.h"
 #include "DebugRenderer.h"
+#include "PixelQuery.h"
 #include "../Utils/ServiceLocator.h"
 #include "../Rendering/CModel/CModel.h"
+#include "../Editor/Editor.h"
 #include "SortUtils.h"
 
 #include <filesystem>
@@ -39,6 +42,7 @@ AutoCVar_Int CVAR_ComplexModelSortingEnabled("complexModels.sortEnable", "enable
 AutoCVar_Int CVAR_ComplexModelLockCullingFrustum("complexModels.lockCullingFrustum", "lock frustrum for complex model culling", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_ComplexModelDrawBoundingBoxes("complexModels.drawBoundingBoxes", "draw bounding boxes for complex models", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_ComplexModelOcclusionCullEnabled("complexModels.occlusionCullEnable", "enable culling of complex models", 1, CVarFlags::EditCheckbox);
+AutoCVar_VecFloat CVAR_ComplexModelWireframeColor("complexModels.wireframeColor", "set the wireframe color for complex models", vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
 constexpr u32 BITONIC_BLOCK_SIZE = 1024;
 const u32 TRANSPOSE_BLOCK_SIZE = 16;
@@ -235,6 +239,7 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "cModel.vs.hlsl";
             vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -619,6 +624,7 @@ void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, Ren
         Renderer::VertexShaderDesc vertexShaderDesc;
         vertexShaderDesc.path = "cModel.vs.hlsl";
         vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+        vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
         pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -821,6 +827,230 @@ void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, Ren
             commandList.PopMarker();
         }
     });
+
+    Editor::Editor* editor = ServiceLocator::GetEditor();
+    if (editor->HasSelectedObject())
+    {
+        u32 activeToken = editor->GetActiveToken();
+
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+        PixelQuery::PixelData pixelData;
+
+        if (pixelQuery->GetQueryResult(activeToken, pixelData))
+        {
+            if (pixelData.type == Editor::QueryObjectType::ComplexModelOpaque || 
+                pixelData.type == Editor::QueryObjectType::ComplexModelTransparent)
+            {
+                const Editor::Editor::SelectedComplexModelData& selectedComplexModelData = editor->GetSelectedComplexModelData();
+                if (selectedComplexModelData.drawWireframe)
+                {
+                    bool isOpaque = pixelData.type == Editor::QueryObjectType::ComplexModelOpaque;
+
+                    u32 drawCallDataID = pixelData.value;
+                    const Editor::Editor::SelectedComplexModelData& selectedComplexModelData = editor->GetSelectedComplexModelData();
+                    AddComplexModelEditorPass(renderGraph, resources, frameIndex, drawCallDataID, isOpaque, selectedComplexModelData.selectedRenderBatch - 1, selectedComplexModelData.wireframeEntireObject);
+                }
+            }
+        }
+    }
+}
+
+void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 drawCallDataID, bool isOpaque, u32 selectedRenderBatch, bool wireframeEntireObject)
+{
+    struct CModelPassData
+    {
+        Renderer::RenderPassMutableResource color;
+        Renderer::RenderPassMutableResource objectIDs;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    // Read back from the culling counters
+    renderGraph->AddPass<CModelPassData>("CModel Pass",
+        [=](CModelPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](CModelPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelPass);
+
+            Renderer::GraphicsPipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
+
+            // Shaders
+            Renderer::VertexShaderDesc vertexShaderDesc;
+            vertexShaderDesc.path = "cModel.vs.hlsl";
+            vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
+
+            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+            Renderer::PixelShaderDesc pixelShaderDesc;
+            pixelShaderDesc.path = "solidColor.ps.hlsl";
+
+            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+            // Depth state
+            pipelineDesc.states.depthStencilState.depthEnable = false;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
+
+            // Rasterizer state
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
+            // Render targets
+            pipelineDesc.renderTargets[0] = data.color;
+            pipelineDesc.renderTargets[1] = data.objectIDs;
+            pipelineDesc.depthStencil = data.depth;
+
+            struct ColorConstant
+            {
+                vec4 value;
+            };
+
+            // Set Opaque Pipeline
+            if (isOpaque)
+            {
+                commandList.PushMarker("Opaque Editor" + std::to_string(selectedRenderBatch), Color::White);
+
+                // Draw
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                _passDescriptorSet.Bind("_packedDrawCallDatas", _opaqueDrawCallDataBuffer);
+                _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
+                _passDescriptorSet.Bind("_textures", _cModelTextures);
+                _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
+                _passDescriptorSet.Bind("_instances", _instanceBuffer);
+                _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
+                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+
+                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+                colorConstant->value = CVAR_ComplexModelWireframeColor.Get();
+                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+                const SafeVector<CModelRenderer::DrawCallData>& drawCallDatas = GetOpaqueDrawCallData();
+                const CModelRenderer::DrawCallData& drawCallData = drawCallDatas.ReadGet(drawCallDataID);
+
+                const CModelRenderer::Instance& instance = _instances.ReadGet(drawCallData.instanceID);
+                const CModelRenderer::LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(instance.modelId);
+
+                u32 numDrawCalls = static_cast<u32>(loadedComplexModel.opaqueDrawCallTemplates.size());
+
+                if (numDrawCalls)
+                {
+                    if (wireframeEntireObject)
+                    {
+                        for (u32 i = 0; i < numDrawCalls; i++)
+                        {
+                            const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[i];
+
+                            u32 vertexOffset = drawCall.vertexOffset;
+                            u32 firstIndex = drawCall.firstIndex;
+                            u32 indexCount = drawCall.indexCount;
+
+                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
+                        }
+                    }
+                    else
+                    {
+                        const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[selectedRenderBatch];
+
+                        u32 vertexOffset = drawCall.vertexOffset;
+                        u32 firstIndex = drawCall.firstIndex;
+                        u32 indexCount = drawCall.indexCount;
+
+                        commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
+                    }
+                }
+
+                commandList.EndPipeline(pipeline);
+
+                commandList.PopMarker();
+            }
+            // Set Transparent Pipeline
+            else
+            {
+                commandList.PushMarker("Transparent " + std::to_string(selectedRenderBatch), Color::White);
+
+                // Draw
+                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+
+                // ColorTarget
+                pipelineDesc.states.blendState.renderTargets[0].blendEnable = true;
+                pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
+                pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::SRC_ALPHA;
+                pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
+
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                _passDescriptorSet.Bind("_packedDrawCallDatas", _transparentDrawCallDataBuffer);
+                _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
+                _passDescriptorSet.Bind("_textures", _cModelTextures);
+                _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
+                _passDescriptorSet.Bind("_instances", _instanceBuffer);
+                _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+
+                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+                colorConstant->value = CVAR_ComplexModelWireframeColor.Get();
+                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+                const SafeVector<CModelRenderer::DrawCallData>& drawCallDatas = GetTransparentDrawCallData();
+                const CModelRenderer::DrawCallData& drawCallData = drawCallDatas.ReadGet(drawCallDataID);
+
+                const CModelRenderer::Instance& instance = _instances.ReadGet(drawCallData.instanceID);
+                const CModelRenderer::LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(instance.modelId);
+
+                u32 numDrawCalls = static_cast<u32>(loadedComplexModel.transparentDrawCallTemplates.size());
+
+                if (numDrawCalls)
+                {
+                    if (wireframeEntireObject)
+                    {
+                        for (u32 i = 0; i < numDrawCalls; i++)
+                        {
+                            const CModelRenderer::DrawCall& drawCall = loadedComplexModel.transparentDrawCallTemplates[i];
+
+                            u32 vertexOffset = drawCall.vertexOffset;
+                            u32 firstIndex = drawCall.firstIndex;
+                            u32 indexCount = drawCall.indexCount;
+
+                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
+                        }
+                    }
+                    else
+                    {
+                        const CModelRenderer::DrawCall& drawCall = loadedComplexModel.transparentDrawCallTemplates[selectedRenderBatch];
+
+                        u32 vertexOffset = drawCall.vertexOffset;
+                        u32 firstIndex = drawCall.firstIndex;
+                        u32 indexCount = drawCall.indexCount;
+
+                        commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
+                    }
+                }
+
+                commandList.EndPipeline(pipeline);
+                commandList.PopMarker();
+            }
+        });
 }
 
 void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable)
@@ -1981,8 +2211,18 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
 
         _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
         {
-            animationBoneInstances.resize(instance->boneInstanceDataOffset);
+            animationBoneInstances.resize(instance->boneInstanceDataOffset + numBones);
         });
+
+        AnimationRequest animationRequest;
+        {
+            animationRequest.instanceId = instanceIndex;
+            animationRequest.sequenceId = 0;
+            animationRequest.flags.isPlaying = true;
+            animationRequest.flags.isLooping = true;
+        }
+
+        _animationRequests.enqueue(animationRequest);
     }
     else
     {

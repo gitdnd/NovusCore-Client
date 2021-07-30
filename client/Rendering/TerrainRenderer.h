@@ -86,6 +86,7 @@ public:
 
     void AddTerrainDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddTerrainEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 cellIndex);
 
     bool LoadMap(const NDBC::Map* map);
 
@@ -99,6 +100,17 @@ public:
     // Triangle stats
     u32 GetNumTriangles() { return Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size()) * Terrain::NUM_TRIANGLES_PER_CELL; }
     u32 GetNumSurvivingTriangles() { return _numSurvivingDrawCalls * Terrain::NUM_TRIANGLES_PER_CELL; }
+
+    u32 GetInstanceIDFromChunkID(u32 chunkID)
+    {
+        auto itr = _chunkIDToInstanceID.find(chunkID);
+        if (itr == _chunkIDToInstanceID.end())
+        {
+            DebugHandler::PrintFatal("TerrainRenderer : GetInstanceIDFromChunkID call with chunkID not matching any loaded Chunks");
+        }
+
+        return itr->second;
+    }
 private:
     void CreatePermanentResources();
 
@@ -151,6 +163,8 @@ private:
 
     u32 _numSurvivingDrawCalls;
     
+    robin_hood::unordered_map<u32, u32> _chunkIDToInstanceID;
+
     // Subrenderers
     MapObjectRenderer* _mapObjectRenderer = nullptr;
     CModelRenderer* _complexModelRenderer = nullptr;

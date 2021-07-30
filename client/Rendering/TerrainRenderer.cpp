@@ -1,10 +1,13 @@
 #include "TerrainRenderer.h"
+#include "ClientRenderer.h"
 #include "DebugRenderer.h"
 #include "MapObjectRenderer.h"
 #include "CModelRenderer.h"
 #include "WaterRenderer.h"
+#include "PixelQuery.h"
 #include "../Utils/ServiceLocator.h"
 #include "../Utils/MapUtils.h"
+#include "../Editor/Editor.h"
 
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
@@ -40,6 +43,7 @@ AutoCVar_VecFloat CVAR_HeightBoxPosition("terrain.heightBox.Position", "position
 AutoCVar_Int CVAR_HeightBoxLockPosition("terrain.heightBox.LockPosition", "lock height box position", 0, CVarFlags::EditCheckbox);
 
 AutoCVar_Int CVAR_DrawCellGrid("terrain.cellGrid.Enable", "draw debug grid for displaying cells", 1, CVarFlags::EditCheckbox);
+AutoCVar_VecFloat CVAR_TerrainWireframeColor("terrain.wireframeColor", "set the wireframe color for terrain", vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
 struct TerrainChunkData
 {
@@ -381,6 +385,7 @@ void TerrainRenderer::AddTerrainDepthPrepass(Renderer::RenderGraph* renderGraph,
                 Renderer::VertexShaderDesc vertexShaderDesc;
                 vertexShaderDesc.path = "terrain.vs.hlsl";
                 vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
                 pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -506,6 +511,7 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "terrain.vs.hlsl";
             vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -583,8 +589,180 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
     }
 
     // Subrenderers
-    _mapObjectRenderer->AddMapObjectPass(renderGraph, resources, frameIndex); 
+
+    Editor::Editor* editor = ServiceLocator::GetEditor();
+    if (editor->HasSelectedObject())
+    {
+        u32 activeToken = editor->GetActiveToken();
+
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+        PixelQuery::PixelData pixelData;
+
+        if (pixelQuery->GetQueryResult(activeToken, pixelData))
+        {
+            if (pixelData.type == Editor::QueryObjectType::Terrain)
+            {
+                const Editor::Editor::SelectedTerrainData& selectedTerrainData = editor->GetSelectedTerrainData();
+                if (selectedTerrainData.drawWireframe)
+                {
+                    const u32 packedChunkCellID = pixelData.value;
+                    u32 cellID = packedChunkCellID & 0xffff;
+                    u32 chunkID = packedChunkCellID >> 16;
+
+                    u32 instanceID = GetInstanceIDFromChunkID(chunkID);
+                    u32 cellIndex = instanceID * Terrain::MAP_CELLS_PER_CHUNK + cellID;
+
+                    AddTerrainEditorPass(renderGraph, resources, frameIndex, cellIndex);
+                }
+            }
+        }
+    }
+
+    _mapObjectRenderer->AddMapObjectPass(renderGraph, resources, frameIndex);
+
+
+    if (editor->HasSelectedObject())
+    {
+        u32 activeToken = editor->GetActiveToken();
+
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+        PixelQuery::PixelData pixelData;
+
+        if (pixelQuery->GetQueryResult(activeToken, pixelData))
+        {
+            if (pixelData.type == Editor::QueryObjectType::MapObject)
+            {
+                const Editor::Editor::SelectedMapObjectData& selectedMapObjectData = editor->GetSelectedMapObjectData();
+                if (selectedMapObjectData.drawWireframe)
+                {
+                    u32 instanceLookupDataID = pixelData.value;
+
+                    const Editor::Editor::SelectedMapObjectData& selectedMapObjectData = editor->GetSelectedMapObjectData();
+                    _mapObjectRenderer->AddMapObjectEditorPass(renderGraph, resources, frameIndex, instanceLookupDataID, selectedMapObjectData.selectedRenderBatch - 1, selectedMapObjectData.wireframeEntireObject);
+                }
+            }
+        }
+    }
+    
    // _waterRenderer->AddWaterPass(renderGraph, globalDescriptorSet, colorTarget, depthTarget, frameIndex);
+}
+
+void TerrainRenderer::AddTerrainEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 cellIndex)
+{
+    // Terrain Pass
+    {
+        struct TerrainPassData
+        {
+            Renderer::RenderPassMutableResource color;
+            Renderer::RenderPassMutableResource objectIDs;
+            Renderer::RenderPassMutableResource depth;
+        };
+
+        renderGraph->AddPass<TerrainPassData>("Terrain Editor Pass",
+            [=](TerrainPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+            {
+                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+
+                return true; // Return true from setup to enable this pass, return false to disable it
+            },
+            [=](TerrainPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+            {
+                entt::registry* registry = ServiceLocator::GetGameRegistry();
+                MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+                Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+
+                if (!currentMap.IsLoadedMap())
+                    return;
+
+                if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
+                    return;
+
+                GPU_SCOPED_PROFILER_ZONE(commandList, TerrainPass);
+
+                Renderer::GraphicsPipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                // Shaders
+                Renderer::VertexShaderDesc vertexShaderDesc;
+                vertexShaderDesc.path = "terrain.vs.hlsl";
+                vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
+
+                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+                Renderer::PixelShaderDesc pixelShaderDesc;
+                pixelShaderDesc.path = "solidColor.ps.hlsl";
+                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+                // Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
+                pipelineDesc.states.inputLayouts[0].enabled = true;
+                pipelineDesc.states.inputLayouts[0].SetName("TEXCOORD0");
+                pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32_UINT;
+                pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_INSTANCE;
+                pipelineDesc.states.inputLayouts[1].enabled = true;
+                pipelineDesc.states.inputLayouts[1].SetName("TEXCOORD1");
+                pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R32_UINT;
+                pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_INSTANCE;
+
+                // Depth state
+                pipelineDesc.states.depthStencilState.depthEnable = false;
+                pipelineDesc.states.depthStencilState.depthWriteEnable = false;
+                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
+
+                // Rasterizer state
+                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
+                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+                pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
+
+                // Render targets
+                pipelineDesc.renderTargets[0] = data.color;
+                pipelineDesc.renderTargets[1] = data.objectIDs;
+
+                pipelineDesc.depthStencil = data.depth;
+
+                // Set pipeline
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                // Set instance buffer
+                const Renderer::BufferID instanceBuffer = _instanceBuffer;
+                commandList.SetBuffer(0, instanceBuffer);
+
+                // Set index buffer
+                commandList.SetIndexBuffer(_cellIndexBuffer, Renderer::IndexFormat::UInt16);
+
+                struct ColorConstant
+                {
+                    vec4 value;
+                };
+
+                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+                colorConstant->value = CVAR_TerrainWireframeColor.Get();
+                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+                // Bind viewbuffer
+                _passDescriptorSet.Bind("_packedVertices"_h, _vertexBuffer);
+                _passDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
+                _passDescriptorSet.Bind("_chunkData"_h, _chunkBuffer);
+                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
+
+                // Bind descriptorset
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+
+                // 768 704 0 0
+                commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, 1, 0, 0, cellIndex);
+
+                commandList.EndPipeline(pipeline);
+            });
+    }
 }
 
 void TerrainRenderer::CreatePermanentResources()
@@ -945,10 +1123,12 @@ void TerrainRenderer::LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded)
 
     size_t currentChunkIndex = 0;
     _loadedChunks.WriteLock(
-        [&currentChunkIndex, chunkID](std::vector<u16>& loadedChunks)
+        [this, &currentChunkIndex, chunkID](std::vector<u16>& loadedChunks)
         {
             currentChunkIndex = loadedChunks.size();
             loadedChunks.push_back(chunkID);
+
+            _chunkIDToInstanceID[chunkID] = static_cast<u32>(currentChunkIndex);
         }
     );
 

@@ -164,6 +164,8 @@ bool EngineLoop::Init()
     _clientRenderer = new ClientRenderer();
     _editor = new Editor::Editor();
 
+    ServiceLocator::SetEditor(_editor);
+
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Debug", 0);
     keybindGroup->SetActive(true);
@@ -178,7 +180,8 @@ bool EngineLoop::Init()
         cameraOrbital->Init();
 
         // Camera Orbital is default active
-        cameraOrbital->SetActive(true);
+        //cameraOrbital->SetActive(true);
+        cameraFreeLook->SetActive(true);
 
         // Bind Switch Camera Key
         keybindGroup->AddKeyboardCallback("Switch Camera Mode", GLFW_KEY_C, KeybindAction::Press, KeybindModifier::Any, [this, cameraFreeLook, cameraOrbital](i32 key, KeybindAction action, KeybindModifier modifier)
@@ -832,6 +835,7 @@ void EngineLoop::DrawMapStats()
             u32 mapNamehash = StringUtils::fnv1a_32(preview, strlen(preview));
             const NDBC::Map* map = mapSingleton.GetMapByNameHash(mapNamehash);
 
+            ServiceLocator::GetEditor()->ClearSelection();
             ServiceLocator::GetClientRenderer()->GetTerrainRenderer()->LoadMap(map);
         }
 

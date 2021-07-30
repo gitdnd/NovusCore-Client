@@ -2,7 +2,9 @@
 #include "DebugRenderer.h"
 #include "ClientRenderer.h"
 #include "CModelRenderer.h"
+#include "PixelQuery.h"
 #include "SortUtils.h"
+#include "../Editor/Editor.h"
 
 #include <filesystem>
 #include <Renderer/Renderer.h>
@@ -28,9 +30,10 @@ namespace fs = std::filesystem;
 
 AutoCVar_Int CVAR_MapObjectOcclusionCullEnabled("mapObjects.occlusionCullEnable", "enable culling of map objects", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_MapObjectCullingEnabled("mapObjects.cullEnable", "enable culling of map objects", 1, CVarFlags::EditCheckbox);
-AutoCVar_Int CVAR_MapObjectLockCullingFrustum("mapObjects.lockCullingFrustum", "lock frustrum for map object culling", 0, CVarFlags::EditCheckbox);
-AutoCVar_Int CVAR_MapObjectDrawBoundingBoxes("mapObjects.drawBoundingBoxes", "draw bounding boxes for mapobjects", 0, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_MapObjectLockCullingFrustum("mapObjects.lockCullingFrustum", "lock frustrum for map objects culling", 0, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_MapObjectDrawBoundingBoxes("mapObjects.drawBoundingBoxes", "draw bounding boxes for map objects", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_MapObjectDeterministicOrder("mapObjects.deterministicOrder", "sort drawcalls by instanceID", 0, CVarFlags::EditCheckbox);
+AutoCVar_VecFloat CVAR_MapObjectWireframeColor("mapObjects.wireframeColor", "set the wireframe color for map objects", vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
 MapObjectRenderer::MapObjectRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
     : _renderer(renderer)
@@ -398,6 +401,7 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "mapObject.vs.hlsl";
             vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -453,6 +457,125 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
 
             commandList.EndPipeline(pipeline);
         });
+    }
+}
+
+void MapObjectRenderer::AddMapObjectEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 instanceLookupDataID, u32 selectedRenderBatch, bool wireframeEntireObject)
+{
+    // Map Object Editor Pass
+    {
+        struct MapObjectPassData
+        {
+            Renderer::RenderPassMutableResource color;
+            Renderer::RenderPassMutableResource objectIDs;
+            Renderer::RenderPassMutableResource depth;
+        };
+
+        renderGraph->AddPass<MapObjectPassData>("MapObject Editor Pass",
+            [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+            {
+                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+
+                return true; // Return true from setup to enable this pass, return false to disable it
+            },
+            [=](MapObjectPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+            {
+                GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
+
+                u32 drawCount = static_cast<u32>(_drawCalls.Size());
+                if (drawCount == 0)
+                    return;
+
+                // -- Render MapObjects --
+                Renderer::GraphicsPipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                // Shaders
+                Renderer::VertexShaderDesc vertexShaderDesc;
+                vertexShaderDesc.path = "mapObject.vs.hlsl";
+                vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
+
+                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+                Renderer::PixelShaderDesc pixelShaderDesc;
+                pixelShaderDesc.path = "solidColor.ps.hlsl";
+
+                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+                // Depth state
+                pipelineDesc.states.depthStencilState.depthEnable = false;
+                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
+
+                // Rasterizer state
+                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
+                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+                pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
+
+                // Render targets
+                pipelineDesc.renderTargets[0] = data.color;
+                pipelineDesc.renderTargets[1] = data.objectIDs;
+
+                pipelineDesc.depthStencil = data.depth;
+
+                // Set pipeline
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+
+                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+                struct ColorConstant
+                {
+                    vec4 value;
+                };
+
+                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+                colorConstant->value = CVAR_MapObjectWireframeColor.Get();
+                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+                const MapObjectRenderer::InstanceLookupData& instanceLookupData = _instanceLookupData.ReadGet(instanceLookupDataID);
+                const MapObjectRenderer::LoadedMapObject& loadedMapObject = _loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
+
+                u32 numRenderBatches = static_cast<u32>(loadedMapObject.renderBatches.size());
+
+                if (numRenderBatches)
+                {
+                    if (wireframeEntireObject)
+                    {
+                        for (u32 i = 0; i < numRenderBatches; i++)
+                        {
+                            const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[i];
+                            const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[i];
+
+                            u32 vertexOffset = renderBatchOffsets.baseVertexOffset;
+                            u32 firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
+                            u32 indexCount = renderBatch.indexCount;
+
+                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, instanceLookupDataID);
+                        }
+                    }
+                    else
+                    {
+                        const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[selectedRenderBatch];
+                        const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[selectedRenderBatch];
+
+                        u32 vertexOffset = renderBatchOffsets.baseVertexOffset;
+                        u32 firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
+                        u32 indexCount = renderBatch.indexCount;
+
+                        commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, instanceLookupDataID);
+                    }
+                }
+
+                commandList.EndPipeline(pipeline);
+            });
     }
 }
 

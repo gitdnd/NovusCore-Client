@@ -112,8 +112,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
             //DebugRenderBone(instanceData, modelBoneInfo.offset + i, float3(boneInfo.pivotPointX, boneInfo.pivotPointY, boneInfo.pivotPointZ), currBoneMatrix, modelBoneInfo.offset + parentBoneId, parentPivotPoint, parentBoneMatrix, true);
             _animationBoneDeformMatrix[instanceData.boneDeformOffset + i] = currBoneMatrix;
-
-
         }
         else
         {

@@ -1,4 +1,5 @@
-permutation COLOR_PASS = [0, 1];
+permutation COLOR_PASS = [0, 1]; 
+permutation EDITOR_PASS = [0, 1];
 
 #include "common.inc.hlsl"
 #include "globalData.inc.hlsl"
@@ -102,7 +103,7 @@ Vertex LoadVertex(uint vertexID)
     Vertex vertex;
     vertex.position = UnpackPosition(packedVertex);
     vertex.uv01 = UnpackUVs(packedVertex);
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     vertex.normal = UnpackNormal(packedVertex);
 #endif
 
@@ -120,12 +121,18 @@ struct VSInput
 
 struct VSOutput
 {
+#if !EDITOR_PASS
     float4 position : SV_Position;
     uint drawCallID : TEXCOORD0;
     float4 uv01 : TEXCOORD1;
 
-#if COLOR_PASS
+#if COLOR_PASS 
     float3 normal : TEXCOORD2;
+#endif
+#endif
+
+#if EDITOR_PASS
+    float4 position : SV_Position;
 #endif
 };
 
@@ -154,11 +161,14 @@ VSOutput main(VSInput input)
     
     VSOutput output;
     output.position = mul(position, _viewData.viewProjectionMatrix);
+
+#if !EDITOR_PASS
     output.drawCallID = drawCallID;
     output.uv01 = vertex.uv01;
 
 #if COLOR_PASS
     output.normal = mul(vertex.normal, (float3x3)instanceData.instanceMatrix);
+#endif
 #endif
 
     return output;

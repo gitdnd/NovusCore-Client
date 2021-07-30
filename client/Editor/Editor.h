@@ -32,25 +32,6 @@ namespace Editor
     class Editor
     {
     public:
-        Editor();
-
-        void Update(f32 deltaTime);
-        void DrawImguiMenuBar();
-
-    private:
-        void TerrainSelectionDrawImGui();
-        void MapObjectSelectionDrawImGui();
-        void ComplexModelSelectionDrawImGui();
-
-        bool IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& boundingBox, f32& t);
-        bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
-
-        NDBCEditorHandler _ndbcEditorHandler;
-    private:
-        u32 _activeToken = 0;
-        u32 _queriedToken = 0;
-        bool _selectedObjectDataInitialized = false;
-
         struct SelectedTerrainData
         {
             Geometry::AABoundingBox boundingBox;
@@ -69,13 +50,20 @@ namespace Editor
 
             NDBC::AreaTable* zone;
             NDBC::AreaTable* area;
-        } _selectedTerrainData;
+
+            bool drawWireframe = false;
+        };
 
         struct SelectedMapObjectData
         {
             Geometry::AABoundingBox boundingBox;
             u32 instanceLookupDataID;
-        } _selectedMapObjectData;
+
+            u32 numRenderBatches;
+            i32 selectedRenderBatch;
+            bool drawWireframe = false;
+            bool wireframeEntireObject = true;
+        };
 
         struct SelectedComplexModelData
         {
@@ -83,6 +71,43 @@ namespace Editor
             u32 drawCallDataID;
             u32 instanceID;
             bool isOpaque;
-        } _selectedComplexModelData;
+
+            u32 numRenderBatches;
+            i32 selectedRenderBatch;
+            bool drawWireframe = false;
+            bool wireframeEntireObject = true;
+        };
+
+    public:
+        Editor();
+
+        void Update(f32 deltaTime);
+        void DrawImguiMenuBar();
+
+        void ClearSelection();
+        bool HasSelectedObject() { return _activeToken; }
+        u32 GetActiveToken() { return _activeToken; }
+
+        const SelectedTerrainData& GetSelectedTerrainData() { return _selectedTerrainData; }
+        const SelectedMapObjectData& GetSelectedMapObjectData() { return _selectedMapObjectData; }
+        const SelectedComplexModelData& GetSelectedComplexModelData() { return _selectedComplexModelData; }
+
+    private:
+        void TerrainSelectionDrawImGui();
+        void MapObjectSelectionDrawImGui();
+        void ComplexModelSelectionDrawImGui();
+
+        bool IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& boundingBox, f32& t);
+        bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
+
+        NDBCEditorHandler _ndbcEditorHandler;
+    private:
+        u32 _activeToken = 0;
+        u32 _queriedToken = 0;
+        bool _selectedObjectDataInitialized = false;
+
+        SelectedTerrainData _selectedTerrainData;
+        SelectedMapObjectData _selectedMapObjectData;
+        SelectedComplexModelData _selectedComplexModelData;
     };
 }

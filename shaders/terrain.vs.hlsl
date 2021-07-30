@@ -1,4 +1,5 @@
 permutation COLOR_PASS = [0, 1];
+permutation EDITOR_PASS = [0, 1];
 
 #include "globalData.inc.hlsl"
 #include "terrain.inc.hlsl"
@@ -61,7 +62,7 @@ Vertex UnpackVertex(const PackedVertex packedVertex)
     
     Vertex vertex;
 
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     // Unpack normal and color
     uint normal = packedVertex.packed0;// & 0x00FFFFFFu;
     uint color = ((packedVertex.packed1 & 0x0000FFFFu) << 8u) | (packedVertex.packed0 >> 24u);
@@ -87,7 +88,7 @@ Vertex LoadVertex(uint chunkID, uint cellID, uint vertexBaseOffset, uint vertexI
     Vertex vertex = UnpackVertex(packedVertex);
 
     vertex.position.xy = GetGlobalVertexPosition(chunkID, cellID, vertexID);
-#if COLOR_PASS
+#if COLOR_PASS  && !EDITOR_PASS
     vertex.uv = float2(-vertexPos.y, -vertexPos.x); // Negated to go from 3D coordinates to 2D
 #endif
 
@@ -105,7 +106,7 @@ struct VSOutput
 {
     float4 position : SV_Position;
 
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     uint packedChunkCellID : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float3 normal : TEXCOORD2;
@@ -134,7 +135,7 @@ VSOutput main(VSInput input)
 
     output.position = mul(float4(vertex.position, 1.0f), _viewData.viewProjectionMatrix);
 
-#if COLOR_PASS
+#if COLOR_PASS && !EDITOR_PASS
     output.uv = vertex.uv;
     output.packedChunkCellID = input.packedChunkCellID;
     output.normal = vertex.normal;
