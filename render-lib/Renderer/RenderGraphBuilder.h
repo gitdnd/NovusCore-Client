@@ -24,7 +24,7 @@ namespace Renderer
     class RenderGraphBuilder
     {
     public:
-        RenderGraphBuilder(Memory::Allocator* allocator, Renderer* renderer);
+        RenderGraphBuilder(Memory::Allocator* allocator, Renderer* renderer, size_t numPasses);
 
         enum class WriteMode : u8
         {
@@ -61,14 +61,18 @@ namespace Renderer
         RenderPassMutableResource Write(DepthImageID id, WriteMode writeMode, LoadMode loadMode);
 
     private:
-        void Compile(CommandList* commandList);
+        void PreExecute(CommandList& commandList, u32 passIndex);
+        void PostExecute(CommandList& commandList, u32 passIndex);
         RenderGraphResources& GetResources();
+
+        void SetCurrentPassIndex(u32 index) { _currentPassIndex = index; }
 
     private:
         Memory::Allocator* _allocator;
         Renderer* _renderer;
 
         RenderGraphResources _resources;
+        u32 _currentPassIndex;
 
         friend class RenderGraph;
     };

@@ -1,6 +1,7 @@
 #pragma once
 #include <NovusTypes.h>
 #include <Memory/Allocator.h>
+#include <Containers/DynamicArray.h>
 
 #include "RenderPassResources.h"
 
@@ -28,7 +29,7 @@ namespace Renderer
         }
 
     private:
-        RenderGraphResources(Memory::Allocator* allocator);
+        RenderGraphResources(Memory::Allocator* allocator, size_t numPasses);
 
         ImageID GetImage(RenderPassResource resource);
         ImageID GetImage(RenderPassMutableResource resource);
@@ -40,6 +41,15 @@ namespace Renderer
         RenderPassResource GetResource(DepthImageID id);
         RenderPassMutableResource GetMutableResource(ImageID id);
         RenderPassMutableResource GetMutableResource(DepthImageID id);
+
+        void Clear(u32 passIndex, ImageID id);
+        void Clear(u32 passIndex, DepthImageID id);
+
+        bool NeedsPreExecute(u32 passIndex);
+        bool NeedsPostExecute(u32 passIndex);
+
+        const DynamicArray<ImageID>& GetColorClears(u32 passIndex);
+        const DynamicArray<DepthImageID>& GetDepthClears(u32 passIndex);
 
     private:
         Memory::Allocator* _allocator = nullptr;

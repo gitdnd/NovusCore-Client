@@ -14,6 +14,7 @@
 
 #include <Memory/StackAllocator.h>
 #include <Renderer/Renderer.h>
+#include <Renderer/RenderSettings.h>
 #include <Renderer/RenderGraph.h>
 #include <Renderer/Renderers/Vulkan/RendererVK.h>
 #include <Window/Window.h>
@@ -71,7 +72,7 @@ void WindowIconifyCallback(GLFWwindow* window, int iconified)
 ClientRenderer::ClientRenderer()
 {
     _window = new Window();
-    _window->Init(WIDTH, HEIGHT);
+    _window->Init(Renderer::Settings::SCREEN_WIDTH, Renderer::Settings::SCREEN_HEIGHT);
     ServiceLocator::SetWindow(_window);
 
     _inputManager = new InputManager();
@@ -171,33 +172,32 @@ void ClientRenderer::Render()
 
     _debugRenderer->AddUploadPass(&renderGraph);
 
-    // Clear Pass
+    // StartFrame Pass
     {
-        struct ClearPassData
+        struct StartFramePassData
         {
+            Renderer::RenderPassMutableResource color;
+            Renderer::RenderPassMutableResource objectIDs;
             Renderer::RenderPassMutableResource depth;
         };
 
-        renderGraph.AddPass<ClearPassData>("ClearPass",
-            [=](ClearPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+        renderGraph.AddPass<StartFramePassData>("StartFramePass",
+            [=](StartFramePassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
+            data.color = builder.Write(_resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.objectIDs = builder.Write(_resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
             data.depth = builder.Write(_resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
-            [&](ClearPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+            [&](StartFramePassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, MainPass);
             commandList.MarkFrameStart(_frameIndex);
 
-            // Clear TODO: This should be handled by the parameters in Setup, and it should definitely not act on ImageID and DepthImageID
-            commandList.Clear(_resources.color, Color(135.0f / 255.0f, 206.0f / 255.0f, 250.0f / 255.0f, 1));
-            commandList.Clear(_resources.objectIDs, Color(0.0f, 0.0f, 0.0f, 0.0f));
-            commandList.Clear(_resources.depth, 0.0f);
-
             // Set viewport
-            commandList.SetViewport(0, 0, static_cast<f32>(WIDTH), static_cast<f32>(HEIGHT), 0.0f, 1.0f);
-            commandList.SetScissorRect(0, WIDTH, 0, HEIGHT);
+            commandList.SetViewport(0, 0, static_cast<f32>(Renderer::Settings::SCREEN_WIDTH), static_cast<f32>(Renderer::Settings::SCREEN_HEIGHT), 0.0f, 1.0f);
+            commandList.SetScissorRect(0, Renderer::Settings::SCREEN_WIDTH, 0, Renderer::Settings::SCREEN_HEIGHT);
         });
     }
 
@@ -323,6 +323,7 @@ void ClientRenderer::CreatePermanentResources()
     mainColorDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
     mainColorDesc.format = Renderer::ImageFormat::R16G16B16A16_FLOAT;
     mainColorDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    mainColorDesc.clearColor = Color::Clear;
 
     _resources.color = _renderer->CreateImage(mainColorDesc);
 
@@ -333,6 +334,7 @@ void ClientRenderer::CreatePermanentResources()
     objectIDsDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
     objectIDsDesc.format = Renderer::ImageFormat::R32_UINT;
     objectIDsDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    objectIDsDesc.clearColor = Color::Clear;
 
     _resources.objectIDs = _renderer->CreateImage(objectIDsDesc);
 
@@ -352,6 +354,7 @@ void ClientRenderer::CreatePermanentResources()
     mainDepthDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
     mainDepthDesc.format = Renderer::DepthImageFormat::D32_FLOAT;
     mainDepthDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    mainDepthDesc.depthClearValue = 0.0f;
 
     _resources.depth = _renderer->CreateDepthImage(mainDepthDesc);
 

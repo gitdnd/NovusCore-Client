@@ -36,9 +36,11 @@ namespace Renderer
     bool RenderGraph::Init(RenderGraphDesc& desc)
     {
         _desc = desc;
-        assert(desc.allocator != nullptr); // You need to set an allocator
 
-        _renderGraphBuilder = Memory::Allocator::New<RenderGraphBuilder>(desc.allocator, desc.allocator, _renderer);
+        if (desc.allocator == nullptr)
+        {
+            DebugHandler::PrintFatal("You need to set an allocator!");
+        }
 
         return true;
     }
@@ -72,14 +74,21 @@ namespace Renderer
 
     void RenderGraph::Setup()
     {
-        ZoneScopedNC("RenderGraph::Setup", tracy::Color::Red2)
+        ZoneScopedNC("RenderGraph::Setup", tracy::Color::Red2);
 
         RenderGraphData* data = static_cast<RenderGraphData*>(_data);
-        for (IRenderPass* pass : data->passes)
-        {
-            ZoneScopedC(tracy::Color::Red2)
-            ZoneName(pass->_name, pass->_nameLength)
 
+        size_t numPasses = data->passes.Count();
+        _renderGraphBuilder = Memory::Allocator::New<RenderGraphBuilder>(_desc.allocator, _desc.allocator, _renderer, numPasses);
+
+        for (u32 i = 0; i < data->passes.Count(); i++)
+        {
+            IRenderPass* pass = data->passes[i];
+
+            ZoneScopedC(tracy::Color::Red2);
+            ZoneName(pass->_name, pass->_nameLength);
+
+            _renderGraphBuilder->SetCurrentPassIndex(i);
             if (pass->Setup(_renderGraphBuilder))
             {
                 data->executingPasses.Insert(pass);
@@ -107,19 +116,26 @@ namespace Renderer
             commandList.AddWaitSemaphore(waitSemaphore);
         }
 
-        // TODO: Parallel_for this
         commandList.PushMarker("RenderGraph", Color(0.0f, 0.0f, 0.4f));
-        for (IRenderPass* pass : data->executingPasses)
+        for (u32 i = 0; i < data->passes.Count(); i++)
         {
-            ZoneScopedC(tracy::Color::Red2)
-            ZoneName(pass->_name, pass->_nameLength)
+            IRenderPass* pass = data->passes[i];
 
+            ZoneScopedC(tracy::Color::Red2);
+            ZoneName(pass->_name, pass->_nameLength);
+
+            commandList.PushMarker(pass->_name, Color(0.0f, 0.4f, 0.0f));
+
+            _renderGraphBuilder->PreExecute(commandList, i);
             pass->Execute(resources, commandList);
+            _renderGraphBuilder->PostExecute(commandList, i);
+
+            commandList.PopMarker();
         }
         commandList.PopMarker();
         
         {
-            ZoneScopedNC("CommandList::Execute", tracy::Color::Red2)
+            ZoneScopedNC("CommandList::Execute", tracy::Color::Red2);
             commandList.Execute();
         }
     }

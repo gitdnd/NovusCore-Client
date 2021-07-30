@@ -507,6 +507,7 @@ namespace Renderer
         TransferDestToComputeShaderRW,
         TransferDestToVertexBuffer,
         TransferDestToTransferSrc,
+        TransferDestToTransferDest,
         ComputeWriteToIndirectArguments,
         ComputeWriteToVertexBuffer,
         ComputeWriteToVertexShaderRead,

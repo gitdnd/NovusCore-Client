@@ -137,7 +137,7 @@ void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGr
         renderGraph->AddPass<MapObjectDepthPrepassData>("MapObject Depth Prepass",
             [=](MapObjectDepthPrepassData& data, Renderer::RenderGraphBuilder& builder) // Setup
             {
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
                 return true; // Return true from setup to enable this pass, return false to disable it
             },
@@ -379,9 +379,9 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
         renderGraph->AddPass<MapObjectPassData>("MapObject Pass",
             [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
@@ -474,9 +474,9 @@ void MapObjectRenderer::AddMapObjectEditorPass(Renderer::RenderGraph* renderGrap
         renderGraph->AddPass<MapObjectPassData>("MapObject Editor Pass",
             [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
             {
-                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
                 return true; // Return true from setup to enable this pass, return false to disable it
             },

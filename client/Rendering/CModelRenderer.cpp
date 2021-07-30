@@ -169,7 +169,7 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
     renderGraph->AddPass<CModelDepthPrepassData>("CModel Depth Prepass",
         [=](CModelDepthPrepassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
@@ -219,7 +219,9 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                         }
 
                         commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstancesBuffer);
                     });
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstancesBuffer);
                 }
 
                 commandList.PopMarker();
@@ -607,9 +609,9 @@ void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, Ren
     renderGraph->AddPass<CModelPassData>("CModel Pass",
         [=](CModelPassData& data, Renderer::RenderGraphBuilder& builder)
     {
-        data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-        data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-        data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+        data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+        data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+        data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
         return true; // Return true from setup to enable this pass, return false to disable it
     },
@@ -870,9 +872,9 @@ void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGrap
     renderGraph->AddPass<CModelPassData>("CModel Pass",
         [=](CModelPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },

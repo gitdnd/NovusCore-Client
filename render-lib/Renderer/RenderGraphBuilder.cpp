@@ -4,16 +4,49 @@
 
 namespace Renderer
 {
-    RenderGraphBuilder::RenderGraphBuilder(Memory::Allocator* allocator, Renderer* renderer)
+    RenderGraphBuilder::RenderGraphBuilder(Memory::Allocator* allocator, Renderer* renderer, size_t numPasses)
         : _renderer(renderer)
-        , _resources(allocator)
+        , _resources(allocator, numPasses)
     {
 
     }
 
-    void RenderGraphBuilder::Compile(CommandList* /*commandList*/)
+    void RenderGraphBuilder::PreExecute(CommandList& commandList, u32 passIndex)
     {
+        if (!_resources.NeedsPreExecute(passIndex))
+            return;
 
+        // Queue up all the clears for this pass
+        commandList.PushMarker("RenderGraph::PreExecute", Color::White);
+
+        const DynamicArray<ImageID>& colorClears = _resources.GetColorClears(passIndex);
+
+        for (ImageID image : colorClears)
+        {
+            ImageDesc& imageDesc = _renderer->GetImageDesc(image);
+            commandList.Clear(image, imageDesc.clearColor);
+        }
+
+        const DynamicArray<DepthImageID>& depthClears = _resources.GetDepthClears(passIndex);
+
+        for (DepthImageID image : depthClears)
+        {
+            DepthImageDesc& imageDesc = _renderer->GetDepthImageDesc(image);
+            commandList.Clear(image, imageDesc.depthClearValue);
+        }
+
+        // TODO: Handling between-pass barriers here
+        // If we have .Read operations we need to:
+        // * Check if the same resource had any .Write operations with WriteMode UAV in earlier passes
+        // * If it did, add a Compute-Compute barrier if this read has the shaderstage Compute, otherwise add a Compute-ShaderRead barrier'
+
+        commandList.PopMarker();
+    }
+
+    void RenderGraphBuilder::PostExecute(CommandList& /*commandList*/, u32 /*passIndex*/)
+    {
+        //if (!_resources.NeedsPostExecute(passIndex))
+        //    return;
     }
 
     RenderGraphResources& RenderGraphBuilder::GetResources()
@@ -52,16 +85,26 @@ namespace Renderer
         return resource;
     }
 
-    RenderPassMutableResource RenderGraphBuilder::Write(ImageID id, WriteMode /*writeMode*/, LoadMode /*loadMode*/)
+    RenderPassMutableResource RenderGraphBuilder::Write(ImageID id, WriteMode /*writeMode*/, LoadMode loadMode)
     {
         RenderPassMutableResource resource = _resources.GetMutableResource(id);
+
+        if (loadMode == LoadMode::CLEAR)
+        {
+            _resources.Clear(_currentPassIndex, id);
+        }
 
         return resource;
     }
 
-    RenderPassMutableResource RenderGraphBuilder::Write(DepthImageID id, WriteMode /*writeMode*/, LoadMode /*loadMode*/)
+    RenderPassMutableResource RenderGraphBuilder::Write(DepthImageID id, WriteMode /*writeMode*/, LoadMode loadMode)
     {
         RenderPassMutableResource resource = _resources.GetMutableResource(id);
+
+        if (loadMode == LoadMode::CLEAR)
+        {
+            _resources.Clear(_currentPassIndex, id);
+        }
 
         return resource;
     }

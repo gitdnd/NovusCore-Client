@@ -51,9 +51,7 @@ namespace Renderer
 
         void Execute(RenderGraphResources& resources, CommandList& commandList) override
         {
-            commandList.PushMarker(_name, Color(0.0f, 0.4f, 0.0f));
             _onExecute(_data, resources, commandList);
-            commandList.PopMarker();
         }
 
         bool ShouldRun() { return _shouldRun; }

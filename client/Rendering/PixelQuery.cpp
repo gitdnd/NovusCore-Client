@@ -64,7 +64,7 @@ void PixelQuery::AddPixelQueryPass(Renderer::RenderGraph* renderGraph, RenderRes
         renderGraph->AddPass<PixelQueryPassData>("Query Pass",
             [=](PixelQueryPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
             {
-                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
                 return true; // Return true from setup to enable this pass, return false to disable it
             },

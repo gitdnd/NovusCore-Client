@@ -1,28 +1,48 @@
 #include "RenderGraphResources.h"
 
 #include "Descriptors/GraphicsPipelineDesc.h"
-#include <Containers/DynamicArray.h>
 
 namespace Renderer
 {
+    struct TrackedPass
+    {
+        TrackedPass(Memory::Allocator* allocator)
+            : colorClears(allocator, 4)
+            , depthClears(allocator, 4)
+        {
+
+        }
+
+        bool needsPreExecute = false;
+        bool needsPostExecute = false;
+        DynamicArray<ImageID> colorClears;
+        DynamicArray<DepthImageID> depthClears;
+    };
+
     struct RenderGraphResourcesData : IRenderGraphResourcesData
     {
-        RenderGraphResourcesData(Memory::Allocator* allocator)
+        RenderGraphResourcesData(Memory::Allocator* allocator, size_t numPasses)
             : trackedImages(allocator, 32)
             , trackedTextures(allocator, 32)
             , trackedDepthImages(allocator, 32)
+            , trackedPasses(allocator, numPasses)
         {
-
+            for (u32 i = 0; i < numPasses; i++)
+            {
+                TrackedPass trackedPass(allocator);
+                trackedPasses.Insert(trackedPass);
+            }
         }
 
         DynamicArray<ImageID> trackedImages;
         DynamicArray<TextureID> trackedTextures;
         DynamicArray<DepthImageID> trackedDepthImages;
+        DynamicArray<TrackedPass> trackedPasses;
     };
 
-	RenderGraphResources::RenderGraphResources(Memory::Allocator* allocator)
+	RenderGraphResources::RenderGraphResources(Memory::Allocator* allocator, size_t numPasses)
 		: _allocator(allocator)
-        , _data(Memory::Allocator::New<RenderGraphResourcesData>(allocator, allocator))
+        , _data(Memory::Allocator::New<RenderGraphResourcesData>(allocator, allocator, numPasses))
     {
 	}
 
@@ -167,5 +187,77 @@ namespace Renderer
 
         data->trackedDepthImages.Insert(id);
         return RenderPassMutableResource(i);
+    }
+    void RenderGraphResources::Clear(u32 passIndex, ImageID id)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access color clears of pass that hasn't been tracked yet");
+        }
+
+        data->trackedPasses[passIndex].needsPreExecute = true;
+        data->trackedPasses[passIndex].colorClears.Insert(id);
+    }
+    void RenderGraphResources::Clear(u32 passIndex, DepthImageID id)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access color clears of pass that hasn't been tracked yet");
+        }
+
+        data->trackedPasses[passIndex].needsPreExecute = true;
+        data->trackedPasses[passIndex].depthClears.Insert(id);
+    }
+
+    bool RenderGraphResources::NeedsPreExecute(u32 passIndex)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access color clears of pass that hasn't been tracked yet");
+        }
+
+        return data->trackedPasses[passIndex].needsPreExecute;
+    }
+
+    bool RenderGraphResources::NeedsPostExecute(u32 passIndex)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access color clears of pass that hasn't been tracked yet");
+        }
+
+        return data->trackedPasses[passIndex].needsPostExecute;
+    }
+
+    const DynamicArray<ImageID>& RenderGraphResources::GetColorClears(u32 passIndex)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access color clears of pass that hasn't been tracked yet");
+        }
+
+        return data->trackedPasses[passIndex].colorClears;
+    }
+
+    const DynamicArray<DepthImageID>& RenderGraphResources::GetDepthClears(u32 passIndex)
+    {
+        RenderGraphResourcesData* data = static_cast<RenderGraphResourcesData*>(_data);
+
+        if (passIndex >= data->trackedPasses.Count())
+        {
+            DebugHandler::PrintFatal("Tried to access depth clears of pass that hasn't been tracked yet");
+        }
+
+        return data->trackedPasses[passIndex].depthClears;
     }
 }
