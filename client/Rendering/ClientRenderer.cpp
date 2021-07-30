@@ -129,7 +129,7 @@ void ClientRenderer::Update(f32 deltaTime)
 
 void ClientRenderer::Render()
 {
-    ZoneScopedNC("ClientRenderer::Render", tracy::Color::Red2)
+    ZoneScopedNC("ClientRenderer::Render", tracy::Color::Red2);
 
     // If the window is minimized we want to pause rendering
     if (_window->IsMinimized())

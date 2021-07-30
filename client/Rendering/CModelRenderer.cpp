@@ -1106,6 +1106,11 @@ void CModelRenderer::ExecuteLoad()
             loadedComplexModels.reserve(numComplexModelsToBeLoaded);
         });
 
+        _instances.WriteLock([&](std::vector<Instance>& instances)
+        {
+            instances.reserve(numComplexModelsToBeLoaded);
+        });
+
         _animationModelInfo.WriteLock([&](std::vector<AnimationModelInfo>& animationModelInfo)
         {
             animationModelInfo.reserve(numComplexModelsToBeLoaded);

@@ -299,6 +299,7 @@ void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGr
                 Renderer::VertexShaderDesc vertexShaderDesc;
                 vertexShaderDesc.path = "mapObject.vs.hlsl";
                 vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
                 pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
@@ -1216,19 +1217,18 @@ bool MapObjectRenderer::LoadRenderBatches(Bytebuffer& buffer, Mesh& mesh, Loaded
         u32 renderBatchIndex = renderBatchesSize + i;
         Terrain::RenderBatch& renderBatch = mapObject.renderBatches[renderBatchIndex];
         // MaterialParameters
-        MaterialParameters* materialParameter = nullptr;
         u32 materialParameterID;
 
         _materialParameters.WriteLock([&](std::vector<MaterialParameters>& materialParameters)
         {
             materialParameterID = static_cast<u32>(materialParameters.size());
-            materialParameter = &materialParameters.emplace_back();
+
+            MaterialParameters& materialParameter = materialParameters.emplace_back();
+            materialParameter.materialID = mapObject.baseMaterialOffset + renderBatch.materialID;
+            materialParameter.exteriorLit = static_cast<u32>(mesh.renderFlags.exteriorLit || mesh.renderFlags.exterior);
         });
 
         mapObject.materialParameterIDs.push_back(materialParameterID);
-
-        materialParameter->materialID = mapObject.baseMaterialOffset + renderBatch.materialID;
-        materialParameter->exteriorLit = static_cast<u32>(mesh.renderFlags.exteriorLit || mesh.renderFlags.exterior);
     }
 
     // Read culling data
