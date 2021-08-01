@@ -111,6 +111,7 @@ namespace Renderer
         // Staging and memory
         [[nodiscard]] std::shared_ptr<UploadBuffer> CreateUploadBuffer(BufferID targetBuffer, size_t targetOffset, size_t size) override;
         [[nodiscard]] bool ShouldWaitForUpload() override;
+        void SetHasWaitedForUpload() override;
         [[nodiscard]] SemaphoreID GetUploadFinishedSemaphore() override;
 
         void CopyBuffer(BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range) override;

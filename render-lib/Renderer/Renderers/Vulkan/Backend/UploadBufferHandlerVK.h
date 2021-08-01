@@ -34,6 +34,7 @@ namespace Renderer
 
             SemaphoreID GetUploadFinishedSemaphore();
             bool ShouldWaitForUpload();
+            void SetHasWaitedForUpload();
         private:
             size_t Allocate(size_t size, StagingBufferID& stagingBufferID, void*& mappedMemory);
             void ExecuteStagingBuffer(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer);

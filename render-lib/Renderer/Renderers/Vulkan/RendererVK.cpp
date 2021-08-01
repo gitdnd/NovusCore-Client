@@ -1311,6 +1311,11 @@ namespace Renderer
         return _uploadBufferHandler->ShouldWaitForUpload();
     }
 
+    void RendererVK::SetHasWaitedForUpload()
+    {
+        return _uploadBufferHandler->SetHasWaitedForUpload();
+    }
+
     SemaphoreID RendererVK::GetUploadFinishedSemaphore()
     {
         return _uploadBufferHandler->GetUploadFinishedSemaphore();

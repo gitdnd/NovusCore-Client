@@ -452,5 +452,13 @@ private:
     u32 _numTransparentTriangles;
     u32 _numTransparentSurvivingTriangles;
 
+    std::atomic<bool> _hasToResizeAnimationBoneDeformMatrixBuffer = false;
+    std::atomic<size_t> _newAnimationBoneDeformMatrixBufferSize = 0;
+    size_t _previousAnimationBoneDeformMatrixBufferSize = 0;
+
+    std::atomic<bool> _hasToResizeAnimationBoneInstanceBuffer = false;
+    std::atomic<size_t> _newAnimationBoneInstanceBufferSize = 0;
+    size_t _previousAnimationBoneInstanceBufferSize = 0;
+
     DebugRenderer* _debugRenderer;
 };

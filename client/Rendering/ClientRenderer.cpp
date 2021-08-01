@@ -34,7 +34,7 @@
 AutoCVar_Int CVAR_LightLockEnabled("lights.lock", "lock the light", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_LightUseDefaultEnabled("lights.useDefault", "Use the map's default light", 0, CVarFlags::EditCheckbox);
 
-const size_t FRAME_ALLOCATOR_SIZE = 8 * 1024 * 1024; // 8 MB
+const size_t FRAME_ALLOCATOR_SIZE = 16 * 1024 * 1024; // 16 MB
 u32 MAIN_RENDER_LAYER = "MainLayer"_h; // _h will compiletime hash the string into a u32
 u32 DEPTH_PREPASS_RENDER_LAYER = "DepthPrepass"_h; // _h will compiletime hash the string into a u32
 
@@ -266,6 +266,7 @@ void ClientRenderer::Render()
     if (_renderer->ShouldWaitForUpload())
     {
         renderGraph.AddWaitSemaphore(_renderer->GetUploadFinishedSemaphore());
+        _renderer->SetHasWaitedForUpload();
     }
 
     renderGraph.Setup();

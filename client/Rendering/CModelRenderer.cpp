@@ -177,6 +177,48 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, CModelPass);
 
+            if (_hasToResizeAnimationBoneDeformMatrixBuffer)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationBoneDeformMatrixBuffer";
+                desc.size = _newAnimationBoneDeformMatrixBufferSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+                Renderer::BufferID newBoneDeformMatrixBuffer = _renderer->CreateBuffer(desc);
+
+                if (_animationBoneDeformMatrixBuffer != Renderer::BufferID::Invalid())
+                {
+                    _renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer);
+                    commandList.CopyBuffer(newBoneDeformMatrixBuffer, 0, _animationBoneDeformMatrixBuffer, 0, _previousAnimationBoneDeformMatrixBufferSize);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneDeformMatrixBuffer);
+                }
+
+                _animationBoneDeformMatrixBuffer = newBoneDeformMatrixBuffer;
+                _previousAnimationBoneDeformMatrixBufferSize = _newAnimationBoneDeformMatrixBufferSize;
+                _hasToResizeAnimationBoneDeformMatrixBuffer = false;
+            }
+
+            if (_hasToResizeAnimationBoneInstanceBuffer)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationBoneInstanceBuffer";
+                desc.size = _newAnimationBoneInstanceBufferSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+                Renderer::BufferID newBoneInstanceBuffer = _renderer->CreateBuffer(desc);
+
+                if (_animationBoneInstancesBuffer != Renderer::BufferID::Invalid())
+                {
+                    _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
+                    commandList.CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _previousAnimationBoneInstanceBufferSize);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneInstanceBuffer);
+                }
+
+                _previousAnimationBoneInstanceBufferSize = _newAnimationBoneInstanceBufferSize;
+                _animationBoneInstancesBuffer = newBoneInstanceBuffer;
+                _hasToResizeAnimationBoneInstanceBuffer = false;
+            }
+
             if (_animationRequests.size_approx() > 0)
             {
                 commandList.PushMarker("Animation Request", Color::White);
@@ -1340,6 +1382,7 @@ void CModelRenderer::CreatePermanentResources()
     // Create AnimationBoneDeformMatrixBuffer
     {
         size_t boneDeformMatrixBufferSize = (sizeof(mat4x4) * 255) * 1000;
+        _previousAnimationBoneDeformMatrixBufferSize = boneDeformMatrixBufferSize;
 
         Renderer::BufferDesc desc;
         desc.name = "AnimationBoneDeformMatrixBuffer";
@@ -1353,6 +1396,7 @@ void CModelRenderer::CreatePermanentResources()
     // Create AnimationBoneInstancesBuffer
     {
         size_t boneInstanceBufferSize = (sizeof(AnimationBoneInstance) * 255) * 1000;
+        _previousAnimationBoneInstanceBufferSize = boneInstanceBufferSize;
 
         Renderer::BufferDesc desc;
         desc.name = "AnimationBoneInstanceBuffer";
@@ -2166,17 +2210,9 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             size_t newBoneDeformMatrixSize = static_cast<size_t>(static_cast<f64>(currentBoneDeformMatrixSize) * 1.25f);
             newBoneDeformMatrixSize += newBoneDeformMatrixSize % sizeof(mat4x4);
 
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationBoneDeformMatrixBuffer";
-            desc.size = newBoneDeformMatrixSize;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _hasToResizeAnimationBoneDeformMatrixBuffer = true;
+            _newAnimationBoneDeformMatrixBufferSize = newBoneDeformMatrixSize;
 
-            Renderer::BufferID newBoneDeformMatrixBuffer = _renderer->CreateBuffer(desc);
-
-            _renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer);
-            _renderer->CopyBuffer(newBoneDeformMatrixBuffer, 0, _animationBoneDeformMatrixBuffer, 0, _animationBoneDeformRangeAllocator.Size());
-
-            _animationBoneDeformMatrixBuffer = newBoneDeformMatrixBuffer;
             _animationBoneDeformRangeAllocator.Grow(newBoneDeformMatrixSize);
 
             if (!_animationBoneDeformRangeAllocator.Allocate(numBones * sizeof(mat4x4), boneDeformRangeFrame))
@@ -2191,17 +2227,9 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             size_t newBoneInstanceSize = static_cast<size_t>(static_cast<f64>(currentBoneInstanceSize) * 1.25f);
             newBoneInstanceSize += newBoneInstanceSize % sizeof(AnimationBoneInstance);
 
-            Renderer::BufferDesc desc;
-            desc.name = "AnimationBoneInstanceBuffer";
-            desc.size = newBoneInstanceSize;
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _hasToResizeAnimationBoneInstanceBuffer = true;
+            _newAnimationBoneInstanceBufferSize = newBoneInstanceSize;
 
-            Renderer::BufferID newBoneInstanceBuffer = _renderer->CreateBuffer(desc);
-
-            _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
-            _renderer->CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _animationBoneInstancesRangeAllocator.Size());
-
-            _animationBoneInstancesBuffer = newBoneInstanceBuffer;
             _animationBoneInstancesRangeAllocator.Grow(newBoneInstanceSize);
 
             if (!_animationBoneInstancesRangeAllocator.Allocate(numBones * sizeof(mat4x4), boneInstanceRangeFrame))

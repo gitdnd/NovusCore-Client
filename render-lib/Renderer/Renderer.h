@@ -124,6 +124,7 @@ namespace Renderer
         // Staging and memory
         virtual [[nodiscard]] std::shared_ptr<UploadBuffer> CreateUploadBuffer(BufferID targetBuffer, size_t targetOffset, size_t size) = 0;
         virtual [[nodiscard]] bool ShouldWaitForUpload() = 0;
+        virtual void SetHasWaitedForUpload() = 0;
         virtual [[nodiscard]] SemaphoreID GetUploadFinishedSemaphore() = 0;
 
         [[nodiscard]] BufferID CreateBuffer(BufferID bufferID, BufferDesc& desc);

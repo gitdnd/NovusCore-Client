@@ -69,6 +69,7 @@ namespace Renderer
             std::thread submitThread;
 
             bool isDirty = true;
+            bool needsWait = false;
             SemaphoreID uploadFinishedSemaphore;
         };
 
@@ -151,6 +152,8 @@ namespace Renderer
 
             VkSemaphore semaphore = _semaphoreHandler->GetVkSemaphore(data->uploadFinishedSemaphore);
             _commandListHandler->AddSignalSemaphore(commandListID, semaphore);
+            data->needsWait = true;
+
             _commandListHandler->EndCommandList(commandListID, VK_NULL_HANDLE);
 
             // Reset staging buffer allocators and uploadToBufferTasks
@@ -268,7 +271,13 @@ namespace Renderer
         bool UploadBufferHandlerVK::ShouldWaitForUpload()
         {
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
-            return data->isDirty;
+            return data->needsWait;
+        }
+
+        void UploadBufferHandlerVK::SetHasWaitedForUpload()
+        {
+            UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
+            data->needsWait = false;
         }
 
         size_t UploadBufferHandlerVK::Allocate(size_t size, StagingBufferID& stagingBufferID, void*& mappedMemory)
@@ -306,8 +315,27 @@ namespace Renderer
                 data->selectedStagingBuffer = (selectedStagingBuffer + 1) % data->stagingBuffers.Num;
                 tries++;
             }
+
+            // If we after 5 seconds couldn't find a stagingbuffer to use, just wait for the next one to be available
+            u32 selectedStagingBuffer = data->selectedStagingBuffer;
+            StagingBuffer* stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
+
+            while (stagingBuffer->bufferStatus != BufferStatus::READY)
+            {
+                std::this_thread::yield();
+            }
+
+            std::scoped_lock lock(stagingBuffer->mutex);
+
+            // Try to allocate in the currently selected stagingbuffer
+            if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
+            {
+                stagingBufferID = StagingBufferID(static_cast<StagingBufferID::type>(selectedStagingBuffer));
+                mappedMemory = static_cast<void*>(&static_cast<u8*>(stagingBuffer->mappedMemory)[offset]);
+                return offset;
+            }
             
-            DebugHandler::PrintFatal("Could not allocate in staging buffer after 5 tries");
+            DebugHandler::PrintFatal("Could not allocate in staging buffer after 5 tries and waiting");
             return offset;
         }
 
