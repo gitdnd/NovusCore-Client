@@ -328,7 +328,7 @@ void FFX_ParallelSort_Scatter_uint(uint localID, uint groupID, FFX_ParallelSortC
 				uint64_t bitKey = (keyIndex >> bitShift) & 0x3;
 
 				// Create a packed histogram 
-				uint64_t packedHistogram = 1 << (bitKey * 8);
+				uint64_t packedHistogram = (uint64_t)1 << (bitKey * 8);
 
 				// Sum up all the packed keys (generates counted offsets up to current thread group)
 				uint64_t localSum = FFX_ParallelSort_BlockScanPrefix(packedHistogram, localID);

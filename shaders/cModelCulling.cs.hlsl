@@ -222,7 +222,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     //_visibleInstanceIndices[visibleInstanceIndex] = drawCallData.instanceID;
 
     const uint maskOffset = drawCallData.instanceID / 32;
-    const uint mask = 1 << (drawCallData.instanceID % 32);
+    const uint mask = (uint)1 << (drawCallData.instanceID % 32);
     _visibleInstanceMask.InterlockedOr(maskOffset * SIZEOF_UINT, mask);
 
     // If we expect to sort afterwards, output the data needed for it

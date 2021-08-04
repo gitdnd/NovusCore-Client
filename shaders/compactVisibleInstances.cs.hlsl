@@ -10,7 +10,7 @@ void main(uint3 groupID : SV_GroupID, uint groupThreadIndex : SV_GroupIndex)
 	const uint groupIndex = groupID.x;
 
 	const uint mask = _visibleInstanceMask.Load(groupIndex * SIZEOF_UINT);
-	const bool visible = mask & (1 << groupThreadIndex);
+	const bool visible = mask & ((uint)1 << groupThreadIndex);
 
 	if (visible)
 	{
