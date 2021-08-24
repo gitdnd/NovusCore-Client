@@ -116,7 +116,7 @@ namespace Renderer
             commandList.AddWaitSemaphore(waitSemaphore);
         }
 
-        commandList.PushMarker("RenderGraph", Color(0.0f, 0.0f, 0.4f));
+        commandList.PushMarker("RenderGraph", Color::PastelBlue);
         for (u32 i = 0; i < data->passes.Count(); i++)
         {
             IRenderPass* pass = data->passes[i];
@@ -124,7 +124,7 @@ namespace Renderer
             ZoneScopedC(tracy::Color::Red2);
             ZoneName(pass->_name, pass->_nameLength);
 
-            commandList.PushMarker(pass->_name, Color(0.0f, 0.4f, 0.0f));
+            commandList.PushMarker(pass->_name, Color::PastelGreen);
 
             _renderGraphBuilder->PreExecute(commandList, i);
             pass->Execute(resources, commandList);

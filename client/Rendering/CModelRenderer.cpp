@@ -44,10 +44,6 @@ AutoCVar_Int CVAR_ComplexModelDrawBoundingBoxes("complexModels.drawBoundingBoxes
 AutoCVar_Int CVAR_ComplexModelOcclusionCullEnabled("complexModels.occlusionCullEnable", "enable culling of complex models", 1, CVarFlags::EditCheckbox);
 AutoCVar_VecFloat CVAR_ComplexModelWireframeColor("complexModels.wireframeColor", "set the wireframe color for complex models", vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
-constexpr u32 BITONIC_BLOCK_SIZE = 1024;
-const u32 TRANSPOSE_BLOCK_SIZE = 16;
-constexpr u32 MATRIX_WIDTH = BITONIC_BLOCK_SIZE;
-
 CModelRenderer::CModelRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
     : _renderer(renderer)
     , _debugRenderer(debugRenderer)
@@ -154,155 +150,39 @@ void CModelRenderer::Update(f32 deltaTime)
     }
 }
 
-void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    struct CModelDepthPrepassData
-    {
-        Renderer::RenderPassMutableResource depth;
-    };
+    const u32 numInstances = static_cast<u32>(_instances.Size());
+    if (numInstances == 0)
+        return;
 
     const bool cullingEnabled = CVAR_ComplexModelCullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
     const bool alphaSortEnabled = CVAR_ComplexModelSortingEnabled.Get();
     const bool lockFrustum = CVAR_ComplexModelLockCullingFrustum.Get();
 
-    // Read back from the culling counters
-    renderGraph->AddPass<CModelDepthPrepassData>("CModel Depth Prepass",
-        [=](CModelDepthPrepassData& data, Renderer::RenderGraphBuilder& builder)
+    struct CModelCullingPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<CModelCullingPassData>("CModel Culling",
+        [=](CModelCullingPassData& data, Renderer::RenderGraphBuilder& builder)
         {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
-        [=](CModelDepthPrepassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        [=](CModelCullingPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
         {
-            GPU_SCOPED_PROFILER_ZONE(commandList, CModelPass);
-
-            if (_hasToResizeAnimationBoneDeformMatrixBuffer)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "AnimationBoneDeformMatrixBuffer";
-                desc.size = _newAnimationBoneDeformMatrixBufferSize;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-
-                Renderer::BufferID newBoneDeformMatrixBuffer = _renderer->CreateBuffer(desc);
-
-                if (_animationBoneDeformMatrixBuffer != Renderer::BufferID::Invalid())
-                {
-                    _renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer);
-                    commandList.CopyBuffer(newBoneDeformMatrixBuffer, 0, _animationBoneDeformMatrixBuffer, 0, _previousAnimationBoneDeformMatrixBufferSize);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneDeformMatrixBuffer);
-                }
-
-                _animationBoneDeformMatrixBuffer = newBoneDeformMatrixBuffer;
-                _previousAnimationBoneDeformMatrixBufferSize = _newAnimationBoneDeformMatrixBufferSize;
-                _hasToResizeAnimationBoneDeformMatrixBuffer = false;
-            }
-
-            if (_hasToResizeAnimationBoneInstanceBuffer)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "AnimationBoneInstanceBuffer";
-                desc.size = _newAnimationBoneInstanceBufferSize;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-
-                Renderer::BufferID newBoneInstanceBuffer = _renderer->CreateBuffer(desc);
-
-                if (_animationBoneInstancesBuffer != Renderer::BufferID::Invalid())
-                {
-                    _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
-                    commandList.CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _previousAnimationBoneInstanceBufferSize);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneInstanceBuffer);
-                }
-
-                _previousAnimationBoneInstanceBufferSize = _newAnimationBoneInstanceBufferSize;
-                _animationBoneInstancesBuffer = newBoneInstanceBuffer;
-                _hasToResizeAnimationBoneInstanceBuffer = false;
-            }
-
-            if (_animationRequests.size_approx() > 0)
-            {
-                commandList.PushMarker("Animation Request", Color::White);
-
-                AnimationRequest animationRequest;
-                while (_animationRequests.try_dequeue(animationRequest))
-                {
-                    const Instance& instance = _instances.ReadGet(animationRequest.instanceId);
-
-                    const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(instance.modelId);
-                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(instance.modelId);
-
-                    u32 sequenceIndex = animationRequest.sequenceId;
-                    if (!complexModel.isAnimated)
-                        continue;
-
-                    _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
-                    {
-                        if (animationRequest.flags.isPlaying)
-                        {
-                            for (u32 i = 0; i < modelInfo.numBones; i++)
-                            {
-                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                bool animationIsLooping = animationRequest.flags.isLooping;
-
-                                boneInstance.animationProgress = 0.f;
-                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                boneInstance.sequenceIndex = sequenceIndex;
-                            }
-                        }
-                        else
-                        {
-                            for (u32 i = 0; i < modelInfo.numBones; i++)
-                            {
-                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                boneInstance.animationProgress = 0.f;
-                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                boneInstance.sequenceIndex = 0;
-                            }
-                        }
-
-                        commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstancesBuffer);
-                    });
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstancesBuffer);
-                }
-
-                commandList.PopMarker();
-            }
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelCullingPass);
 
             Renderer::ComputePipelineDesc cullingPipelineDesc;
             graphResources.InitializePipelineDesc(cullingPipelineDesc);
-
-            Renderer::ComputeShaderDesc shaderDesc;
-            shaderDesc.path = "cModelCulling.cs.hlsl";
-            cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-            Renderer::GraphicsPipelineDesc pipelineDesc;
-            graphResources.InitializePipelineDesc(pipelineDesc);
-
-            // Shaders
-            Renderer::VertexShaderDesc vertexShaderDesc;
-            vertexShaderDesc.path = "cModel.vs.hlsl";
-            vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
-            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
-
-            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-            Renderer::PixelShaderDesc pixelShaderDesc;
-            pixelShaderDesc.path = "cModel.ps.hlsl";
-            pixelShaderDesc.AddPermutationField("COLOR_PASS", "0");
-
-            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
-
-            // Depth state
-            pipelineDesc.states.depthStencilState.depthEnable = true;
-            pipelineDesc.states.depthStencilState.depthWriteEnable = true;
-            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
-
-            // Rasterizer state
-            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-            // Render targets
-            pipelineDesc.depthStencil = data.depth;
 
             if (cullingEnabled && !lockFrustum)
             {
@@ -311,14 +191,8 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 _cullConstants.cameraPos = camera->GetPosition();
             }
 
-            const u32 numInstances = static_cast<u32>(_instances.Size());
             const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
             const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
-
-            if (numInstances == 0)
-            {
-                return;
-            }
 
             // clear visible instance counter
             if (numOpaqueDrawCalls > 0 || numTransparentDrawCalls > 0)
@@ -332,7 +206,7 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
             }
 
             // Cull opaque
-            if (cullingEnabled && numOpaqueDrawCalls > 0)
+            if (numOpaqueDrawCalls > 0)
             {
                 commandList.PushMarker("Opaque Culling", Color::Yellow);
 
@@ -343,6 +217,11 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _opaqueDrawCountBuffer);
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _opaqueTriangleCountBuffer);
 
+                Renderer::ComputeShaderDesc shaderDesc;
+                shaderDesc.path = "cModelCulling.cs.hlsl";
+                shaderDesc.AddPermutationField("PREPARE_SORT", "0");
+                cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
                 // Do culling
                 Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(cullingPipelineDesc);
                 commandList.BeginPipeline(pipeline);
@@ -351,47 +230,17 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 CullConstants* cullConstants = graphResources.FrameNew<CullConstants>();
                 memcpy(cullConstants, &_cullConstants, sizeof(CullConstants));
                 cullConstants->maxDrawCount = numOpaqueDrawCalls;
-                cullConstants->shouldPrepareSort = false;
                 cullConstants->occlusionCull = CVAR_ComplexModelOcclusionCullEnabled.Get();
                 commandList.PushConstant(cullConstants, 0, sizeof(CullConstants));
 
-                _cullingDescriptorSet.Bind("_packedDrawCallDatas", _opaqueDrawCallDataBuffer);
-                _cullingDescriptorSet.Bind("_drawCalls", _opaqueDrawCallBuffer);
-                _cullingDescriptorSet.Bind("_culledDrawCalls", _opaqueCulledDrawCallBuffer);
-                _cullingDescriptorSet.Bind("_drawCount", _opaqueDrawCountBuffer);
-                _cullingDescriptorSet.Bind("_triangleCount", _opaqueTriangleCountBuffer);
-                _cullingDescriptorSet.Bind("_instances", _instanceBuffer);
-                _cullingDescriptorSet.Bind("_cullingDatas", _cullingDataBuffer);
-                _cullingDescriptorSet.Bind("_visibleInstanceMask", _visibleInstanceMaskBuffer);
+                _opaqueCullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
 
-                Renderer::SamplerDesc samplerDesc;
-                samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
-
-                samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.minLOD = 0.f;
-                samplerDesc.maxLOD = 16.f;
-                samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
-
-                Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
-
-                _cullingDescriptorSet.Bind("_depthSampler", occlusionSampler);
-                _cullingDescriptorSet.Bind("_depthPyramid", resources.depthPyramid);
-
-                // These two are not actually used by the culling shader unless shouldPrepareSort is enabled, but they need to be bound to avoid validation errors...
-                _cullingDescriptorSet.Bind("_sortKeys", _transparentSortKeys);
-                _cullingDescriptorSet.Bind("_sortValues", _transparentSortValues);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_opaqueCullingDescriptorSet, frameIndex);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
 
                 commandList.Dispatch((numOpaqueDrawCalls + 31) / 32, 1, 1);
 
                 commandList.EndPipeline(pipeline);
-
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueCulledDrawCallBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueDrawCountBuffer);
 
                 commandList.PopMarker();
             }
@@ -402,15 +251,9 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _opaqueDrawCountBuffer);
             }
 
-            // Copy _transparentDrawCallBuffer into _transparentCulledDrawCallBuffer
-            //u32 copySize = numTransparentDrawCalls * sizeof(DrawCall);
-            //commandList.CopyBuffer(_transparentCulledDrawCallBuffer, 0, _transparentDrawCallBuffer, 0, copySize);
-
             // Cull transparent
-            if (cullingEnabled && numTransparentDrawCalls > 0)
+            if (numTransparentDrawCalls > 0)
             {
-                //commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _transparentCulledDrawCallBuffer);
-
                 commandList.PushMarker("Transparent Culling", Color::Yellow);
 
                 // Reset the counters
@@ -423,6 +266,7 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 // Do culling
                 Renderer::ComputeShaderDesc shaderDesc;
                 shaderDesc.path = "cModelCulling.cs.hlsl";
+                shaderDesc.AddPermutationField("PREPARE_SORT", alphaSortEnabled ? "1" : "0");
                 cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
 
                 Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(cullingPipelineDesc);
@@ -432,23 +276,12 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 CullConstants* cullConstants = graphResources.FrameNew<CullConstants>();
                 memcpy(cullConstants, &_cullConstants, sizeof(CullConstants));
                 cullConstants->maxDrawCount = numTransparentDrawCalls;
-                cullConstants->shouldPrepareSort = alphaSortEnabled;
                 cullConstants->occlusionCull = CVAR_ComplexModelOcclusionCullEnabled.Get();
                 commandList.PushConstant(cullConstants, 0, sizeof(CullConstants));
 
-                _cullingDescriptorSet.Bind("_packedDrawCallDatas", _transparentDrawCallDataBuffer);
-                _cullingDescriptorSet.Bind("_drawCalls", _transparentDrawCallBuffer);
-                _cullingDescriptorSet.Bind("_culledDrawCalls", _transparentCulledDrawCallBuffer);
-                _cullingDescriptorSet.Bind("_drawCount", _transparentDrawCountBuffer);
-                _cullingDescriptorSet.Bind("_triangleCount", _transparentTriangleCountBuffer);
-                _cullingDescriptorSet.Bind("_instances", _instanceBuffer);
-                _cullingDescriptorSet.Bind("_cullingDatas", _cullingDataBuffer);
-                _cullingDescriptorSet.Bind("_visibleInstanceMask", _visibleInstanceMaskBuffer);
+                _transparentCullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
 
-                _cullingDescriptorSet.Bind("_sortKeys", _transparentSortKeys);
-                _cullingDescriptorSet.Bind("_sortValues", _transparentSortValues);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_transparentCullingDescriptorSet, frameIndex);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
 
                 commandList.Dispatch((numTransparentDrawCalls + 31) / 32, 1, 1);
@@ -478,13 +311,8 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
 
                 Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(compactPipelineDesc);
 
-                Renderer::DescriptorSet descriptorSet;
-                descriptorSet.Bind("_visibleInstanceMask", _visibleInstanceMaskBuffer);
-                descriptorSet.Bind("_visibleInstanceCount", _visibleInstanceCountBuffer);
-                descriptorSet.Bind("_visibleInstanceIDs", _visibleInstanceIndexBuffer);
-
                 commandList.BeginPipeline(pipeline);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_DRAW, &descriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_compactDescriptorSet, frameIndex);
                 commandList.Dispatch((numInstances + 31) / 32, 1, 1);
                 commandList.EndPipeline(pipeline);
 
@@ -505,10 +333,6 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
 
                 Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(createArgumentsPipelineDesc);
 
-                Renderer::DescriptorSet descriptorSet;
-                descriptorSet.Bind("_source", _visibleInstanceCountBuffer);
-                descriptorSet.Bind("_target", _visibleInstanceCountArgumentBuffer32);
-
                 struct PushConstants
                 {
                     u32 sourceByteOffset;
@@ -521,15 +345,140 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 constants.threadGroupSize = 32;
 
                 commandList.BeginPipeline(pipeline);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_DRAW, &descriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_DRAW, &_visibleInstanceArgumentDescriptorSet, frameIndex);
                 commandList.PushConstant(&constants, 0, sizeof(PushConstants));
                 commandList.Dispatch(1, 1, 1);
                 commandList.EndPipeline(pipeline);
 
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _visibleInstanceCountArgumentBuffer32);
+                commandList.PopMarker();
+            }
+        });
+}
+
+void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    const u32 numInstances = static_cast<u32>(_instances.Size());
+    if (numInstances == 0)
+        return;
+
+    struct CModelAnimationPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<CModelAnimationPassData>("CModel Animation",
+        [=](CModelAnimationPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](CModelAnimationPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelAnimationPass);
+
+            if (_hasToResizeAnimationBoneDeformMatrixBuffer)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationBoneDeformMatrixBuffer";
+                desc.size = _newAnimationBoneDeformMatrixBufferSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+                Renderer::BufferID newBoneDeformMatrixBuffer = _renderer->CreateBuffer(desc);
+
+                if (_animationBoneDeformMatrixBuffer != Renderer::BufferID::Invalid())
+                {
+                    _renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer);
+                    commandList.CopyBuffer(newBoneDeformMatrixBuffer, 0, _animationBoneDeformMatrixBuffer, 0, _previousAnimationBoneDeformMatrixBufferSize);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneDeformMatrixBuffer);
+                }
+
+                _animationBoneDeformMatrixBuffer = newBoneDeformMatrixBuffer;
+                _previousAnimationBoneDeformMatrixBufferSize = _newAnimationBoneDeformMatrixBufferSize;
+                _hasToResizeAnimationBoneDeformMatrixBuffer = false;
+
+                _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrix"_h, _animationBoneDeformMatrixBuffer);
+                _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+                _materialPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+            }
+
+            if (_hasToResizeAnimationBoneInstanceBuffer)
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "AnimationBoneInstanceBuffer";
+                desc.size = _newAnimationBoneInstanceBufferSize;
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+                Renderer::BufferID newBoneInstanceBuffer = _renderer->CreateBuffer(desc);
+
+                if (_animationBoneInstancesBuffer != Renderer::BufferID::Invalid())
+                {
+                    _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
+                    commandList.CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _previousAnimationBoneInstanceBufferSize);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneInstanceBuffer);
+                }
+
+                _previousAnimationBoneInstanceBufferSize = _newAnimationBoneInstanceBufferSize;
+                _animationBoneInstancesBuffer = newBoneInstanceBuffer;
+                _hasToResizeAnimationBoneInstanceBuffer = false;
+
+                _animationPrepassDescriptorSet.Bind("_animationBoneInstances"_h, _animationBoneInstancesBuffer);
+            }
+
+            if (_animationRequests.size_approx() > 0)
+            {
+                commandList.PushMarker("Animation Request", Color::White);
+
+                AnimationRequest animationRequest;
+                while (_animationRequests.try_dequeue(animationRequest))
+                {
+                    const Instance& instance = _instances.ReadGet(animationRequest.instanceId);
+
+                    const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(instance.modelId);
+                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(instance.modelId);
+
+                    u32 sequenceIndex = animationRequest.sequenceId;
+                    if (!complexModel.isAnimated)
+                        continue;
+
+                    _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
+                        {
+                            if (animationRequest.flags.isPlaying)
+                            {
+                                for (u32 i = 0; i < modelInfo.numBones; i++)
+                                {
+                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                    bool animationIsLooping = animationRequest.flags.isLooping;
+
+                                    boneInstance.animationProgress = 0.f;
+                                    boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                    boneInstance.sequenceIndex = sequenceIndex;
+                                }
+                            }
+                            else
+                            {
+                                for (u32 i = 0; i < modelInfo.numBones; i++)
+                                {
+                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                    boneInstance.animationProgress = 0.f;
+                                    boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                    boneInstance.sequenceIndex = 0;
+                                }
+                            }
+
+                            commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
+                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstancesBuffer);
+                        });
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstancesBuffer);
+                }
 
                 commandList.PopMarker();
             }
+
+            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+            const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
 
             // Set Animation Prepass Pipeline
             if (numOpaqueDrawCalls > 0 || numTransparentDrawCalls > 0)
@@ -567,30 +516,99 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                     commandList.PushConstant(deltaTimeConstant, 0, sizeof(AnimationConstants));
                 }
 
-                _animationPrepassDescriptorSet.Bind("_visibleInstanceCount", _visibleInstanceCountBuffer);
-                _animationPrepassDescriptorSet.Bind("_visibleInstanceIndices", _visibleInstanceIndexBuffer);
-                _animationPrepassDescriptorSet.Bind("_instances", _instanceBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationSequence", _animationSequenceBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationModelInfo", _animationModelInfoBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationBoneInfo", _animationBoneInfoBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationBoneInstances", _animationBoneInstancesBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationTrackInfo", _animationTrackInfoBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationTrackTimestamp", _animationTrackTimestampBuffer);
-                _animationPrepassDescriptorSet.Bind("_animationTrackValue", _animationTrackValueBuffer);
-
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::DEBUG, &resources.debugDescriptorSet, frameIndex);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_animationPrepassDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_animationPrepassDescriptorSet, frameIndex);
 
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _visibleInstanceCountArgumentBuffer32);
                 commandList.DispatchIndirect(_visibleInstanceCountArgumentBuffer32, 0);
 
                 commandList.EndPipeline(pipeline);
 
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _instanceBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _animationBoneDeformMatrixBuffer);
-
                 commandList.PopMarker();
             }
+        });
+}
+
+void CModelRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    const u32 numInstances = static_cast<u32>(_instances.Size());
+    if (numInstances == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_ComplexModelCullingEnabled.Get();
+
+    struct CModelGeometryPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<CModelGeometryPassData>("CModel Geometry",
+        [=](CModelGeometryPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](CModelGeometryPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelGeometryPass);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _instanceBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _instanceBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToPixelShaderRead, _instanceBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _animationBoneDeformMatrixBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToPixelShaderRead, _animationBoneDeformMatrixBuffer);
+
+            Renderer::GraphicsPipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
+
+            // Shaders
+            Renderer::VertexShaderDesc vertexShaderDesc;
+            vertexShaderDesc.path = "cModel.vs.hlsl";
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
+
+            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+            Renderer::PixelShaderDesc pixelShaderDesc;
+            pixelShaderDesc.path = "cModel.ps.hlsl";
+            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+            // Depth state
+            pipelineDesc.states.depthStencilState.depthEnable = true;
+            pipelineDesc.states.depthStencilState.depthWriteEnable = true;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+
+            // Rasterizer state
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+
+            // Render targets
+            pipelineDesc.renderTargets[0] = data.visibilityBuffer;
+            pipelineDesc.depthStencil = data.depth;
+
+            if (cullingEnabled)
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueCulledDrawCallBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueDrawCountBuffer);
+
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentCulledDrawCallBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentDrawCountBuffer);
+            }
+            else
+            {
+                const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+                const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
+
+                // Reset the counters
+                commandList.FillBuffer(_opaqueDrawCountBuffer, 0, 4, numOpaqueDrawCalls);
+                commandList.FillBuffer(_transparentDrawCountBuffer, 0, 4, numTransparentDrawCalls);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _opaqueDrawCountBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _transparentDrawCountBuffer);
+            }
+
+            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
 
             // Set Opaque Pipeline
             if (numOpaqueDrawCalls > 0)
@@ -603,13 +621,7 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
 
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
 
-                _passDescriptorSet.Bind("_packedDrawCallDatas", _opaqueDrawCallDataBuffer);
-                _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
-                _passDescriptorSet.Bind("_textures", _cModelTextures);
-                _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
-                _passDescriptorSet.Bind("_instances", _instanceBuffer);
-                _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_geometryPassDescriptorSet, frameIndex);
 
                 commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
 
@@ -630,299 +642,58 @@ void CModelRenderer::AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGr
                 commandList.PopMarker();
             }
 
-            // We skip transparencies since they don't write to depth
+            // We skip transparencies since they don't get rendered through visibility buffers
         });
 }
 
-void CModelRenderer::AddComplexModelPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+void CModelRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    struct CModelPassData
-    {
-        Renderer::RenderPassMutableResource color;
-        Renderer::RenderPassMutableResource objectIDs;
-        Renderer::RenderPassMutableResource depth;
-    };
-
-    const bool cullingEnabled = CVAR_ComplexModelCullingEnabled.Get();
-    const bool alphaSortEnabled = CVAR_ComplexModelSortingEnabled.Get();
-    const bool lockFrustum = CVAR_ComplexModelLockCullingFrustum.Get();
-
-    // Read back from the culling counters
-    renderGraph->AddPass<CModelPassData>("CModel Pass",
-        [=](CModelPassData& data, Renderer::RenderGraphBuilder& builder)
-    {
-        data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-        data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-        data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-
-        return true; // Return true from setup to enable this pass, return false to disable it
-    },
-        [=](CModelPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
-    {
-        GPU_SCOPED_PROFILER_ZONE(commandList, CModelPass);
-
-        Renderer::GraphicsPipelineDesc pipelineDesc;
-        graphResources.InitializePipelineDesc(pipelineDesc);
-
-        // Shaders
-        Renderer::VertexShaderDesc vertexShaderDesc;
-        vertexShaderDesc.path = "cModel.vs.hlsl";
-        vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
-        vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
-
-        pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-        Renderer::PixelShaderDesc pixelShaderDesc;
-        pixelShaderDesc.path = "cModel.ps.hlsl";
-        pixelShaderDesc.AddPermutationField("COLOR_PASS", "1");
-
-        pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
-
-        // Depth state
-        pipelineDesc.states.depthStencilState.depthEnable = true;
-        pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::EQUAL;
-
-        // Rasterizer state
-        pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-        pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-        // Render targets
-        pipelineDesc.renderTargets[0] = data.color;
-        pipelineDesc.renderTargets[1] = data.objectIDs;
-        pipelineDesc.depthStencil = data.depth;
-
-        struct Constants
-        {
-            u32 isTransparent;
-        };
-
-        const u32 numInstances = static_cast<u32>(_instances.Size());
-        const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
-        const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
-
-        // Set Opaque Pipeline
-        if (numOpaqueDrawCalls > 0)
-        {
-            commandList.PushMarker("Opaque " + std::to_string(numOpaqueDrawCalls), Color::White);
-
-            // Draw
-            Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-            commandList.BeginPipeline(pipeline);
-
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-            _passDescriptorSet.Bind("_packedDrawCallDatas", _opaqueDrawCallDataBuffer);
-            _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
-            _passDescriptorSet.Bind("_textures", _cModelTextures);
-            _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
-            _passDescriptorSet.Bind("_instances", _instanceBuffer);
-            _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-            _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-            Constants* constants = graphResources.FrameNew<Constants>();
-            constants->isTransparent = false;
-            commandList.PushConstant(constants, 0, sizeof(Constants));
-
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-            
-            Renderer::BufferID argumentBuffer = (cullingEnabled) ? _opaqueCulledDrawCallBuffer : _opaqueDrawCallBuffer;
-            commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _opaqueDrawCountBuffer, 0, numOpaqueDrawCalls);
-
-            commandList.EndPipeline(pipeline);
-
-            commandList.PopMarker();
-        }
-
-        // Set Transparent Pipeline
-        if (numTransparentDrawCalls > 0)
-        {
-            commandList.PushMarker("Transparent " + std::to_string(numTransparentDrawCalls), Color::White);
-
-            // Sort, but only if we cull since that prepares the sorting buffers
-            if (alphaSortEnabled && cullingEnabled)
-            {
-                commandList.PushMarker("Sort", Color::White);
-
-                // First we sort our list of keys and values
-                {
-                    // Barriers
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _transparentDrawCountBuffer);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _transparentSortKeys);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _transparentSortValues);
-
-                    SortUtils::SortIndirectCountParams sortParams;
-                    sortParams.maxNumKeys = numTransparentDrawCalls;
-                    sortParams.maxThreadGroups = 800; // I am not sure why this is set to 800, but the sample code used this value so I'll go with it
-
-                    sortParams.numKeysBuffer = _transparentDrawCountBuffer;
-                    sortParams.keysBuffer = _transparentSortKeys;
-                    sortParams.valuesBuffer = _transparentSortValues;
-
-                    SortUtils::SortIndirectCount(_renderer, graphResources, commandList, frameIndex, sortParams);
-                }
-
-                // Then we apply it to our drawcalls
-                {
-                    commandList.PushMarker("ApplySort", Color::White);
-
-                    // Barriers
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _transparentCulledDrawCallBuffer);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _transparentSortKeys);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _transparentSortValues);
-
-                    Renderer::ComputeShaderDesc shaderDesc;
-                    shaderDesc.path = "cModelApplySort.cs.hlsl";
-                    Renderer::ComputePipelineDesc pipelineDesc;
-                    pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-                    Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
-                    commandList.BeginPipeline(pipeline);
-
-                    _sortingDescriptorSet.Bind("_sortKeys", _transparentSortKeys);
-                    _sortingDescriptorSet.Bind("_sortValues", _transparentSortValues);
-                    _sortingDescriptorSet.Bind("_culledDrawCount", _transparentDrawCountBuffer);
-                    _sortingDescriptorSet.Bind("_culledDrawCalls", _transparentCulledDrawCallBuffer);
-                    _sortingDescriptorSet.Bind("_sortedCulledDrawCalls", _transparentSortedCulledDrawCallBuffer);
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_sortingDescriptorSet, frameIndex);
-
-                    commandList.Dispatch((numTransparentDrawCalls + 31) / 32, 1, 1);
-
-                    commandList.EndPipeline(pipeline);
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _transparentSortedCulledDrawCallBuffer);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _transparentTriangleCountReadBackBuffer);
-
-                    commandList.PopMarker();
-                }
-
-                commandList.PopMarker();
-            }
-
-            // Decide which drawcallBuffer to use and add barriers
-            Renderer::BufferID drawCallBuffer;
-            if (cullingEnabled)
-            {
-                if (alphaSortEnabled)
-                {
-                    drawCallBuffer = _transparentSortedCulledDrawCallBuffer;
-                }
-                else
-                {
-                    drawCallBuffer = _transparentCulledDrawCallBuffer;
-                }
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, drawCallBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentDrawCountBuffer);
-            }
-            else
-            {
-                drawCallBuffer = _transparentCulledDrawCallBuffer;
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _transparentCulledDrawCallBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _transparentDrawCountBuffer);
-            }
-
-            // Draw
-            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
-
-            // ColorTarget
-            pipelineDesc.states.blendState.renderTargets[0].blendEnable = true;
-            pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
-            pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::SRC_ALPHA;
-            pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
-
-            Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-            commandList.BeginPipeline(pipeline);
-
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-            _passDescriptorSet.Bind("_packedDrawCallDatas", _transparentDrawCallDataBuffer);
-            _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
-            _passDescriptorSet.Bind("_textures", _cModelTextures);
-            _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
-            _passDescriptorSet.Bind("_instances", _instanceBuffer);
-            _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-            Constants* constants = graphResources.FrameNew<Constants>();
-            constants->isTransparent = true;
-            commandList.PushConstant(constants, 0, sizeof(Constants));
-
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
-            if (cullingEnabled)
-            {
-                commandList.DrawIndexedIndirectCount(drawCallBuffer, 0, _transparentDrawCountBuffer, 0, numTransparentDrawCalls);
-            }
-            else
-            {
-                commandList.DrawIndexedIndirect(drawCallBuffer, 0, numTransparentDrawCalls);
-            }
-
-            commandList.EndPipeline(pipeline);
-
-            // Copy from our draw count buffer to the readback buffer
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentDrawCountBuffer);
-            commandList.CopyBuffer(_transparentDrawCountReadBackBuffer, 0, _transparentDrawCountBuffer, 0, 4);
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentDrawCountBuffer);
-
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentTriangleCountBuffer);
-            commandList.CopyBuffer(_transparentTriangleCountReadBackBuffer, 0, _transparentTriangleCountBuffer, 0, 4);
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentTriangleCountReadBackBuffer);
-
-            commandList.PopMarker();
-        }
-    });
+    const u32 numInstances = static_cast<u32>(_instances.Size());
+    if (numInstances == 0)
+        return;
 
     Editor::Editor* editor = ServiceLocator::GetEditor();
-    if (editor->HasSelectedObject())
-    {
-        u32 activeToken = editor->GetActiveToken();
+    if (!editor->HasSelectedObject())
+        return;
+    
+    u32 activeToken = editor->GetActiveToken();
 
-        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+    PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
 
-        PixelQuery::PixelData pixelData;
+    PixelQuery::PixelData pixelData;
 
-        if (pixelQuery->GetQueryResult(activeToken, pixelData))
-        {
-            if (pixelData.type == Editor::QueryObjectType::ComplexModelOpaque || 
-                pixelData.type == Editor::QueryObjectType::ComplexModelTransparent)
-            {
-                const Editor::Editor::SelectedComplexModelData& selectedComplexModelData = editor->GetSelectedComplexModelData();
-                if (selectedComplexModelData.drawWireframe)
-                {
-                    bool isOpaque = pixelData.type == Editor::QueryObjectType::ComplexModelOpaque;
-
-                    u32 drawCallDataID = pixelData.value;
-                    const Editor::Editor::SelectedComplexModelData& selectedComplexModelData = editor->GetSelectedComplexModelData();
-                    AddComplexModelEditorPass(renderGraph, resources, frameIndex, drawCallDataID, isOpaque, selectedComplexModelData.selectedRenderBatch - 1, selectedComplexModelData.wireframeEntireObject);
-                }
-            }
-        }
-    }
-}
-
-void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 drawCallDataID, bool isOpaque, u32 selectedRenderBatch, bool wireframeEntireObject)
-{
+    if (!pixelQuery->GetQueryResult(activeToken, pixelData))
+        return;
+    
+    if (pixelData.type != Editor::QueryObjectType::ComplexModelOpaque) // Transparent mapobjects won't show up in the visibility buffer so they are TODO
+        return;
+    
+    const Editor::Editor::SelectedComplexModelData& selectedComplexModelData = editor->GetSelectedComplexModelData();
+    if (!selectedComplexModelData.drawWireframe)
+        return;
+    
+    u32 drawCallDataID = pixelData.value;
+    u32 selectedRenderBatch = selectedComplexModelData.selectedRenderBatch - 1;
+    
     struct CModelPassData
     {
         Renderer::RenderPassMutableResource color;
-        Renderer::RenderPassMutableResource objectIDs;
         Renderer::RenderPassMutableResource depth;
     };
 
     // Read back from the culling counters
-    renderGraph->AddPass<CModelPassData>("CModel Pass",
+    renderGraph->AddPass<CModelPassData>("CModel Editor",
         [=](CModelPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
         [=](CModelPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
         {
-            GPU_SCOPED_PROFILER_ZONE(commandList, CModelPass);
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelEditorPass);
 
             Renderer::GraphicsPipelineDesc pipelineDesc;
             graphResources.InitializePipelineDesc(pipelineDesc);
@@ -930,7 +701,6 @@ void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGrap
             // Shaders
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "cModel.vs.hlsl";
-            vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
             vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
@@ -950,7 +720,6 @@ void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGrap
             pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
             // Render targets
             pipelineDesc.renderTargets[0] = data.color;
-            pipelineDesc.renderTargets[1] = data.objectIDs;
             pipelineDesc.depthStencil = data.depth;
 
             struct ColorConstant
@@ -958,58 +727,36 @@ void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGrap
                 vec4 value;
             };
 
-            // Set Opaque Pipeline
-            if (isOpaque)
+            commandList.PushMarker("Opaque Editor" + std::to_string(selectedRenderBatch), Color::White);
+
+            // Draw
+            Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+            commandList.BeginPipeline(pipeline);
+
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_geometryPassDescriptorSet, frameIndex);
+
+            ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+            colorConstant->value = CVAR_ComplexModelWireframeColor.Get();
+            commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+            const SafeVector<CModelRenderer::DrawCallData>& drawCallDatas = GetOpaqueDrawCallData();
+            const CModelRenderer::DrawCallData& drawCallData = drawCallDatas.ReadGet(drawCallDataID);
+
+            const CModelRenderer::Instance& instance = _instances.ReadGet(drawCallData.instanceID);
+            const CModelRenderer::LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(instance.modelId);
+
+            u32 numDrawCalls = static_cast<u32>(loadedComplexModel.opaqueDrawCallTemplates.size());
+
+            if (numDrawCalls)
             {
-                commandList.PushMarker("Opaque Editor" + std::to_string(selectedRenderBatch), Color::White);
-
-                // Draw
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-                _passDescriptorSet.Bind("_packedDrawCallDatas", _opaqueDrawCallDataBuffer);
-                _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
-                _passDescriptorSet.Bind("_textures", _cModelTextures);
-                _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
-                _passDescriptorSet.Bind("_instances", _instanceBuffer);
-                _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
-                colorConstant->value = CVAR_ComplexModelWireframeColor.Get();
-                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
-
-                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
-                const SafeVector<CModelRenderer::DrawCallData>& drawCallDatas = GetOpaqueDrawCallData();
-                const CModelRenderer::DrawCallData& drawCallData = drawCallDatas.ReadGet(drawCallDataID);
-
-                const CModelRenderer::Instance& instance = _instances.ReadGet(drawCallData.instanceID);
-                const CModelRenderer::LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(instance.modelId);
-
-                u32 numDrawCalls = static_cast<u32>(loadedComplexModel.opaqueDrawCallTemplates.size());
-
-                if (numDrawCalls)
+                if (selectedComplexModelData.wireframeEntireObject)
                 {
-                    if (wireframeEntireObject)
+                    for (u32 i = 0; i < numDrawCalls; i++)
                     {
-                        for (u32 i = 0; i < numDrawCalls; i++)
-                        {
-                            const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[i];
-
-                            u32 vertexOffset = drawCall.vertexOffset;
-                            u32 firstIndex = drawCall.firstIndex;
-                            u32 indexCount = drawCall.indexCount;
-
-                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
-                        }
-                    }
-                    else
-                    {
-                        const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[selectedRenderBatch];
+                        const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[i];
 
                         u32 vertexOffset = drawCall.vertexOffset;
                         u32 firstIndex = drawCall.firstIndex;
@@ -1018,82 +765,20 @@ void CModelRenderer::AddComplexModelEditorPass(Renderer::RenderGraph* renderGrap
                         commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
                     }
                 }
-
-                commandList.EndPipeline(pipeline);
-
-                commandList.PopMarker();
-            }
-            // Set Transparent Pipeline
-            else
-            {
-                commandList.PushMarker("Transparent " + std::to_string(selectedRenderBatch), Color::White);
-
-                // Draw
-                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
-
-                // ColorTarget
-                pipelineDesc.states.blendState.renderTargets[0].blendEnable = true;
-                pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
-                pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::SRC_ALPHA;
-                pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
-
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-                _passDescriptorSet.Bind("_packedDrawCallDatas", _transparentDrawCallDataBuffer);
-                _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
-                _passDescriptorSet.Bind("_textures", _cModelTextures);
-                _passDescriptorSet.Bind("_textureUnits", _textureUnitBuffer);
-                _passDescriptorSet.Bind("_instances", _instanceBuffer);
-                _passDescriptorSet.Bind("_animationBoneDeformMatrix", _animationBoneDeformMatrixBuffer);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
-                colorConstant->value = CVAR_ComplexModelWireframeColor.Get();
-                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
-
-                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
-                const SafeVector<CModelRenderer::DrawCallData>& drawCallDatas = GetTransparentDrawCallData();
-                const CModelRenderer::DrawCallData& drawCallData = drawCallDatas.ReadGet(drawCallDataID);
-
-                const CModelRenderer::Instance& instance = _instances.ReadGet(drawCallData.instanceID);
-                const CModelRenderer::LoadedComplexModel& loadedComplexModel = _loadedComplexModels.ReadGet(instance.modelId);
-
-                u32 numDrawCalls = static_cast<u32>(loadedComplexModel.transparentDrawCallTemplates.size());
-
-                if (numDrawCalls)
+                else
                 {
-                    if (wireframeEntireObject)
-                    {
-                        for (u32 i = 0; i < numDrawCalls; i++)
-                        {
-                            const CModelRenderer::DrawCall& drawCall = loadedComplexModel.transparentDrawCallTemplates[i];
+                    const CModelRenderer::DrawCall& drawCall = loadedComplexModel.opaqueDrawCallTemplates[selectedRenderBatch];
 
-                            u32 vertexOffset = drawCall.vertexOffset;
-                            u32 firstIndex = drawCall.firstIndex;
-                            u32 indexCount = drawCall.indexCount;
+                    u32 vertexOffset = drawCall.vertexOffset;
+                    u32 firstIndex = drawCall.firstIndex;
+                    u32 indexCount = drawCall.indexCount;
 
-                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
-                        }
-                    }
-                    else
-                    {
-                        const CModelRenderer::DrawCall& drawCall = loadedComplexModel.transparentDrawCallTemplates[selectedRenderBatch];
-
-                        u32 vertexOffset = drawCall.vertexOffset;
-                        u32 firstIndex = drawCall.firstIndex;
-                        u32 indexCount = drawCall.indexCount;
-
-                        commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
-                    }
+                    commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, drawCallDataID);
                 }
-
-                commandList.EndPipeline(pipeline);
-                commandList.PopMarker();
             }
+
+            commandList.EndPipeline(pipeline);
+            commandList.PopMarker();
         });
 }
 
@@ -1134,6 +819,7 @@ void CModelRenderer::ExecuteLoad()
 {
     ZoneScopedN("CModelRenderer::ExecuteLoad()");
 
+    _numTotalAnimatedVertices = 0;
     std::atomic<size_t> numComplexModelsToLoad = 0;
     
     _animationBoneDeformRangeAllocator.Reset();
@@ -1315,6 +1001,8 @@ void CModelRenderer::CreatePermanentResources()
     textureArrayDesc.size = 4096;
 
     _cModelTextures = _renderer->CreateTextureArray(textureArrayDesc);
+    _geometryPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
+    _materialPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
 
     Renderer::SamplerDesc samplerDesc;
     samplerDesc.enabled = true;
@@ -1325,7 +1013,21 @@ void CModelRenderer::CreatePermanentResources()
     samplerDesc.shaderVisibility = Renderer::ShaderVisibility::PIXEL;
 
     _sampler = _renderer->CreateSampler(samplerDesc);
-    _passDescriptorSet.Bind("_sampler", _sampler);
+    _geometryPassDescriptorSet.Bind("_sampler"_h, _sampler);
+
+    Renderer::SamplerDesc occlusionSamplerDesc;
+    occlusionSamplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+
+    occlusionSamplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.minLOD = 0.f;
+    occlusionSamplerDesc.maxLOD = 16.f;
+    occlusionSamplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+    _occlusionSampler = _renderer->CreateSampler(occlusionSamplerDesc);
+    _opaqueCullingDescriptorSet.Bind("_depthSampler"_h, _occlusionSampler);
+    _transparentCullingDescriptorSet.Bind("_depthSampler"_h, _occlusionSampler);
 
     // Create OpaqueDrawCountBuffer
     {
@@ -1334,6 +1036,8 @@ void CModelRenderer::CreatePermanentResources()
         desc.size = sizeof(u32);
         desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _opaqueDrawCountBuffer = _renderer->CreateBuffer(_opaqueDrawCountBuffer, desc);
+
+        _opaqueCullingDescriptorSet.Bind("_drawCount"_h, _opaqueDrawCountBuffer);
 
         desc.name = "CModelOpaqueDrawCountRBBuffer";
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
@@ -1349,6 +1053,8 @@ void CModelRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _transparentDrawCountBuffer = _renderer->CreateBuffer(_transparentDrawCountBuffer, desc);
 
+        _transparentCullingDescriptorSet.Bind("_drawCount"_h, _transparentDrawCountBuffer);
+
         desc.name = "CModelTransparentDrawCountRBBuffer";
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
@@ -1363,6 +1069,8 @@ void CModelRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _opaqueTriangleCountBuffer = _renderer->CreateBuffer(_opaqueTriangleCountBuffer, desc);
 
+        _opaqueCullingDescriptorSet.Bind("_triangleCount"_h, _opaqueTriangleCountBuffer);
+
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _opaqueTriangleCountReadBackBuffer = _renderer->CreateBuffer(_opaqueTriangleCountReadBackBuffer, desc);
     }
@@ -1374,6 +1082,8 @@ void CModelRenderer::CreatePermanentResources()
         desc.size = sizeof(u32);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _transparentTriangleCountBuffer = _renderer->CreateBuffer(_transparentTriangleCountBuffer, desc);
+
+        _transparentCullingDescriptorSet.Bind("_triangleCount"_h, _transparentTriangleCountBuffer);
 
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _transparentTriangleCountReadBackBuffer = _renderer->CreateBuffer(_transparentTriangleCountReadBackBuffer, desc);
@@ -1390,6 +1100,10 @@ void CModelRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _animationBoneDeformMatrixBuffer = _renderer->CreateBuffer(_animationBoneDeformMatrixBuffer, desc);
 
+        _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrix"_h, _animationBoneDeformMatrixBuffer);
+        _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+        _materialPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+
         _animationBoneDeformRangeAllocator.Init(0, boneDeformMatrixBufferSize);
     }
 
@@ -1403,6 +1117,8 @@ void CModelRenderer::CreatePermanentResources()
         desc.size = boneInstanceBufferSize;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _animationBoneInstancesBuffer = _renderer->CreateBuffer(_animationBoneInstancesBuffer, desc);
+
+        _animationPrepassDescriptorSet.Bind("_animationBoneInstances"_h, _animationBoneInstancesBuffer);
 
         _animationBoneInstancesRangeAllocator.Init(0, boneInstanceBufferSize);
     }
@@ -1426,7 +1142,6 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
     vec3 maxBounding = cModel.cullingData.maxBoundingBox;
     entt::registry* registry = ServiceLocator::GetGameRegistry();
     TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
-
 
     // Add Sequences
     {
@@ -1638,6 +1353,9 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         memcpy(&vertices[numVerticesBeforeAdd], cModel.vertices.data(), numVerticesToAdd * sizeof(CModel::ComplexVertex));
     });
 
+    complexModel.numVertices = static_cast<u32>(cModel.vertices.size());
+    complexModel.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
+
     // Handle the CullingData
     size_t numCullingDataBeforeAdd = 0;
     _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
@@ -1676,7 +1394,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
 
         drawCallTemplate.instanceCount = 1;
         drawCallTemplate.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
-
+        
         // Add indices
         size_t numIndicesBeforeAdd = 0;
         size_t numIndicesToAdd = 0;
@@ -2196,12 +1914,16 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
 
     instance->modelId = complexModel.objectID;
     instance->instanceMatrix = glm::translate(mat4x4(1.0f), pos) * rotationMatrix * scaleMatrix;
+    instance->vertexOffset = complexModel.vertexOffset;
 
     BufferRangeFrame& boneDeformRangeFrame = _instanceBoneDeformRangeFrames.EmplaceBack();
     BufferRangeFrame& boneInstanceRangeFrame = _instanceBoneInstanceRangeFrames.EmplaceBack();
 
     if (complexModel.isAnimated)
     {
+        u32 vertexOffset = _numTotalAnimatedVertices.fetch_add(complexModel.numVertices);
+        instance->animatedVertexOffset = vertexOffset;
+
         u32 numBones = complexModel.numBones;
 
         if (!_animationBoneDeformRangeAllocator.Allocate(numBones * sizeof(mat4x4), boneDeformRangeFrame))
@@ -2352,7 +2074,22 @@ void CModelRenderer::CreateBuffers()
             desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
             _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, vertices.data(), desc.size);
+            _geometryPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertexBuffer);
+            _materialPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertexBuffer);
         });
+    }
+
+    // Create Animated Vertex Position buffer
+    {
+        Renderer::BufferDesc desc;
+        desc.name = "CModelVertexBuffer";
+        desc.size = sizeof(PackedAnimatedVertexPositions) * _numTotalAnimatedVertices;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+        _animatedVertexPositions = _renderer->CreateBuffer(_animatedVertexPositions, desc);
+
+        _geometryPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
+        _materialPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
     }
     
     // Create Index buffer
@@ -2362,8 +2099,11 @@ void CModelRenderer::CreateBuffers()
             Renderer::BufferDesc desc;
             desc.name = "CModelIndexBuffer";
             desc.size = sizeof(u16) * indices.size();
-            desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _indexBuffer = _renderer->CreateAndFillBuffer(_indexBuffer, desc, indices.data(), desc.size);
+
+            _geometryPassDescriptorSet.Bind("_cModelIndices"_h, _indexBuffer);
+            _materialPassDescriptorSet.Bind("_cModelIndices"_h, _indexBuffer);
         });
     }
 
@@ -2376,6 +2116,8 @@ void CModelRenderer::CreateBuffers()
             desc.size = sizeof(TextureUnit) * textureUnits.size();
             desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _textureUnitBuffer = _renderer->CreateAndFillBuffer(_textureUnitBuffer, desc, textureUnits.data(), desc.size);
+            _geometryPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnitBuffer);
+            _materialPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnitBuffer);
         });
     }
 
@@ -2388,6 +2130,12 @@ void CModelRenderer::CreateBuffers()
             desc.size = sizeof(Instance) * instances.size();
             desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _instanceBuffer = _renderer->CreateAndFillBuffer(_instanceBuffer, desc, instances.data(), desc.size);
+
+            _opaqueCullingDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
+            _transparentCullingDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
+            _animationPrepassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
+            _geometryPassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
+            _materialPassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
         });
     }
 
@@ -2400,6 +2148,9 @@ void CModelRenderer::CreateBuffers()
             desc.size = sizeof(CModel::CullingData) * cullingDatas.size();
             desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
             _cullingDataBuffer = _renderer->CreateAndFillBuffer(_cullingDataBuffer, desc, cullingDatas.data(), desc.size);
+
+            _opaqueCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDataBuffer);
+            _transparentCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDataBuffer);
         });
     }
 
@@ -2415,6 +2166,8 @@ void CModelRenderer::CreateBuffers()
                 desc.size = sizeof(AnimationSequence) * numSequences;
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _animationSequenceBuffer = _renderer->CreateAndFillBuffer(_animationSequenceBuffer, desc, animationSequence.data(), desc.size);
+
+                _animationPrepassDescriptorSet.Bind("_animationSequence"_h, _animationSequenceBuffer);
             }
         });
     }    
@@ -2431,6 +2184,8 @@ void CModelRenderer::CreateBuffers()
                 desc.size = sizeof(AnimationModelInfo) * numModelInfo;
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _animationModelInfoBuffer = _renderer->CreateAndFillBuffer(_animationModelInfoBuffer, desc, animationModelInfo.data(), desc.size);
+
+                _animationPrepassDescriptorSet.Bind("_animationModelInfo"_h, _animationModelInfoBuffer);
             }
         });
     }    
@@ -2447,6 +2202,8 @@ void CModelRenderer::CreateBuffers()
                 desc.size = sizeof(AnimationBoneInfo) * numBoneInfo;
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _animationBoneInfoBuffer = _renderer->CreateAndFillBuffer(_animationBoneInfoBuffer, desc, animationBoneInfo.data(), desc.size);
+
+                _animationPrepassDescriptorSet.Bind("_animationBoneInfo"_h, _animationBoneInfoBuffer);
             }
         });
     }
@@ -2467,6 +2224,7 @@ void CModelRenderer::CreateBuffers()
         {
             _animationTrackInfoBuffer = _renderer->CreateBuffer(desc);
         }
+        _animationPrepassDescriptorSet.Bind("_animationTrackInfo"_h, _animationTrackInfoBuffer);
     }
     
     // Create AnimationTimestamp buffer
@@ -2485,6 +2243,7 @@ void CModelRenderer::CreateBuffers()
         {
             _animationTrackTimestampBuffer = _renderer->CreateBuffer(desc);
         }
+        _animationPrepassDescriptorSet.Bind("_animationTrackTimestamp"_h, _animationTrackTimestampBuffer);
     }
 
     // Create AnimationValueVec buffer
@@ -2503,6 +2262,8 @@ void CModelRenderer::CreateBuffers()
         {
             _animationTrackValueBuffer = _renderer->CreateBuffer(desc);
         }
+
+        _animationPrepassDescriptorSet.Bind("_animationTrackValue"_h, _animationTrackValueBuffer);
     }
 
     _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
@@ -2517,8 +2278,14 @@ void CModelRenderer::CreateBuffers()
                 desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _opaqueDrawCallBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallBuffer, desc, opaqueDrawCalls.data(), desc.size);
 
+                _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCallBuffer);
+                _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
+                _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
+
                 desc.name = "CModelOpaqueCullDrawCallBuffer";
                 _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
+
+                _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
             }
 
             _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
@@ -2530,6 +2297,10 @@ void CModelRenderer::CreateBuffers()
                         desc.size = sizeof(DrawCallData) * opaqueDrawCallDatas.size();
                         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                         _opaqueDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallDataBuffer, desc, opaqueDrawCallDatas.data(), desc.size);
+
+                        _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
+                        _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
+                        _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
                     }
                 });
         }
@@ -2549,12 +2320,16 @@ void CModelRenderer::CreateBuffers()
                 desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
 
+                _transparentCullingDescriptorSet.Bind("_culledDrawCalls"_h, _transparentCulledDrawCallBuffer);
+
                 desc.name = "CModelAlphaSortCullDrawCalls";
                 _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
 
                 desc.name = "CModelAlphaDrawCalls";
                 desc.usage |= Renderer::BufferUsage::TRANSFER_SOURCE;
                 _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, transparentDrawCalls.data(), desc.size);
+
+                _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCallBuffer);
             }
 
             // Create TransparentDrawCallData buffer
@@ -2565,6 +2340,8 @@ void CModelRenderer::CreateBuffers()
                 desc.size = sizeof(DrawCallData) * transparentDrawCallDatas.size();
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, transparentDrawCallDatas.data(), desc.size);
+            
+                _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
             });
 
             // Create transparent sort keys/values buffer
@@ -2579,9 +2356,13 @@ void CModelRenderer::CreateBuffers()
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
 
+                _transparentCullingDescriptorSet.Bind("_sortKeys"_h, _transparentSortKeys);
+
                 desc.name = "CModelAlphaSortValues";
                 desc.size = valuesSize;
                 _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+
+                _transparentCullingDescriptorSet.Bind("_sortValues"_h, _transparentSortValues);
             }
         }
         else
@@ -2597,9 +2378,13 @@ void CModelRenderer::CreateBuffers()
                 desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
                 _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
 
+                _transparentCullingDescriptorSet.Bind("_sortKeys"_h, _transparentSortKeys);
+
                 desc.name = "CModelAlphaSortValues";
                 desc.size = valuesSize;
                 _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+
+                _transparentCullingDescriptorSet.Bind("_sortValues"_h, _transparentSortValues);
             }
         }
     });
@@ -2610,6 +2395,10 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(u32) * ((_instances.Size() + 31) / 32);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _visibleInstanceMaskBuffer = _renderer->CreateBuffer(_visibleInstanceMaskBuffer, desc);
+
+        _compactDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
+        _opaqueCullingDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
+        _transparentCullingDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
     }
     {
         Renderer::BufferDesc desc;
@@ -2617,6 +2406,10 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(u32);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _visibleInstanceCountBuffer = _renderer->CreateBuffer(_visibleInstanceCountBuffer, desc);
+
+        _compactDescriptorSet.Bind("_visibleInstanceCount"_h, _visibleInstanceCountBuffer);
+        _animationPrepassDescriptorSet.Bind("_visibleInstanceCount"_h, _visibleInstanceCountBuffer);
+        _visibleInstanceArgumentDescriptorSet.Bind("_source"_h, _visibleInstanceCountBuffer);
     }
     {
         Renderer::BufferDesc desc;
@@ -2624,6 +2417,9 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(u32) * _instances.Size();
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER;
         _visibleInstanceIndexBuffer = _renderer->CreateBuffer(_visibleInstanceIndexBuffer, desc);
+
+        _compactDescriptorSet.Bind("_visibleInstanceIDs"_h, _visibleInstanceIndexBuffer);
+        _animationPrepassDescriptorSet.Bind("_visibleInstanceIndices"_h, _visibleInstanceIndexBuffer);
     }
     {
         Renderer::BufferDesc desc;
@@ -2631,5 +2427,7 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(VkDispatchIndirectCommand);
         desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER;
         _visibleInstanceCountArgumentBuffer32 = _renderer->CreateBuffer(_visibleInstanceCountArgumentBuffer32, desc);
+
+        _visibleInstanceArgumentDescriptorSet.Bind("_target"_h, _visibleInstanceCountArgumentBuffer32);
     }
 }

@@ -121,278 +121,206 @@ void MapObjectRenderer::Update(f32 deltaTime)
     }
 }
 
-void MapObjectRenderer::AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    // Map Object Depth Prepass
+    u32 drawCount = static_cast<u32>(_drawCalls.Size());
+    if (drawCount == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
+    const bool lockFrustum = CVAR_MapObjectLockCullingFrustum.Get();
+    const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
+
+    struct MapObjectCullingPassData
     {
-        struct MapObjectDepthPrepassData
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<MapObjectCullingPassData>("MapObject Culling",
+        [=](MapObjectCullingPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            Renderer::RenderPassMutableResource depth;
-        };
-
-        const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
-        const bool lockFrustum = CVAR_MapObjectLockCullingFrustum.Get();
-        const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
-
-        renderGraph->AddPass<MapObjectDepthPrepassData>("MapObject Depth Prepass",
-            [=](MapObjectDepthPrepassData& data, Renderer::RenderGraphBuilder& builder) // Setup
-            {
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-
-                return true; // Return true from setup to enable this pass, return false to disable it
-            },
-            [=](MapObjectDepthPrepassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
-            {
-                GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
-
-                u32 drawCount = static_cast<u32>(_drawCalls.Size());
-                if (drawCount == 0)
-                    return;
-
-                // -- Cull MapObjects --
-                if (cullingEnabled)
-                {
-                    // Cull
-                    {
-                        // Reset the counters
-                        commandList.FillBuffer(_drawCountBuffer, 0, 4, 0);
-                        commandList.FillBuffer(_triangleCountBuffer, 0, 4, 0);
-
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _drawCountBuffer);
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _triangleCountBuffer);
-
-                        // Do culling
-                        Renderer::ComputePipelineDesc pipelineDesc;
-                        graphResources.InitializePipelineDesc(pipelineDesc);
-
-                        Renderer::ComputeShaderDesc shaderDesc;
-                        shaderDesc.path = "mapObjectCulling.cs.hlsl";
-                        shaderDesc.AddPermutationField("DETERMINISTIC_ORDER", std::to_string((int)deterministicOrder));
-
-                        pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-                        Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
-                        commandList.BeginPipeline(pipeline);
-
-                        if (!lockFrustum)
-                        {
-                            Camera* camera = ServiceLocator::GetCamera();
-                            memcpy(_cullingConstantBuffer->resource.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
-                            _cullingConstantBuffer->resource.cameraPos = camera->GetPosition();
-                            _cullingConstantBuffer->resource.maxDrawCount = drawCount;
-                            _cullingConstantBuffer->resource.occlusionEnabled = CVAR_MapObjectOcclusionCullEnabled.Get();
-                            _cullingConstantBuffer->Apply(frameIndex);
-                        }
-
-                        _cullingDescriptorSet.Bind("_constants", _cullingConstantBuffer->GetBuffer(frameIndex));
-                        _cullingDescriptorSet.Bind("_drawCommands", _argumentBuffer);
-                        _cullingDescriptorSet.Bind("_culledDrawCommands", _culledArgumentBuffer);
-                        _cullingDescriptorSet.Bind("_drawCount", _drawCountBuffer);
-                        _cullingDescriptorSet.Bind("_triangleCount", _triangleCountBuffer);
-                        if (deterministicOrder)
-                        {
-                            _cullingDescriptorSet.Bind("_sortKeys", _sortKeysBuffer);
-                            _cullingDescriptorSet.Bind("_sortValues", _sortValuesBuffer);
-                        }
-
-                        Renderer::SamplerDesc samplerDesc;
-                        samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
-
-                        samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
-                        samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
-                        samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-                        samplerDesc.minLOD = 0.f;
-                        samplerDesc.maxLOD = 16.f;
-                        samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
-
-                        Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
-
-                        _cullingDescriptorSet.Bind("_depthSampler", occlusionSampler);
-                        _cullingDescriptorSet.Bind("_depthPyramid", resources.depthPyramid);
-
-                        commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
-                        commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-                        commandList.Dispatch((drawCount + 31) / 32, 1, 1);
-
-                        commandList.EndPipeline(pipeline);
-                    }
-                    
-                    // Sort if they should be deterministic
-                    if (deterministicOrder)
-                    {
-                        commandList.PushMarker("Sort", Color::White);
-
-                        u32 numDraws = static_cast<u32>(_drawCalls.Size());
-
-                        // First we sort our list of keys and values
-                        {
-                            // Barriers
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _culledArgumentBuffer);
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _drawCountBuffer);
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortKeysBuffer);
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortValuesBuffer);
-
-                            SortUtils::SortIndirectCountParams sortParams;
-                            sortParams.maxNumKeys = numDraws;
-                            sortParams.maxThreadGroups = 800; // I am not sure why this is set to 800, but the sample code used this value so I'll go with it
-
-                            sortParams.numKeysBuffer = _drawCountBuffer;
-                            sortParams.keysBuffer = _sortKeysBuffer;
-                            sortParams.valuesBuffer = _sortValuesBuffer;
-
-                            SortUtils::SortIndirectCount(_renderer, graphResources, commandList, frameIndex, sortParams);
-                        }
-
-                        // Then we apply it to our drawcalls
-                        {
-                            commandList.PushMarker("ApplySort", Color::White);
-
-                            // Barriers
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortKeysBuffer);
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortValuesBuffer);
-
-                            Renderer::ComputeShaderDesc shaderDesc;
-                            shaderDesc.path = "mapObjectApplySort.cs.hlsl";
-                            Renderer::ComputePipelineDesc pipelineDesc;
-                            pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-                            Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
-                            commandList.BeginPipeline(pipeline);
-
-                            _sortingDescriptorSet.Bind("_sortValues", _sortValuesBuffer);
-                            _sortingDescriptorSet.Bind("_culledDrawCount", _drawCountBuffer);
-                            _sortingDescriptorSet.Bind("_culledDrawCalls", _culledArgumentBuffer);
-                            _sortingDescriptorSet.Bind("_sortedCulledDrawCalls", _culledSortedArgumentBuffer);
-                            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_sortingDescriptorSet, frameIndex);
-
-                            commandList.Dispatch((numDraws + 31) / 32, 1, 1);
-
-                            commandList.EndPipeline(pipeline);
-
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledSortedArgumentBuffer);
-
-                            commandList.PopMarker();
-                        }
-
-                        commandList.PopMarker();
-                    }
-                    else
-                    {
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledArgumentBuffer);
-                    }
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _drawCountBuffer);
-                }
-                else
-                {
-                    // Reset the counter
-                    commandList.FillBuffer(_drawCountBuffer, 0, 4, drawCount);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _drawCountBuffer);
-                }
-
-                // -- Render MapObjects --
-                Renderer::GraphicsPipelineDesc pipelineDesc;
-                graphResources.InitializePipelineDesc(pipelineDesc);
-
-                // Shaders
-                Renderer::VertexShaderDesc vertexShaderDesc;
-                vertexShaderDesc.path = "mapObject.vs.hlsl";
-                vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
-                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
-
-                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-                Renderer::PixelShaderDesc pixelShaderDesc;
-                pixelShaderDesc.path = "mapObject.ps.hlsl";
-                pixelShaderDesc.AddPermutationField("COLOR_PASS", "0");
-
-                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
-
-                // Depth state
-                pipelineDesc.states.depthStencilState.depthEnable = true;
-                pipelineDesc.states.depthStencilState.depthWriteEnable = true;
-                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
-
-                // Rasterizer state
-                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-
-                // Render targets
-                pipelineDesc.depthStencil = data.depth;
-
-                // Set pipeline
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
-                Renderer::BufferID argumentBuffer;
-                if (cullingEnabled)
-                {
-                    if (deterministicOrder)
-                    {
-                        argumentBuffer = _culledSortedArgumentBuffer;
-                    }
-                    else
-                    {
-                        argumentBuffer = _culledArgumentBuffer;
-                    }
-                }
-                else
-                {
-                    argumentBuffer = _argumentBuffer;
-                }
-                
-                commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
-
-                commandList.EndPipeline(pipeline);
-
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountBuffer);
-                commandList.CopyBuffer(_drawCountReadBackBuffer, 0, _drawCountBuffer, 0, 4);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountReadBackBuffer);
-
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountBuffer);
-                commandList.CopyBuffer(_triangleCountReadBackBuffer, 0, _triangleCountBuffer, 0, 4);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountReadBackBuffer);
-            });
-    }
-}
-
-void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
-{
-    // Map Object Pass
-    {
-        struct MapObjectPassData
-        {
-            Renderer::RenderPassMutableResource color;
-            Renderer::RenderPassMutableResource objectIDs;
-            Renderer::RenderPassMutableResource depth;
-        };
-
-        const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
-        const bool lockFrustum = CVAR_MapObjectLockCullingFrustum.Get();
-        const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
-
-        renderGraph->AddPass<MapObjectPassData>("MapObject Pass",
-            [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
-        {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-
             return true; // Return true from setup to enable this pass, return false to disable it
         },
-            [=](MapObjectPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        [=](MapObjectCullingPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
         {
-            GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
+            GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectCulling);
 
-            u32 drawCount = static_cast<u32>(_drawCalls.Size());
-            if (drawCount == 0)
-                return;
+            // Cull
+            {
+                // Reset the counters
+                commandList.FillBuffer(_drawCountBuffer, 0, 4, 0);
+                commandList.FillBuffer(_triangleCountBuffer, 0, 4, 0);
+
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _drawCountBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _triangleCountBuffer);
+
+                // Do culling
+                Renderer::ComputePipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                Renderer::ComputeShaderDesc shaderDesc;
+                shaderDesc.path = "mapObjectCulling.cs.hlsl";
+                shaderDesc.AddPermutationField("DETERMINISTIC_ORDER", std::to_string((int)deterministicOrder));
+
+                pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                commandList.BeginPipeline(pipeline);
+
+                if (!lockFrustum)
+                {
+                    Camera* camera = ServiceLocator::GetCamera();
+                    memcpy(_cullingConstantBuffer->resource.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
+                    _cullingConstantBuffer->resource.cameraPos = camera->GetPosition();
+                    _cullingConstantBuffer->resource.maxDrawCount = drawCount;
+                    _cullingConstantBuffer->resource.occlusionEnabled = CVAR_MapObjectOcclusionCullEnabled.Get();
+                    _cullingConstantBuffer->Apply(frameIndex);
+                }
+
+                _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingDataBuffer);
+                _cullingDescriptorSet.Bind("_constants"_h, _cullingConstantBuffer->GetBuffer(frameIndex));
+                _cullingDescriptorSet.Bind("_draws"_h, _argumentBuffer);
+                _cullingDescriptorSet.Bind("_culledDraws"_h, _culledArgumentBuffer);
+                _cullingDescriptorSet.Bind("_drawCount"_h, _drawCountBuffer);
+                _cullingDescriptorSet.Bind("_triangleCount"_h, _triangleCountBuffer);
+                if (deterministicOrder)
+                {
+                    _cullingDescriptorSet.Bind("_sortKeys"_h, _sortKeysBuffer);
+                    _cullingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
+                }
+
+                Renderer::SamplerDesc samplerDesc;
+                samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+
+                samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+                samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+                samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+                samplerDesc.minLOD = 0.f;
+                samplerDesc.maxLOD = 16.f;
+                samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+                Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
+
+                _cullingDescriptorSet.Bind("_depthSampler"_h, occlusionSampler);
+                _cullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_cullingDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                commandList.Dispatch((drawCount + 31) / 32, 1, 1);
+
+                commandList.EndPipeline(pipeline);
+            }
+
+            // Sort if they should be deterministic
+            if (deterministicOrder)
+            {
+                commandList.PushMarker("Sort", Color::White);
+
+                u32 numDraws = static_cast<u32>(_drawCalls.Size());
+
+                // First we sort our list of keys and values
+                {
+                    // Barriers
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _culledArgumentBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _drawCountBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortKeysBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortValuesBuffer);
+
+                    SortUtils::SortIndirectCountParams sortParams;
+                    sortParams.maxNumKeys = numDraws;
+                    sortParams.maxThreadGroups = 800; // I am not sure why this is set to 800, but the sample code used this value so I'll go with it
+
+                    sortParams.numKeysBuffer = _drawCountBuffer;
+                    sortParams.keysBuffer = _sortKeysBuffer;
+                    sortParams.valuesBuffer = _sortValuesBuffer;
+
+                    SortUtils::SortIndirectCount(_renderer, graphResources, commandList, frameIndex, sortParams);
+                }
+
+                // Then we apply it to our drawcalls
+                {
+                    commandList.PushMarker("ApplySort", Color::White);
+
+                    // Barriers
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortKeysBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _sortValuesBuffer);
+
+                    Renderer::ComputeShaderDesc shaderDesc;
+                    shaderDesc.path = "mapObjectApplySort.cs.hlsl";
+                    Renderer::ComputePipelineDesc pipelineDesc;
+                    pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                    Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                    commandList.BeginPipeline(pipeline);
+
+                    _sortingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
+                    _sortingDescriptorSet.Bind("_culledDrawCount"_h, _drawCountBuffer);
+                    _sortingDescriptorSet.Bind("_culledDrawCalls"_h, _culledArgumentBuffer);
+                    _sortingDescriptorSet.Bind("_sortedCulledDrawCalls"_h, _culledSortedArgumentBuffer);
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_sortingDescriptorSet, frameIndex);
+
+                    commandList.Dispatch((numDraws + 31) / 32, 1, 1);
+
+                    commandList.EndPipeline(pipeline);
+                    commandList.PopMarker();
+                }
+
+                commandList.PopMarker();
+            }
+        });
+}
+
+void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    u32 drawCount = static_cast<u32>(_drawCalls.Size());
+    if (drawCount == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
+    const bool deterministicOrder = CVAR_MapObjectDeterministicOrder.Get();
+
+    struct MapObjectGeometryPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<MapObjectGeometryPassData>("MapObject Geometry",
+        [=](MapObjectGeometryPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+        {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](MapObjectGeometryPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectGeometry);
+
+            if (cullingEnabled)
+            {
+                if (deterministicOrder)
+                {
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledSortedArgumentBuffer);
+                }
+                else
+                {
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledArgumentBuffer);
+                }
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _drawCountBuffer);
+            }
+            else
+            {
+                // Reset the counter
+                commandList.FillBuffer(_drawCountBuffer, 0, 4, drawCount);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _drawCountBuffer);
+            }
 
             // -- Render MapObjects --
             Renderer::GraphicsPipelineDesc pipelineDesc;
@@ -401,28 +329,25 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
             // Shaders
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "mapObject.vs.hlsl";
-            vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
             vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
 
             Renderer::PixelShaderDesc pixelShaderDesc;
             pixelShaderDesc.path = "mapObject.ps.hlsl";
-            pixelShaderDesc.AddPermutationField("COLOR_PASS", "1");
-
             pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
 
             // Depth state
             pipelineDesc.states.depthStencilState.depthEnable = true;
-            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::EQUAL;
+            pipelineDesc.states.depthStencilState.depthWriteEnable = true;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
             pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
 
             // Render targets
-            pipelineDesc.renderTargets[0] = data.color;
-            pipelineDesc.renderTargets[1] = data.objectIDs;
+            pipelineDesc.renderTargets[0] = data.visibilityBuffer;
 
             pipelineDesc.depthStencil = data.depth;
 
@@ -430,142 +355,146 @@ void MapObjectRenderer::AddMapObjectPass(Renderer::RenderGraph* renderGraph, Ren
             Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
             commandList.BeginPipeline(pipeline);
 
-            _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
-
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
             Renderer::BufferID argumentBuffer;
             if (cullingEnabled)
             {
-                if (deterministicOrder)
-                {
-                    argumentBuffer = _culledSortedArgumentBuffer;
-                }
-                else
-                {
-                    argumentBuffer = _culledArgumentBuffer;
-                }
+                argumentBuffer = (deterministicOrder) ? _culledSortedArgumentBuffer : _culledArgumentBuffer;
             }
             else
             {
                 argumentBuffer = _argumentBuffer;
             }
 
+            _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
+            _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
+
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
+
+            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
             commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
 
             commandList.EndPipeline(pipeline);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountBuffer);
+            commandList.CopyBuffer(_drawCountReadBackBuffer, 0, _drawCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountReadBackBuffer);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountBuffer);
+            commandList.CopyBuffer(_triangleCountReadBackBuffer, 0, _triangleCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountReadBackBuffer);
         });
-    }
 }
 
-void MapObjectRenderer::AddMapObjectEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 instanceLookupDataID, u32 selectedRenderBatch, bool wireframeEntireObject)
+void MapObjectRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    // Map Object Editor Pass
+    u32 drawCount = static_cast<u32>(_drawCalls.Size());
+    if (drawCount == 0)
+        return;
+
+    Editor::Editor* editor = ServiceLocator::GetEditor();
+    if (!editor->HasSelectedObject())
+        return;
+    
+    u32 activeToken = editor->GetActiveToken();
+
+    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+    PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+    PixelQuery::PixelData pixelData;
+    if (!pixelQuery->GetQueryResult(activeToken, pixelData))
+        return;
+    
+    if (pixelData.type != Editor::QueryObjectType::MapObject)
+        return;
+
+    const Editor::Editor::SelectedMapObjectData& selectedMapObjectData = editor->GetSelectedMapObjectData();
+    if (!selectedMapObjectData.drawWireframe)
+        return;
+    
+    u32 instanceLookupDataID = pixelData.value;
+    u32 selectedRenderBatch = selectedMapObjectData.selectedRenderBatch - 1;
+
+    struct MapObjectEditorPassData
     {
-        struct MapObjectPassData
+        Renderer::RenderPassMutableResource color;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<MapObjectEditorPassData>("MapObject Editor Pass",
+        [=](MapObjectEditorPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            Renderer::RenderPassMutableResource color;
-            Renderer::RenderPassMutableResource objectIDs;
-            Renderer::RenderPassMutableResource depth;
-        };
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
-        renderGraph->AddPass<MapObjectPassData>("MapObject Editor Pass",
-            [=](MapObjectPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](MapObjectEditorPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
+
+            // -- Render MapObjects --
+            Renderer::GraphicsPipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
+
+            // Shaders
+            Renderer::VertexShaderDesc vertexShaderDesc;
+            vertexShaderDesc.path = "mapObject.vs.hlsl";
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
+
+            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+            Renderer::PixelShaderDesc pixelShaderDesc;
+            pixelShaderDesc.path = "solidColor.ps.hlsl";
+
+            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+            // Depth state
+            pipelineDesc.states.depthStencilState.depthEnable = false;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
+
+            // Rasterizer state
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
+
+            // Render targets
+            pipelineDesc.renderTargets[0] = data.color;
+
+            pipelineDesc.depthStencil = data.depth;
+
+            // Set pipeline
+            Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+            commandList.BeginPipeline(pipeline);
+
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
+
+            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+            struct ColorConstant
             {
-                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                vec4 value;
+            };
 
-                return true; // Return true from setup to enable this pass, return false to disable it
-            },
-            [=](MapObjectPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+            ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+            colorConstant->value = CVAR_MapObjectWireframeColor.Get();
+            commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
+
+            const MapObjectRenderer::InstanceLookupData& instanceLookupData = _instanceLookupData.ReadGet(instanceLookupDataID);
+            const MapObjectRenderer::LoadedMapObject& loadedMapObject = _loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
+
+            u32 numRenderBatches = static_cast<u32>(loadedMapObject.renderBatches.size());
+
+            if (numRenderBatches)
             {
-                GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectPass);
-
-                u32 drawCount = static_cast<u32>(_drawCalls.Size());
-                if (drawCount == 0)
-                    return;
-
-                // -- Render MapObjects --
-                Renderer::GraphicsPipelineDesc pipelineDesc;
-                graphResources.InitializePipelineDesc(pipelineDesc);
-
-                // Shaders
-                Renderer::VertexShaderDesc vertexShaderDesc;
-                vertexShaderDesc.path = "mapObject.vs.hlsl";
-                vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
-                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
-
-                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-                Renderer::PixelShaderDesc pixelShaderDesc;
-                pixelShaderDesc.path = "solidColor.ps.hlsl";
-
-                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
-
-                // Depth state
-                pipelineDesc.states.depthStencilState.depthEnable = false;
-                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
-
-                // Rasterizer state
-                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
-                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-                pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
-
-                // Render targets
-                pipelineDesc.renderTargets[0] = data.color;
-                pipelineDesc.renderTargets[1] = data.objectIDs;
-
-                pipelineDesc.depthStencil = data.depth;
-
-                // Set pipeline
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
-
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
-                struct ColorConstant
+                if (selectedMapObjectData.wireframeEntireObject)
                 {
-                    vec4 value;
-                };
-
-                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
-                colorConstant->value = CVAR_MapObjectWireframeColor.Get();
-                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
-
-                const MapObjectRenderer::InstanceLookupData& instanceLookupData = _instanceLookupData.ReadGet(instanceLookupDataID);
-                const MapObjectRenderer::LoadedMapObject& loadedMapObject = _loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
-
-                u32 numRenderBatches = static_cast<u32>(loadedMapObject.renderBatches.size());
-
-                if (numRenderBatches)
-                {
-                    if (wireframeEntireObject)
+                    for (u32 i = 0; i < numRenderBatches; i++)
                     {
-                        for (u32 i = 0; i < numRenderBatches; i++)
-                        {
-                            const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[i];
-                            const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[i];
-
-                            u32 vertexOffset = renderBatchOffsets.baseVertexOffset;
-                            u32 firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
-                            u32 indexCount = renderBatch.indexCount;
-
-                            commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, instanceLookupDataID);
-                        }
-                    }
-                    else
-                    {
-                        const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[selectedRenderBatch];
-                        const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[selectedRenderBatch];
+                        const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[i];
+                        const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[i];
 
                         u32 vertexOffset = renderBatchOffsets.baseVertexOffset;
                         u32 firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
@@ -574,10 +503,22 @@ void MapObjectRenderer::AddMapObjectEditorPass(Renderer::RenderGraph* renderGrap
                         commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, instanceLookupDataID);
                     }
                 }
+                else
+                {
+                    const Terrain::RenderBatch& renderBatch = loadedMapObject.renderBatches[selectedRenderBatch];
+                    const RenderBatchOffsets& renderBatchOffsets = loadedMapObject.renderBatchOffsets[selectedRenderBatch];
 
-                commandList.EndPipeline(pipeline);
-            });
-    }
+                    u32 vertexOffset = renderBatchOffsets.baseVertexOffset;
+                    u32 firstIndex = renderBatchOffsets.baseIndexOffset + renderBatch.startIndex;
+                    u32 indexCount = renderBatch.indexCount;
+
+                    commandList.DrawIndexed(indexCount, 1, firstIndex, vertexOffset, instanceLookupDataID);
+                }
+            }
+
+            commandList.EndPipeline(pipeline);
+        });
+    
 }
 
 void MapObjectRenderer::RegisterMapObjectToBeLoaded(const std::string& mapObjectName, const Terrain::Placement& mapObjectPlacement)
@@ -769,7 +710,8 @@ void MapObjectRenderer::CreatePermanentResources()
     textureArrayDesc.size = 4096;
 
     _mapObjectTextures = _renderer->CreateTextureArray(textureArrayDesc);
-    _passDescriptorSet.Bind("_textures", _mapObjectTextures);
+    _geometryPassDescriptorSet.Bind("_mapObjectTextures"_h, _mapObjectTextures);
+    _materialPassDescriptorSet.Bind("_mapObjectTextures"_h, _mapObjectTextures);
 
     // Create a 1x1 pixel black texture
     Renderer::DataTextureDesc dataTextureDesc;
@@ -792,7 +734,7 @@ void MapObjectRenderer::CreatePermanentResources()
     samplerDesc.shaderVisibility = Renderer::ShaderVisibility::PIXEL;
 
     _sampler = _renderer->CreateSampler(samplerDesc);
-    _passDescriptorSet.Bind("_sampler", _sampler);
+    _geometryPassDescriptorSet.Bind("_sampler"_h, _sampler);
 
     _cullingConstantBuffer = new Renderer::Buffer<CullingConstants>(_renderer, "CullingConstantBuffer", Renderer::BufferUsage::UNIFORM_BUFFER, Renderer::BufferCPUAccess::WriteOnly);
 
@@ -1370,8 +1312,9 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _instanceLookupBuffer = _renderer->CreateAndFillBuffer(_instanceLookupBuffer, desc, instanceLookupData.data(), desc.size);
 
-        _passDescriptorSet.Bind("_packedInstanceLookup", _instanceLookupBuffer);
-        _cullingDescriptorSet.Bind("_packedInstanceLookup", _instanceLookupBuffer);
+        _cullingDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
+        _geometryPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
+        _materialPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
     });
     
     
@@ -1402,7 +1345,8 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, vertices.data(), desc.size);
 
-        _passDescriptorSet.Bind("_packedVertices", _vertexBuffer);
+        _geometryPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertexBuffer);
+        _materialPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertexBuffer);
     });
 
     // Create Index buffer
@@ -1411,8 +1355,11 @@ void MapObjectRenderer::CreateBuffers()
         Renderer::BufferDesc desc;
         desc.name = "MapObjectIndexBuffer";
         desc.size = sizeof(u16) * indices.size();
-        desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+        desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _indexBuffer = _renderer->CreateAndFillBuffer(_indexBuffer, desc, indices.data(), desc.size);
+
+        _geometryPassDescriptorSet.Bind("_mapObjectIndices"_h, _indexBuffer);
+        _materialPassDescriptorSet.Bind("_mapObjectIndices"_h, _indexBuffer);
     });
 
     // Create Instance buffer
@@ -1424,8 +1371,9 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _instanceBuffer = _renderer->CreateAndFillBuffer(_instanceBuffer, desc, instances.data(), desc.size);
 
-        _passDescriptorSet.Bind("_instanceData", _instanceBuffer);
-        _cullingDescriptorSet.Bind("_instanceData", _instanceBuffer);
+        _geometryPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
+        _materialPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
+        _cullingDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
     });
 
     // Create Material buffer
@@ -1437,7 +1385,8 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _materialBuffer = _renderer->CreateAndFillBuffer(_materialBuffer, desc, materials.data(), desc.size);
 
-        _passDescriptorSet.Bind("_packedMaterialData", _materialBuffer);
+        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materialBuffer);
+        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materialBuffer);
     });
 
     // Create MaterialParam buffer
@@ -1449,7 +1398,8 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _materialParametersBuffer = _renderer->CreateAndFillBuffer(_materialParametersBuffer, desc, materialParameters.data(), desc.size);
 
-        _passDescriptorSet.Bind("_packedMaterialParams", _materialParametersBuffer);
+        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParametersBuffer);
+        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParametersBuffer);
     });
 
     // Create CullingData buffer
@@ -1461,7 +1411,7 @@ void MapObjectRenderer::CreateBuffers()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _cullingDataBuffer = _renderer->CreateAndFillBuffer(_cullingDataBuffer, desc, cullingData.data(), desc.size);
 
-        _cullingDescriptorSet.Bind("_packedCullingData", _cullingDataBuffer);
+        _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingDataBuffer);
     });
 
     // Create SortKeys and SortValues buffer

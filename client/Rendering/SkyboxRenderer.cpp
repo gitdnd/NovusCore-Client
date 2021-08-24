@@ -44,7 +44,7 @@ void SkyboxRenderer::AddSkyboxPass(Renderer::RenderGraph* renderGraph, RenderRes
     renderGraph->AddPass<SkyboxPassData>("Skybox Pass",
         [=](SkyboxPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it

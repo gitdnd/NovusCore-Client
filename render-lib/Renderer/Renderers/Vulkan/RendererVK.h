@@ -70,6 +70,8 @@ namespace Renderer
         [[nodiscard]] CommandListID BeginCommandList() override;
         void EndCommandList(CommandListID commandListID) override;
         void Clear(CommandListID commandListID, ImageID image, Color color) override;
+        void Clear(CommandListID commandListID, ImageID image, uvec4 values) override;
+        void Clear(CommandListID commandListID, ImageID image, ivec4 values) override;
         void Clear(CommandListID commandListID, DepthImageID image, DepthClearFlags clearFlags, f32 depth, u8 stencil) override;
         void Draw(CommandListID commandListID, u32 numVertices, u32 numInstances, u32 vertexOffset, u32 instanceOffset) override;
         void DrawIndirect(CommandListID commandListID, BufferID argumentBuffer, u32 argumentBufferOffset, u32 drawCount) override;

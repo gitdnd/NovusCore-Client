@@ -421,6 +421,8 @@ namespace Renderer
             deviceFeatures.features.multiDrawIndirect = VK_TRUE;
             deviceFeatures.features.drawIndirectFirstInstance = VK_TRUE;
             deviceFeatures.features.independentBlend = VK_TRUE;
+            deviceFeatures.features.geometryShader = VK_TRUE;
+            deviceFeatures.features.fillModeNonSolid = VK_TRUE;
             deviceFeatures.pNext = &descriptorIndexingFeatures;
 
             CheckDeviceFeatureSupport(_physicalDevice, deviceFeatures);

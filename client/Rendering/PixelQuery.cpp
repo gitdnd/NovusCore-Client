@@ -1,4 +1,8 @@
 #include "PixelQuery.h"
+#include "ClientRenderer.h"
+#include "TerrainRenderer.h"
+#include "MapObjectRenderer.h"
+#include "CModelRenderer.h"
 #include "../Utils/ServiceLocator.h"
 
 #include <Renderer/RenderGraph.h>
@@ -58,13 +62,13 @@ void PixelQuery::AddPixelQueryPass(Renderer::RenderGraph* renderGraph, RenderRes
     {
         struct PixelQueryPassData
         {
-            Renderer::RenderPassMutableResource objectIDs;
+            Renderer::RenderPassMutableResource visibilityBuffer;
         };
 
         renderGraph->AddPass<PixelQueryPassData>("Query Pass",
             [=](PixelQueryPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
             {
-                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
                 return true; // Return true from setup to enable this pass, return false to disable it
             },
@@ -80,7 +84,7 @@ void PixelQuery::AddPixelQueryPass(Renderer::RenderGraph* renderGraph, RenderRes
 
                     {
                         ZoneScopedN("PixelQuery::ImageBarrier");
-                        commandList.ImageBarrier(resources.objectIDs);
+                        commandList.ImageBarrier(resources.visibilityBuffer);
                     }
                     commandList.PushMarker("Pixel Queries " + std::to_string(numRequests), Color::White);
                     Renderer::ComputePipelineDesc queryPipelineDesc;
@@ -107,9 +111,23 @@ void PixelQuery::AddPixelQueryPass(Renderer::RenderGraph* renderGraph, RenderRes
                         commandList.PushConstant(queryRequests, 0, sizeof(QueryRequestConstant));
                     }
 
-                    _queryDescriptorSet.Bind("_texture", resources.objectIDs);
+                    _queryDescriptorSet.Bind("_visibilityBuffer", resources.visibilityBuffer);
                     _queryDescriptorSet.Bind("_result", _pixelResultBuffer);
                     commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_queryDescriptorSet, _frameIndex);
+
+                    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+
+                    TerrainRenderer* terrainRenderer = clientRenderer->GetTerrainRenderer();
+                    Renderer::DescriptorSet& terrainDescriptorSet = terrainRenderer->GetMaterialPassDescriptorSet();
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::TERRAIN, &terrainDescriptorSet, _frameIndex);
+
+                    MapObjectRenderer* mapObjectRenderer = clientRenderer->GetMapObjectRenderer();
+                    Renderer::DescriptorSet& mapObjectDescriptorSet = mapObjectRenderer->GetMaterialPassDescriptorSet();
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &mapObjectDescriptorSet, _frameIndex);
+
+                    CModelRenderer* cModelRenderer = clientRenderer->GetCModelRenderer();
+                    Renderer::DescriptorSet& cModelDescriptorSet = cModelRenderer->GetMaterialPassDescriptorSet();
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &cModelDescriptorSet, _frameIndex);
 
                     commandList.Dispatch(1, 1, 1);
 

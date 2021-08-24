@@ -1,9 +1,20 @@
+#ifndef TERRAIN_INC_INCLUDED
+#define TERRAIN_INC_INCLUDED
+
+#include "common.inc.hlsl"
+#include "cullingUtils.inc.hlsl"
+
 #define NUM_CHUNKS_PER_MAP_SIDE (64)
 #define NUM_CELLS_PER_CHUNK_SIDE (16)
 #define NUM_CELLS_PER_CHUNK (NUM_CELLS_PER_CHUNK_SIDE * NUM_CELLS_PER_CHUNK_SIDE)
 
 #define NUM_INDICES_PER_CELL (768)
+#define NUM_TRIANGLES_PER_CELL (NUM_INDICES_PER_CELL/3)
 #define NUM_VERTICES_PER_CELL (145)
+
+#define NUM_VERTICES_PER_OUTER_PATCH_ROW (9)
+#define NUM_VERTICES_PER_INNER_PATCH_ROW (8)
+#define NUM_VERTICES_PER_PATCH_ROW (NUM_VERTICES_PER_OUTER_PATCH_ROW + NUM_VERTICES_PER_INNER_PATCH_ROW)
 
 #define CHUNK_SIDE_SIZE (533.33333f)
 #define CELL_SIDE_SIZE (33.33333f)
@@ -33,13 +44,7 @@ struct ChunkData
 struct CellInstance
 {
     uint packedChunkCellID;
-    uint instanceID;
-};
-
-struct AABB
-{
-    float3 min;
-    float3 max;
+    uint globalCellID;
 };
 
 uint GetGlobalCellID(uint chunkID, uint cellID)
@@ -91,7 +96,6 @@ float2 GetGlobalVertexPosition(uint chunkID, uint cellID, uint vertexID)
 
     return float2(-finalPos.y, -finalPos.x);
 }
-
 
 AABB GetCellAABB(uint chunkID, uint cellID, float2 heightRange)
 {
@@ -167,9 +171,7 @@ bool IsHoleVertex(uint vertexId, uint hole)
     return false;
 }
 
-#if !SHADER_CS
-[[vk::binding(0, PER_PASS)]] StructuredBuffer<PackedCellData> _packedCellData;
-
+[[vk::binding(0, TERRAIN)]] StructuredBuffer<PackedCellData> _packedCellData;
 CellData LoadCellData(uint globalCellID)
 {
     const PackedCellData rawCellData = _packedCellData[globalCellID];
@@ -187,4 +189,144 @@ CellData LoadCellData(uint globalCellID)
 
     return cellData;
 }
+
+uint3 GetLocalTerrainVertexIDs(uint triangleID)
+{
+    uint patchID = triangleID / 4;
+    uint patchRow = patchID / 8;
+    uint patchColumn = patchID % 8;
+
+    uint patchVertexIDs[5];
+
+    // Top Left is calculated like this
+    patchVertexIDs[0] = patchColumn + (patchRow * (NUM_VERTICES_PER_PATCH_ROW));
+
+    // Top Right is always +1 from Top Left
+    patchVertexIDs[1] = patchVertexIDs[0] + 1;
+
+    // Bottom Left is always NUM_VERTICES_PER_PATCH_ROW from the Top Left vertex
+    patchVertexIDs[2] = patchVertexIDs[0] + NUM_VERTICES_PER_PATCH_ROW;
+
+    // Bottom Right is always +1 from Bottom Left
+    patchVertexIDs[3] = patchVertexIDs[2] + 1;
+
+    // Center is always NUM_VERTICES_PER_OUTER_PATCH_ROW from Top Left
+    patchVertexIDs[4] = patchVertexIDs[0] + NUM_VERTICES_PER_OUTER_PATCH_ROW;
+
+    // Branchless fuckery, Pursche is confused so talk to Nix.
+    // https://www.meme-arsenal.com/memes/81e0feae96e7eb1e08704c6d1be70ba8.jpg - Nix 2021
+    uint triangleWithinPatch = triangleID % 4; // 0 - top, 1 - left, 2 - bottom, 3 - right
+    uint2 triangleComponentOffsets = uint2(triangleWithinPatch > 1, // Identify if we are within bottom or right triangle
+        triangleWithinPatch == 0 || triangleWithinPatch == 3); // Identify if we are within the top or right triangle
+    uint3 vertexIDs;
+    vertexIDs.x = patchVertexIDs[4];
+    vertexIDs.y = patchVertexIDs[triangleComponentOffsets.x * 2 + triangleComponentOffsets.y];
+    vertexIDs.z = patchVertexIDs[(!triangleComponentOffsets.y) * 2 + triangleComponentOffsets.x];
+
+    return vertexIDs;
+}
+
+struct PackedTerrainVertex
+{
+    uint packed0;
+    uint packed1;
+}; // 8 bytes
+
+struct TerrainVertex
+{
+    float3 position;
+#if !GEOMETRY_PASS
+    float3 normal;
+    float3 color;
+    float2 uv;
 #endif
+};
+
+[[vk::binding(1, TERRAIN)]] StructuredBuffer<PackedTerrainVertex> _packedTerrainVertices;
+
+float3 UnpackTerrainNormal(uint encoded)
+{
+    uint x = encoded & 0x000000FFu;
+    uint y = (encoded >> 8u) & 0x000000FFu;
+    uint z = (encoded >> 16u) & 0x000000FFu;
+
+    float3 normal = (float3(x, y, z) / 127.0f) - 1.0f;
+    return normalize(normal);
+}
+
+float3 UnpackColor(uint encoded)
+{
+    float r = (float)((encoded) & 0xFF);
+    float g = (float)((encoded >> 8) & 0xFF);
+    float b = (float)((encoded >> 16) & 0xFF);
+
+    return float3(r, g, b) / 127.0f;
+}
+
+float UnpackHalf(uint encoded)
+{
+    return f16tof32(encoded);
+}
+
+TerrainVertex UnpackTerrainVertex(const PackedTerrainVertex packedVertex)
+{
+    // The vertex consists of 8 bytes of data, we split this into two uints called data0 and data1
+    // data0 contains, in order:
+    // u8 normal.x
+    // u8 normal.y
+    // u8 normal.z
+    // u8 color.r
+    //
+    // data1 contains, in order:
+    // u8 color.g
+    // u8 color.b
+    // half height, 2 bytes
+
+    TerrainVertex vertex;
+
+#if !GEOMETRY_PASS
+    // Unpack normal and color
+    uint normal = packedVertex.packed0;// & 0x00FFFFFFu;
+    uint color = ((packedVertex.packed1 & 0x0000FFFFu) << 8u) | (packedVertex.packed0 >> 24u);
+
+    vertex.normal = UnpackTerrainNormal(normal);
+    vertex.color = UnpackColor(color);
+#endif
+
+    // Unpack height
+    uint height = packedVertex.packed1 >> 16u;
+    vertex.position.z = UnpackHalf(height);
+
+    return vertex;
+}
+
+TerrainVertex LoadTerrainVertex(uint chunkID, uint cellID, uint vertexBaseOffset, uint vertexID)
+{
+    // Load height
+    const uint vertexIndex = vertexBaseOffset + vertexID;
+    const PackedTerrainVertex packedVertex = _packedTerrainVertices[vertexIndex];
+    float2 vertexPos = GetCellSpaceVertexPosition(vertexID);
+
+    TerrainVertex vertex = UnpackTerrainVertex(packedVertex);
+
+    vertex.position.xy = GetGlobalVertexPosition(chunkID, cellID, vertexID);
+#if !GEOMETRY_PASS
+    vertex.uv = float2(-vertexPos.y, -vertexPos.x); // Negated to go from 3D coordinates to 2D
+#endif
+
+    return vertex;
+}
+
+[[vk::binding(2, TERRAIN)]] StructuredBuffer<CellInstance> _cellInstances;
+[[vk::binding(3, TERRAIN)]] StructuredBuffer<ChunkData> _chunkData;
+
+[[vk::binding(4, TERRAIN)]] SamplerState _alphaSampler;
+
+[[vk::binding(5, TERRAIN)]] Texture2D<float4> _ambientOcclusion;
+
+[[vk::binding(6, TERRAIN)]] RWTexture2D<float4> _resolvedColor;
+
+[[vk::binding(7, TERRAIN)]] Texture2D<float4> _terrainColorTextures[4096];
+[[vk::binding(8, TERRAIN)]] Texture2DArray<float4> _terrainAlphaTextures[NUM_CHUNKS_PER_MAP_SIDE * NUM_CHUNKS_PER_MAP_SIDE];
+
+#endif // TERRAIN_INC_INCLUDED

@@ -321,7 +321,7 @@ void RendertargetVisualizer::AddVisualizerPass(Renderer::RenderGraph* renderGrap
     renderGraph->AddPass<RTVisualizerData>("RTVisualizer",
         [=](RTVisualizerData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.target = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.target = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true;
         },

@@ -923,7 +923,7 @@ void EngineLoop::DrawMapStats()
                 }
 
                 TerrainRenderer* terrainRenderer = _clientRenderer->GetTerrainRenderer();
-                MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
+                MapObjectRenderer* mapObjectRenderer = _clientRenderer->GetMapObjectRenderer();
                 CModelRenderer* cModelRenderer = _clientRenderer->GetCModelRenderer();
 
                 ImGui::Text("Loaded Map Objects:            %u", mapObjectRenderer->GetNumLoadedMapObjects());
@@ -1072,7 +1072,7 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
     EngineStatsSingleton::Frame average = stats->AverageFrame(240);
 
     TerrainRenderer* terrainRenderer = _clientRenderer->GetTerrainRenderer();
-    MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
+    MapObjectRenderer* mapObjectRenderer = _clientRenderer->GetMapObjectRenderer();
     CModelRenderer* cModelRenderer = _clientRenderer->GetCModelRenderer();
 
     // Draw hardware info

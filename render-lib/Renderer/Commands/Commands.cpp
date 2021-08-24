@@ -35,7 +35,9 @@ namespace Renderer
 {
     namespace Commands
     {
-        const BackendDispatchFunction ClearImage::DISPATCH_FUNCTION = &BackendDispatch::ClearImage;
+        const BackendDispatchFunction ClearImageColor::DISPATCH_FUNCTION = &BackendDispatch::ClearImageColor;
+        const BackendDispatchFunction ClearImageUInt::DISPATCH_FUNCTION = &BackendDispatch::ClearImageUInt;
+        const BackendDispatchFunction ClearImageInt::DISPATCH_FUNCTION = &BackendDispatch::ClearImageInt;
         const BackendDispatchFunction ClearDepthImage::DISPATCH_FUNCTION = &BackendDispatch::ClearDepthImage;
         const BackendDispatchFunction Draw::DISPATCH_FUNCTION = &BackendDispatch::Draw;
         const BackendDispatchFunction DrawIndirect::DISPATCH_FUNCTION = &BackendDispatch::DrawIndirect;

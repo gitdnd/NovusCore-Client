@@ -83,6 +83,8 @@ namespace Renderer
         virtual [[nodiscard]] CommandListID BeginCommandList() = 0;
         virtual void EndCommandList(CommandListID commandListID) = 0;
         virtual void Clear(CommandListID commandListID, ImageID image, Color color) = 0;
+        virtual void Clear(CommandListID commandListID, ImageID image, uvec4 values) = 0;
+        virtual void Clear(CommandListID commandListID, ImageID image, ivec4 values) = 0;
         virtual void Clear(CommandListID commandListID, DepthImageID image, DepthClearFlags clearFlags, f32 depth, u8 stencil) = 0;
         virtual void Draw(CommandListID commandListID, u32 numVertices, u32 numInstances, u32 vertexOffset, u32 instanceOffset) = 0;
         virtual void DrawIndirect(CommandListID commandListID, BufferID argumentBuffer, u32 argumentBufferOffset, u32 drawCount) = 0;

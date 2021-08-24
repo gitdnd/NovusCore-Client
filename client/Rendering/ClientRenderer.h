@@ -22,7 +22,9 @@ class Window;
 class CameraFreeLook;
 class UIRenderer;
 class TerrainRenderer;
+class MapObjectRenderer;
 class CModelRenderer;
+class MaterialRenderer;
 class SkyboxRenderer;
 class PostProcessRenderer;
 class RendertargetVisualizer;
@@ -45,6 +47,7 @@ public:
     void InitImgui();
     UIRenderer* GetUIRenderer() { return _uiRenderer; }
     TerrainRenderer* GetTerrainRenderer() { return _terrainRenderer; }
+    MapObjectRenderer* GetMapObjectRenderer() { return _mapObjectRenderer; }
     CModelRenderer* GetCModelRenderer() { return _cModelRenderer; }
     DebugRenderer* GetDebugRenderer() { return _debugRenderer; }
     RendertargetVisualizer* GetRendertargetVisualizer() { return _rendertargetVisualizer; }
@@ -77,7 +80,9 @@ private:
     DebugRenderer* _debugRenderer;
     UIRenderer* _uiRenderer;
     TerrainRenderer* _terrainRenderer;
+    MapObjectRenderer* _mapObjectRenderer;
     CModelRenderer* _cModelRenderer;
+    MaterialRenderer* _materialRenderer;
     SkyboxRenderer* _skyboxRenderer;
     PostProcessRenderer* _postProcessRenderer;
     RendertargetVisualizer* _rendertargetVisualizer;

@@ -17,6 +17,8 @@ namespace Renderer
         ImageFormat format = ImageFormat::UNKNOWN;
         SampleCount sampleCount = SampleCount::SAMPLE_COUNT_1;
         Color clearColor = Color::Clear;
+        uvec4 clearUInts = uvec4(0, 0, 0, 0);
+        ivec4 clearInts = ivec4(0, 0, 0, 0);
     };
 
     // Lets strong-typedef an ID type with the underlying type of u16

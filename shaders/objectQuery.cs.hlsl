@@ -1,3 +1,5 @@
+#include "visibilityBuffer.inc.hlsl"
+
 struct Constants
 {
     uint2 requests[15];
@@ -11,8 +13,7 @@ struct ObjectData
 };
 
 [[vk::push_constant]] Constants _constants;
-[[vk::binding(0, PER_PASS)]] Texture2D<uint> _texture;
-[[vk::binding(1, PER_PASS)]] RWStructuredBuffer<ObjectData> _result;
+[[vk::binding(0, PER_PASS)]] RWStructuredBuffer<ObjectData> _result;
 
 [numthreads(1, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -21,10 +22,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     for (uint i = 0; i < numRequests; i++)
     {
-        uint2 pixelData = _constants.requests[i];
-        uint objectID = _texture.Load(uint3(pixelData, 0));
+        uint2 pixelPos = _constants.requests[i];
 
-        _result[i].type = objectID >> 28;
-        _result[i].value = objectID & 0x0FFFFFFF;
+        VisibilityBuffer vBuffer = LoadVisibilityBuffer(pixelPos);
+
+        _result[i].type = vBuffer.typeID;
+
+        uint objectID = 0;
+        if (vBuffer.typeID == ObjectType::Terrain)
+        {
+            CellInstance cellInstance = _cellInstances[vBuffer.drawID];
+            objectID = cellInstance.packedChunkCellID;
+        }
+        else
+        {
+            objectID = vBuffer.drawID;//GetObjectID(vBuffer.typeID, vBuffer.drawID);
+        }
+
+        _result[i].value = objectID;
     }
 }

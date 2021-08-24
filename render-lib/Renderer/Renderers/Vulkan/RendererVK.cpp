@@ -278,6 +278,64 @@ namespace Renderer
         _device->TransitionImageLayout(commandBuffer, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, desc.depth, 1);
     }
 
+    void RendererVK::Clear(CommandListID commandListID, ImageID imageID, uvec4 values)
+    {
+        VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
+        VkImage image = _imageHandler->GetImage(imageID);
+
+        ImageDesc desc = _imageHandler->GetImageDesc(imageID);
+
+        VkClearColorValue clearColorValue = {};
+        clearColorValue.uint32[0] = values.x;
+        clearColorValue.uint32[1] = values.y;
+        clearColorValue.uint32[2] = values.z;
+        clearColorValue.uint32[3] = values.w;
+
+        VkImageSubresourceRange imageSubresourceRange;
+        imageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageSubresourceRange.baseMipLevel = 0;
+        imageSubresourceRange.levelCount = 1;
+        imageSubresourceRange.baseArrayLayer = 0;
+        imageSubresourceRange.layerCount = desc.depth;
+
+        // Transition image to TRANSFER_DST_OPTIMAL
+        _device->TransitionImageLayout(commandBuffer, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, desc.depth, 1);
+
+        vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColorValue, 1, &imageSubresourceRange);
+
+        // Transition image back to GENERAL
+        _device->TransitionImageLayout(commandBuffer, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, desc.depth, 1);
+    }
+
+    void RendererVK::Clear(CommandListID commandListID, ImageID imageID, ivec4 values)
+    {
+        VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
+        VkImage image = _imageHandler->GetImage(imageID);
+
+        ImageDesc desc = _imageHandler->GetImageDesc(imageID);
+
+        VkClearColorValue clearColorValue = {};
+        clearColorValue.int32[0] = values.x;
+        clearColorValue.int32[1] = values.y;
+        clearColorValue.int32[2] = values.z;
+        clearColorValue.int32[3] = values.w;
+
+        VkImageSubresourceRange imageSubresourceRange;
+        imageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageSubresourceRange.baseMipLevel = 0;
+        imageSubresourceRange.levelCount = 1;
+        imageSubresourceRange.baseArrayLayer = 0;
+        imageSubresourceRange.layerCount = desc.depth;
+
+        // Transition image to TRANSFER_DST_OPTIMAL
+        _device->TransitionImageLayout(commandBuffer, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, desc.depth, 1);
+
+        vkCmdClearColorImage(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColorValue, 1, &imageSubresourceRange);
+
+        // Transition image back to GENERAL
+        _device->TransitionImageLayout(commandBuffer, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, desc.depth, 1);
+    }
+
     void RendererVK::Clear(CommandListID commandListID, DepthImageID imageID, DepthClearFlags clearFlags, f32 depth, u8 stencil)
     {
         VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
@@ -763,6 +821,11 @@ namespace Renderer
 
         if (graphicsPipelineID != GraphicsPipelineID::Invalid())
         {
+            if (_pipelineHandler->GetNumDescriptorSetLayouts(graphicsPipelineID) <= static_cast<u32>(slot))
+            {
+                return;
+            }
+
             std::vector<std::vector<VkDescriptorImageInfo>> imageInfosArrays; // These need to live until builder->BuildDescriptor()
             imageInfosArrays.reserve(8);
 
@@ -784,6 +847,11 @@ namespace Renderer
         } 
         else if (computePipelineID != ComputePipelineID::Invalid())
         {
+            if (_pipelineHandler->GetNumDescriptorSetLayouts(computePipelineID) <= static_cast<u32>(slot))
+            {
+                return;
+            }
+
             std::vector<std::vector<VkDescriptorImageInfo>> imageInfosArrays; // These need to live until builder->BuildDescriptor()
             imageInfosArrays.reserve(8);
 
@@ -1060,7 +1128,7 @@ namespace Renderer
         VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
         
         // Tracy profiling
-        PushMarker(commandListID, Color::Red, "Present Blitting");
+        PushMarker(commandListID, Color::PastelRed, "Present Blitting");
         tracy::VkCtxManualScope*& tracyScope = _commandListHandler->GetTracyScope(commandListID);
 
         {

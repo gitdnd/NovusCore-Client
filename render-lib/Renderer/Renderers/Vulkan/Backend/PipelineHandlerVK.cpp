@@ -163,6 +163,9 @@ NOVUS_NO_PADDING_END;
             u64 cacheDescHash = CalculateCacheDescHash(desc);
             if (TryFindExistingGPipeline(cacheDescHash, nextID))
             {
+                // Update the desc in case the ResourceToID functions has changed
+                data.graphicsPipelines[nextID].desc = desc;
+
                 return GraphicsPipelineID(static_cast<gIDType>(nextID));
             }
             nextID = data.graphicsPipelines.size();
@@ -760,10 +763,28 @@ NOVUS_NO_PADDING_END;
             return data.graphicsPipelines[static_cast<gIDType>(id)].framebuffer;
         }
 
+        u32 PipelineHandlerVK::GetNumDescriptorSetLayouts(GraphicsPipelineID id)
+        {
+            PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);
+            return static_cast<u32>(data.graphicsPipelines[static_cast<gIDType>(id)].descriptorSetLayoutDatas.size());
+        }
+
+        u32 PipelineHandlerVK::GetNumDescriptorSetLayouts(ComputePipelineID id)
+        {
+            PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);
+            return static_cast<u32>(data.computePipelines[static_cast<cIDType>(id)].descriptorSetLayoutDatas.size());
+        }
+
         DescriptorSetLayoutData& PipelineHandlerVK::GetDescriptorSetLayoutData(GraphicsPipelineID id, u32 index)
         {
             PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);
             return data.graphicsPipelines[static_cast<gIDType>(id)].descriptorSetLayoutDatas[index];
+        }
+        
+        DescriptorSetLayoutData& PipelineHandlerVK::GetDescriptorSetLayoutData(ComputePipelineID id, u32 index)
+        {
+            PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);
+            return data.computePipelines[static_cast<cIDType>(id)].descriptorSetLayoutDatas[index];
         }
 
         VkDescriptorSetLayout& PipelineHandlerVK::GetDescriptorSetLayout(GraphicsPipelineID id, u32 index)

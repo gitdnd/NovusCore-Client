@@ -10,7 +10,9 @@ namespace Renderer
     class BackendDispatch
     {
     public:
-        static void ClearImage(Renderer* renderer, CommandListID commandList, const void* data);
+        static void ClearImageColor(Renderer* renderer, CommandListID commandList, const void* data);
+        static void ClearImageUInt(Renderer* renderer, CommandListID commandList, const void* data);
+        static void ClearImageInt(Renderer* renderer, CommandListID commandList, const void* data);
         static void ClearDepthImage(Renderer* renderer, CommandListID commandList, const void* data);
 
         static void Draw(Renderer* renderer, CommandListID commandList, const void* data);

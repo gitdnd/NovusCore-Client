@@ -30,7 +30,6 @@ namespace Renderer
 {
     class RenderGraph;
     class Renderer;
-    class DescriptorSet;
 }
 
 namespace NDBC
@@ -79,19 +78,18 @@ class TerrainRenderer
 #pragma pack(pop)
 
 public:
-    TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, CModelRenderer* complexModelRenderer);
+    TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer);
     ~TerrainRenderer();
 
     void Update(f32 deltaTime);
 
-    void AddTerrainDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddTerrainEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 cellIndex);
+    void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 
     bool LoadMap(const NDBC::Map* map);
 
     const SafeVector<Geometry::AABoundingBox>& GetBoundingBoxes() { return _cellBoundingBoxes; }
-    MapObjectRenderer* GetMapObjectRenderer() { return _mapObjectRenderer; }
 
     // Drawcall stats
     u32 GetNumDrawCalls() { return Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size()); }
@@ -101,16 +99,10 @@ public:
     u32 GetNumTriangles() { return Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size()) * Terrain::NUM_TRIANGLES_PER_CELL; }
     u32 GetNumSurvivingTriangles() { return _numSurvivingDrawCalls * Terrain::NUM_TRIANGLES_PER_CELL; }
 
-    u32 GetInstanceIDFromChunkID(u32 chunkID)
-    {
-        auto itr = _chunkIDToInstanceID.find(chunkID);
-        if (itr == _chunkIDToInstanceID.end())
-        {
-            DebugHandler::PrintFatal("TerrainRenderer : GetInstanceIDFromChunkID call with chunkID not matching any loaded Chunks");
-        }
+    u32 GetInstanceIDFromChunkID(u32 chunkID);
 
-        return itr->second;
-    }
+    Renderer::DescriptorSet& GetMaterialPassDescriptorSet() { return _materialPassDescriptorSet; };
+    
 private:
     void CreatePermanentResources();
 
@@ -120,7 +112,6 @@ private:
 
     void LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded);
     //void LoadChunksAround(Terrain::Map& map, ivec2 middleChunk, u16 drawDistance);
-    void CPUCulling(const Camera* camera);
 
     void DebugRenderCellTriangles(const Camera* camera);
 private:
@@ -147,11 +138,13 @@ private:
 
     Renderer::SamplerID _alphaSampler;
     Renderer::SamplerID _colorSampler;
+    Renderer::SamplerID _occlusionSampler;
 
-    Renderer::DescriptorSet _passDescriptorSet;
-    Renderer::DescriptorSet _drawDescriptorSet;
+    Renderer::DescriptorSet _geometryPassDescriptorSet;
 
     Renderer::DescriptorSet _cullingPassDescriptorSet;
+    Renderer::DescriptorSet _materialPassDescriptorSet;
+    Renderer::DescriptorSet _editorPassDescriptorSet;
 
     SafeVector<u16> _loadedChunks;
     SafeVector<Geometry::AABoundingBox> _cellBoundingBoxes;
@@ -165,9 +158,8 @@ private:
     
     robin_hood::unordered_map<u32, u32> _chunkIDToInstanceID;
 
-    // Subrenderers
-    MapObjectRenderer* _mapObjectRenderer = nullptr;
-    CModelRenderer* _complexModelRenderer = nullptr;
-    WaterRenderer* _waterRenderer = nullptr;
     DebugRenderer* _debugRenderer = nullptr;
+    MapObjectRenderer* _mapObjectRenderer = nullptr;
+    CModelRenderer* _cModelRenderer = nullptr;
+    WaterRenderer* _waterRenderer = nullptr;
 };

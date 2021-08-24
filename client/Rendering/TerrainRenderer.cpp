@@ -34,7 +34,6 @@
 
 AutoCVar_Int CVAR_OcclusionCullingEnabled("terrain.occlusionCull.Enable", "enable culling of terrain tiles", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_CullingEnabled("terrain.culling.Enable", "enable culling of terrain tiles", 1, CVarFlags::EditCheckbox);
-AutoCVar_Int CVAR_GPUCullingEnabled("terrain.culling.GPUCullEnable", "enable gpu culling", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_LockCullingFrustum("terrain.culling.LockFrustum", "lock frustrum for terrain culling", 0, CVarFlags::EditCheckbox);
 
 AutoCVar_Int CVAR_HeightBoxEnable("terrain.heightBox.Enable", "draw height box", 1, CVarFlags::EditCheckbox);
@@ -67,19 +66,19 @@ struct TerrainCellHeightRange
 #endif
 };
 
-TerrainRenderer::TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, CModelRenderer* complexModelRenderer)
+TerrainRenderer::TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer)
     : _renderer(renderer)
     , _debugRenderer(debugRenderer)
-    , _complexModelRenderer(complexModelRenderer)
+    , _mapObjectRenderer(mapObjectRenderer)
+    , _cModelRenderer(cModelRenderer)
 {
-    _mapObjectRenderer = new MapObjectRenderer(renderer, debugRenderer); // Needs to be created before CreatePermanentResources
     _waterRenderer = new WaterRenderer(renderer); // Needs to be created before CreatePermanentResources
     CreatePermanentResources();
 }
 
 TerrainRenderer::~TerrainRenderer()
 {
-    delete _mapObjectRenderer;
+    
 }
 
 void TerrainRenderer::Update(f32 deltaTime)
@@ -121,12 +120,6 @@ void TerrainRenderer::Update(f32 deltaTime)
     }
 
     const bool cullingEnabled = CVAR_CullingEnabled.Get();
-    const bool gpuCullEnabled = CVAR_GPUCullingEnabled.Get();
-
-    if (cullingEnabled && !gpuCullEnabled)
-    {
-        CPUCulling(camera);
-    }
 
     // Read back from culling counters
     u32 numDrawCalls = Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size());
@@ -134,121 +127,16 @@ void TerrainRenderer::Update(f32 deltaTime)
 
     if (cullingEnabled)
     {
-        if (gpuCullEnabled)
+        u32* count = static_cast<u32*>(_renderer->MapBuffer(_drawCountReadBackBuffer));
+        if (count != nullptr)
         {
-            u32* count = static_cast<u32*>(_renderer->MapBuffer(_drawCountReadBackBuffer));
-            if (count != nullptr)
-            {
-                _numSurvivingDrawCalls = *count;
-            }
-            _renderer->UnmapBuffer(_drawCountReadBackBuffer);
+            _numSurvivingDrawCalls = *count;
         }
-        else
-        {
-            _numSurvivingDrawCalls = static_cast<u32>(_culledInstances.size());
-        }
+        _renderer->UnmapBuffer(_drawCountReadBackBuffer);
     }
 
     // Subrenderers
-    _mapObjectRenderer->Update(deltaTime);
     _waterRenderer->Update(deltaTime);
-}
-
-__forceinline bool IsInsideFrustum(const vec4* planes, const Geometry::AABoundingBox& boundingBox)
-{
-    // this is why god abandoned us
-    for (int i = 0; i < 6; ++i)
-    {
-        const vec4& plane = planes[i];
-
-        vec3 vmin, vmax;
-
-        // X axis 
-        if (plane.x > 0) {
-            vmin.x = boundingBox.min.x;
-            vmax.x = boundingBox.max.x;
-        }
-        else {
-            vmin.x = boundingBox.max.x;
-            vmax.x = boundingBox.min.x;
-        }
-        // Y axis 
-        if (plane.y > 0) {
-            vmin.y = boundingBox.min.y;
-            vmax.y = boundingBox.max.y;
-        }
-        else {
-            vmin.y = boundingBox.max.y;
-            vmax.y = boundingBox.min.y;
-        }
-        // Z axis 
-        if (plane.z > 0)
-        {
-            vmin.z = boundingBox.min.z;
-            vmax.z = boundingBox.max.z;
-        }
-        else
-        {
-            vmin.z = boundingBox.max.z;
-            vmax.z = boundingBox.min.z;
-        }
-
-        if (glm::dot(vec3(plane), vmin) + plane.w < 0)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-void TerrainRenderer::CPUCulling(const Camera* camera)
-{
-    ZoneScoped;
-
-    static vec4 frustumPlanes[6];
-    static mat4x4 lockedViewProjectionMatrix;
-
-    if (!CVAR_LockCullingFrustum.Get())
-    {
-        memcpy(frustumPlanes, camera->GetFrustumPlanes(), sizeof(frustumPlanes));
-        lockedViewProjectionMatrix = camera->GetViewProjectionMatrix();
-    }
-
-    _culledInstances.clear();
-    _culledInstances.reserve(_loadedChunks.Size() * Terrain::MAP_CELLS_PER_CHUNK);
-
-    const size_t chunkCount = _loadedChunks.Size();
-    size_t boundingBoxIndex = 0;
-    for (size_t i = 0; i < chunkCount; ++i)
-    {
-        for (u16 cellId = 0; cellId < Terrain::MAP_CELLS_PER_CHUNK; ++cellId)
-        {
-            u32 index = static_cast<u32>(boundingBoxIndex++);
-
-            const Geometry::AABoundingBox* boundingBox = nullptr;
-            _cellBoundingBoxes.ReadLock([&](const std::vector<Geometry::AABoundingBox>& boundingBoxes) {
-                boundingBox = &boundingBoxes[index];
-                });
-
-            //const Geometry::AABoundingBox& boundingBox = _cellBoundingBoxes[index];
-            if (IsInsideFrustum(frustumPlanes, *boundingBox))
-            {
-                u16 chunkId = 0;
-                _loadedChunks.ReadLock(
-                    [&](const std::vector<u16>& loadedChunks)
-                    {
-                        chunkId = loadedChunks[i];
-                    });
-
-                CellInstance& cellInstance = _culledInstances.emplace_back();
-                cellInstance.packedChunkCellID = (chunkId << 16) | cellId;
-                cellInstance.instanceID = index;
-            }
-        }
-    }
-
-    _debugRenderer->DrawFrustum(lockedViewProjectionMatrix, 0xff0000ff);
 }
 
 void TerrainRenderer::DebugRenderCellTriangles(const Camera* camera)
@@ -271,238 +159,117 @@ void TerrainRenderer::DebugRenderCellTriangles(const Camera* camera)
     }
 }
 
-void TerrainRenderer::AddTerrainDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+void TerrainRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    // Terrain Depth Prepass
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+
+    if (!currentMap.IsLoadedMap())
+        return;
+
+    if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
+        return;
+
+    const bool cullingEnabled = CVAR_CullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
+    const bool lockFrustum = CVAR_LockCullingFrustum.Get();
+
+    struct TerrainCullingPassData
     {
-        struct TerrainDepthPrepassData
+    };
+
+    renderGraph->AddPass<TerrainCullingPassData>("Terrain Culling",
+        [=](TerrainCullingPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            Renderer::RenderPassMutableResource depth;
-        };
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](TerrainCullingPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, TerrainCulling);
 
-        const bool cullingEnabled = CVAR_CullingEnabled.Get();
-        const bool gpuCullEnabled = CVAR_GPUCullingEnabled.Get();
-        const bool lockFrustum = CVAR_LockCullingFrustum.Get();
+            // Cull instances on GPU
+            Renderer::ComputePipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
 
-        renderGraph->AddPass<TerrainDepthPrepassData>("Terrain Depth Prepass",
-            [=](TerrainDepthPrepassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+            Renderer::ComputeShaderDesc shaderDesc;
+            shaderDesc.path = "terrainCulling.cs.hlsl";
+            pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+            Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+            commandList.BeginPipeline(pipeline);
+
+            if (!lockFrustum)
             {
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                Camera* camera = ServiceLocator::GetCamera();
+                memcpy(_cullingConstants.frustumPlanes, camera->GetFrustumPlanes(), sizeof(_cullingConstants.frustumPlanes));
+            }
+            _cullingConstants.occlusionEnabled = CVAR_OcclusionCullingEnabled.Get();
 
-                return true; // Return true from setup to enable this pass, return false to disable it
-            },
-            [=](TerrainDepthPrepassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
-            {
-                entt::registry* registry = ServiceLocator::GetGameRegistry();
-                MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+            // Reset the counter
+            commandList.FillBuffer(_argumentBuffer, 0, 4, Terrain::NUM_INDICES_PER_CELL);
+            commandList.FillBuffer(_argumentBuffer, 4, 12, 0);
+            commandList.FillBuffer(_argumentBuffer, 16, 4, 0);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _argumentBuffer);
 
-                Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+            commandList.PushConstant(&_cullingConstants, 0, sizeof(CullingConstants));
+            _cullingPassDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
 
-                if (!currentMap.IsLoadedMap())
-                    return;
+            // Bind descriptorset
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::DEBUG, &resources.debugDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::TERRAIN, &_cullingPassDescriptorSet, frameIndex);
 
-                if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
-                    return;
+            const u32 cellCount = (u32)_loadedChunks.Size() * Terrain::MAP_CELLS_PER_CHUNK;
+            commandList.Dispatch((cellCount + 31) / 32, 1, 1);
 
-                GPU_SCOPED_PROFILER_ZONE(commandList, TerrainDepthPrepass);
-
-                // Upload culled instances
-                if (cullingEnabled && !gpuCullEnabled && !_culledInstances.empty())
-                {
-                    size_t size = sizeof(CellInstance) * _culledInstances.size();
-                    auto uploadBuffer = _renderer->CreateUploadBuffer(_culledInstanceBuffer, 0, size);
-                    memcpy(uploadBuffer->mappedMemory, _culledInstances.data(), size);
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _culledInstanceBuffer);
-                }
-
-                // Cull instances on GPU
-                if (cullingEnabled && gpuCullEnabled)
-                {
-                    Renderer::ComputePipelineDesc pipelineDesc;
-                    graphResources.InitializePipelineDesc(pipelineDesc);
-
-                    Renderer::ComputeShaderDesc shaderDesc;
-                    shaderDesc.path = "terrainCulling.cs.hlsl";
-                    pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
-
-                    Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
-                    commandList.BeginPipeline(pipeline);
-
-                    if (!lockFrustum)
-                    {
-                        Camera* camera = ServiceLocator::GetCamera();
-                        memcpy(_cullingConstants.frustumPlanes, camera->GetFrustumPlanes(), sizeof(_cullingConstants.frustumPlanes));
-                    }
-                    _cullingConstants.occlusionEnabled = CVAR_OcclusionCullingEnabled.Get();
-
-                    // Reset the counter
-                    commandList.FillBuffer(_argumentBuffer, 0, 4, Terrain::NUM_INDICES_PER_CELL);
-                    commandList.FillBuffer(_argumentBuffer, 4, 12, 0);
-                    commandList.FillBuffer(_argumentBuffer, 16, 4, 0);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _argumentBuffer);
-
-                    commandList.PushConstant(&_cullingConstants, 0, sizeof(CullingConstants));
-
-                    _cullingPassDescriptorSet.Bind("_instances", _instanceBuffer);
-                    _cullingPassDescriptorSet.Bind("_heightRanges", _cellHeightRangeBuffer);
-                    _cullingPassDescriptorSet.Bind("_culledInstances", _culledInstanceBuffer);
-                    _cullingPassDescriptorSet.Bind("_drawCount", _argumentBuffer);
-
-                    Renderer::SamplerDesc samplerDesc;
-                    samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
-
-                    samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-                    samplerDesc.minLOD = 0.f;
-                    samplerDesc.maxLOD = 16.f;
-                    samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
-
-                    Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
-
-                    _cullingPassDescriptorSet.Bind("_depthSampler", occlusionSampler);
-                    _cullingPassDescriptorSet.Bind("_depthPyramid", resources.depthPyramid);
-
-                    // Bind descriptorset
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::DEBUG, &resources.debugDescriptorSet, frameIndex);
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingPassDescriptorSet, frameIndex);
-
-                    const u32 cellCount = (u32)_loadedChunks.Size() * Terrain::MAP_CELLS_PER_CHUNK;
-                    commandList.Dispatch((cellCount + 31) / 32, 1, 1);
-
-                    commandList.EndPipeline(pipeline);
-
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexBuffer, _culledInstanceBuffer);
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _argumentBuffer);
-                }
-
-                Renderer::GraphicsPipelineDesc pipelineDesc;
-                graphResources.InitializePipelineDesc(pipelineDesc);
-
-                // Shaders
-                Renderer::VertexShaderDesc vertexShaderDesc;
-                vertexShaderDesc.path = "terrain.vs.hlsl";
-                vertexShaderDesc.AddPermutationField("COLOR_PASS", "0");
-                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
-
-                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-                // Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
-                pipelineDesc.states.inputLayouts[0].enabled = true;
-                pipelineDesc.states.inputLayouts[0].SetName("TEXCOORD0");
-                pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32_UINT;
-                pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-                pipelineDesc.states.inputLayouts[1].enabled = true;
-                pipelineDesc.states.inputLayouts[1].SetName("TEXCOORD1");
-                pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R32_UINT;
-                pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-
-                // Depth state
-                pipelineDesc.states.depthStencilState.depthEnable = true;
-                pipelineDesc.states.depthStencilState.depthWriteEnable = true;
-                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
-
-                // Rasterizer state
-                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-
-                // Render targets
-                pipelineDesc.depthStencil = data.depth;
-
-                // Set pipeline
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                // Set instance buffer
-                const Renderer::BufferID instanceBuffer = cullingEnabled ? _culledInstanceBuffer : _instanceBuffer;
-                commandList.SetBuffer(0, instanceBuffer);
-
-                // Set index buffer
-                commandList.SetIndexBuffer(_cellIndexBuffer, Renderer::IndexFormat::UInt16);
-
-                // Bind viewbuffer
-                _passDescriptorSet.Bind("_packedVertices"_h, _vertexBuffer);
-                _passDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
-
-                // Bind descriptorset
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-                if (cullingEnabled)
-                {
-                    if (gpuCullEnabled)
-                    {
-                        commandList.DrawIndexedIndirect(_argumentBuffer, 0, 1);
-                    }
-                    else
-                    {
-                        const u32 cellCount = (u32)_culledInstances.size();
-                        TracyPlot("Cell Instance Count", (i64)cellCount);
-                        commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, cellCount, 0, 0, 0);
-                    }
-                }
-                else
-                {
-                    const u32 cellCount = Terrain::MAP_CELLS_PER_CHUNK * (u32)_loadedChunks.Size();
-                    TracyPlot("Cell Instance Count", (i64)cellCount);
-                    commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, cellCount, 0, 0, 0);
-                }
-
-                commandList.EndPipeline(pipeline);
-                if (cullingEnabled)
-                {
-                    if (gpuCullEnabled)
-                    {
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _argumentBuffer);
-                        commandList.CopyBuffer(_drawCountReadBackBuffer, 0, _argumentBuffer, 4, 4);
-                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountReadBackBuffer);
-                    }
-                }
-            });
-    }
-
-    _mapObjectRenderer->AddMapObjectDepthPrepass(renderGraph, resources, frameIndex);
+            commandList.EndPipeline(pipeline);
+        });
 }
 
-void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+void TerrainRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    // Terrain Pass
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+
+    if (!currentMap.IsLoadedMap())
+        return;
+
+    if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
+        return;
+
+    const bool cullingEnabled = CVAR_CullingEnabled.Get();
+
+    struct TerrainGeometryPassData
     {
-        struct TerrainPassData
-        {
-            Renderer::RenderPassMutableResource color;
-            Renderer::RenderPassMutableResource objectIDs;
-            Renderer::RenderPassMutableResource depth;
-        };
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
 
-        const bool cullingEnabled = CVAR_CullingEnabled.Get();
-        const bool gpuCullEnabled = CVAR_GPUCullingEnabled.Get();
-        const bool lockFrustum = CVAR_LockCullingFrustum.Get();
-
-        renderGraph->AddPass<TerrainPassData>("Terrain Pass",
-            [=](TerrainPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+    renderGraph->AddPass<TerrainGeometryPassData>("Terrain Geometry",
+        [=](TerrainGeometryPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-            data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
-            [=](TerrainPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        [=](TerrainGeometryPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
         {
-            entt::registry* registry = ServiceLocator::GetGameRegistry();
-            MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+            GPU_SCOPED_PROFILER_ZONE(commandList, TerrainGeometry);
 
-            Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
-
-            if (!currentMap.IsLoadedMap())
-                return;
-
-            if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
-                return;
-
-            GPU_SCOPED_PROFILER_ZONE(commandList, TerrainPass);
+            // Add barriers if we're culling
+            if (cullingEnabled)
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _culledInstanceBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToPixelShaderRead, _culledInstanceBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _argumentBuffer);
+            }
 
             Renderer::GraphicsPipelineDesc pipelineDesc;
             graphResources.InitializePipelineDesc(pipelineDesc);
@@ -510,7 +277,6 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
             // Shaders
             Renderer::VertexShaderDesc vertexShaderDesc;
             vertexShaderDesc.path = "terrain.vs.hlsl";
-            vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
             vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
 
             pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
@@ -519,28 +285,17 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
             pixelShaderDesc.path = "terrain.ps.hlsl";
             pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
 
-            // Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
-            pipelineDesc.states.inputLayouts[0].enabled = true;
-            pipelineDesc.states.inputLayouts[0].SetName("TEXCOORD0");
-            pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32_UINT;
-            pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-            pipelineDesc.states.inputLayouts[1].enabled = true;
-            pipelineDesc.states.inputLayouts[1].SetName("TEXCOORD1");
-            pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R32_UINT;
-            pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-
             // Depth state
             pipelineDesc.states.depthStencilState.depthEnable = true;
-            pipelineDesc.states.depthStencilState.depthWriteEnable = false;
-            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::EQUAL;
+            pipelineDesc.states.depthStencilState.depthWriteEnable = true;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
             pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
 
             // Render targets
-            pipelineDesc.renderTargets[0] = data.color;
-            pipelineDesc.renderTargets[1] = data.objectIDs;
+            pipelineDesc.renderTargets[0] = data.visibilityBuffer;
 
             pipelineDesc.depthStencil = data.depth;
 
@@ -548,34 +303,21 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
             Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
             commandList.BeginPipeline(pipeline);
 
-            // Set instance buffer
-            const Renderer::BufferID instanceBuffer = cullingEnabled ? _culledInstanceBuffer : _instanceBuffer;
-            commandList.SetBuffer(0, instanceBuffer);
-
             // Set index buffer
             commandList.SetIndexBuffer(_cellIndexBuffer, Renderer::IndexFormat::UInt16);
 
-            // Bind viewbuffer
-            _passDescriptorSet.Bind("_packedVertices"_h, _vertexBuffer);
-            _passDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
-            _passDescriptorSet.Bind("_chunkData"_h, _chunkBuffer);
-            _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
+            // Bind descriptors
+            const Renderer::BufferID instanceBuffer = cullingEnabled ? _culledInstanceBuffer : _instanceBuffer;
+
+            _geometryPassDescriptorSet.Bind("_cellInstances"_h, instanceBuffer);
+            _materialPassDescriptorSet.Bind("_cellInstances"_h, instanceBuffer);
 
             // Bind descriptorset
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::TERRAIN, &_geometryPassDescriptorSet, frameIndex);
             if (cullingEnabled)
             {
-                if (gpuCullEnabled)
-                {
-                    commandList.DrawIndexedIndirect(_argumentBuffer, 0, 1);
-                }
-                else
-                {
-                    const u32 cellCount = (u32)_culledInstances.size();
-                    TracyPlot("Cell Instance Count", (i64)cellCount);
-                    commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, cellCount, 0, 0, 0);
-                }
+                commandList.DrawIndexedIndirect(_argumentBuffer, 0, 1);
             }
             else
             {
@@ -585,184 +327,138 @@ void TerrainRenderer::AddTerrainPass(Renderer::RenderGraph* renderGraph, RenderR
             }
 
             commandList.EndPipeline(pipeline);
+            if (cullingEnabled)
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _argumentBuffer);
+                commandList.CopyBuffer(_drawCountReadBackBuffer, 0, _argumentBuffer, 4, 4);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountReadBackBuffer);
+            }
         });
-    }
-
-    // Subrenderers
-
-    Editor::Editor* editor = ServiceLocator::GetEditor();
-    if (editor->HasSelectedObject())
-    {
-        u32 activeToken = editor->GetActiveToken();
-
-        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
-
-        PixelQuery::PixelData pixelData;
-
-        if (pixelQuery->GetQueryResult(activeToken, pixelData))
-        {
-            if (pixelData.type == Editor::QueryObjectType::Terrain)
-            {
-                const Editor::Editor::SelectedTerrainData& selectedTerrainData = editor->GetSelectedTerrainData();
-                if (selectedTerrainData.drawWireframe)
-                {
-                    const u32 packedChunkCellID = pixelData.value;
-                    u32 cellID = packedChunkCellID & 0xffff;
-                    u32 chunkID = packedChunkCellID >> 16;
-
-                    u32 instanceID = GetInstanceIDFromChunkID(chunkID);
-                    u32 cellIndex = instanceID * Terrain::MAP_CELLS_PER_CHUNK + cellID;
-
-                    AddTerrainEditorPass(renderGraph, resources, frameIndex, cellIndex);
-                }
-            }
-        }
-    }
-
-    _mapObjectRenderer->AddMapObjectPass(renderGraph, resources, frameIndex);
-
-
-    if (editor->HasSelectedObject())
-    {
-        u32 activeToken = editor->GetActiveToken();
-
-        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-        PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
-
-        PixelQuery::PixelData pixelData;
-
-        if (pixelQuery->GetQueryResult(activeToken, pixelData))
-        {
-            if (pixelData.type == Editor::QueryObjectType::MapObject)
-            {
-                const Editor::Editor::SelectedMapObjectData& selectedMapObjectData = editor->GetSelectedMapObjectData();
-                if (selectedMapObjectData.drawWireframe)
-                {
-                    u32 instanceLookupDataID = pixelData.value;
-
-                    const Editor::Editor::SelectedMapObjectData& selectedMapObjectData = editor->GetSelectedMapObjectData();
-                    _mapObjectRenderer->AddMapObjectEditorPass(renderGraph, resources, frameIndex, instanceLookupDataID, selectedMapObjectData.selectedRenderBatch - 1, selectedMapObjectData.wireframeEntireObject);
-                }
-            }
-        }
-    }
-    
-   // _waterRenderer->AddWaterPass(renderGraph, globalDescriptorSet, colorTarget, depthTarget, frameIndex);
 }
 
-void TerrainRenderer::AddTerrainEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 cellIndex)
+void TerrainRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    // Terrain Pass
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+
+    if (!currentMap.IsLoadedMap())
+        return;
+
+    if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
+        return;
+
+    Editor::Editor* editor = ServiceLocator::GetEditor();
+    if (!editor->HasSelectedObject()) // Only continue if we have a selected object
+        return;
+
+    u32 activeToken = editor->GetActiveToken();
+
+    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+    PixelQuery* pixelQuery = clientRenderer->GetPixelQuery();
+
+    PixelQuery::PixelData pixelData;
+    if (!pixelQuery->GetQueryResult(activeToken, pixelData)) // Only continue if we could get the pixelquery data
+        return;
+
+    if (pixelData.type != Editor::QueryObjectType::Terrain) // Only continue if the pixel was terrain
+        return;
+
+    const Editor::Editor::SelectedTerrainData& selectedTerrainData = editor->GetSelectedTerrainData();
+    if (!selectedTerrainData.drawWireframe) // Only continue if we should draw wireframes
+        return;
+    
+    const u32 packedChunkCellID = pixelData.value;
+    u32 cellID = packedChunkCellID & 0xffff;
+    u32 chunkID = packedChunkCellID >> 16;
+
+    u32 instanceID = GetInstanceIDFromChunkID(chunkID);
+    u32 cellIndex = instanceID * Terrain::MAP_CELLS_PER_CHUNK + cellID;
+    
+    struct TerrainPassData
     {
-        struct TerrainPassData
+        Renderer::RenderPassMutableResource color;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<TerrainPassData>("Terrain Editor",
+        [=](TerrainPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            Renderer::RenderPassMutableResource color;
-            Renderer::RenderPassMutableResource objectIDs;
-            Renderer::RenderPassMutableResource depth;
-        };
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
-        renderGraph->AddPass<TerrainPassData>("Terrain Editor Pass",
-            [=](TerrainPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](TerrainPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, TerrainEditorPass);
+
+            Renderer::GraphicsPipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
+
+            // Shaders
+            Renderer::VertexShaderDesc vertexShaderDesc;
+            vertexShaderDesc.path = "terrain.vs.hlsl";
+            vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
+
+            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+            Renderer::PixelShaderDesc pixelShaderDesc;
+            pixelShaderDesc.path = "solidColor.ps.hlsl";
+            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+            // Depth state
+            pipelineDesc.states.depthStencilState.depthEnable = false;
+            pipelineDesc.states.depthStencilState.depthWriteEnable = false;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
+
+            // Rasterizer state
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
+
+            // Render targets
+            pipelineDesc.renderTargets[0] = data.color;
+
+            pipelineDesc.depthStencil = data.depth;
+
+            // Set pipeline
+            Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+            commandList.BeginPipeline(pipeline);
+
+            // Set index buffer
+            commandList.SetIndexBuffer(_cellIndexBuffer, Renderer::IndexFormat::UInt16);
+
+            struct ColorConstant
             {
-                data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-                data.objectIDs = builder.Write(resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-                data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+                vec4 value;
+            };
 
-                return true; // Return true from setup to enable this pass, return false to disable it
-            },
-            [=](TerrainPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
-            {
-                entt::registry* registry = ServiceLocator::GetGameRegistry();
-                MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+            ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
+            colorConstant->value = CVAR_TerrainWireframeColor.Get();
+            commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
 
-                Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+            // Bind descriptorset
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::TERRAIN, &_editorPassDescriptorSet, frameIndex);
 
-                if (!currentMap.IsLoadedMap())
-                    return;
+            commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, 1, 0, 0, cellIndex);
 
-                if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
-                    return;
+            commandList.EndPipeline(pipeline);
+        });
+    
+}
 
-                GPU_SCOPED_PROFILER_ZONE(commandList, TerrainPass);
-
-                Renderer::GraphicsPipelineDesc pipelineDesc;
-                graphResources.InitializePipelineDesc(pipelineDesc);
-
-                // Shaders
-                Renderer::VertexShaderDesc vertexShaderDesc;
-                vertexShaderDesc.path = "terrain.vs.hlsl";
-                vertexShaderDesc.AddPermutationField("COLOR_PASS", "1");
-                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "1");
-
-                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-
-                Renderer::PixelShaderDesc pixelShaderDesc;
-                pixelShaderDesc.path = "solidColor.ps.hlsl";
-                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
-
-                // Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
-                pipelineDesc.states.inputLayouts[0].enabled = true;
-                pipelineDesc.states.inputLayouts[0].SetName("TEXCOORD0");
-                pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32_UINT;
-                pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-                pipelineDesc.states.inputLayouts[1].enabled = true;
-                pipelineDesc.states.inputLayouts[1].SetName("TEXCOORD1");
-                pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R32_UINT;
-                pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_INSTANCE;
-
-                // Depth state
-                pipelineDesc.states.depthStencilState.depthEnable = false;
-                pipelineDesc.states.depthStencilState.depthWriteEnable = false;
-                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER_EQUAL;
-
-                // Rasterizer state
-                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
-                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
-                pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
-
-                // Render targets
-                pipelineDesc.renderTargets[0] = data.color;
-                pipelineDesc.renderTargets[1] = data.objectIDs;
-
-                pipelineDesc.depthStencil = data.depth;
-
-                // Set pipeline
-                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-                commandList.BeginPipeline(pipeline);
-
-                // Set instance buffer
-                const Renderer::BufferID instanceBuffer = _instanceBuffer;
-                commandList.SetBuffer(0, instanceBuffer);
-
-                // Set index buffer
-                commandList.SetIndexBuffer(_cellIndexBuffer, Renderer::IndexFormat::UInt16);
-
-                struct ColorConstant
-                {
-                    vec4 value;
-                };
-
-                ColorConstant* colorConstant = graphResources.FrameNew<ColorConstant>();
-                colorConstant->value = CVAR_TerrainWireframeColor.Get();
-                commandList.PushConstant(colorConstant, 0, sizeof(ColorConstant));
-
-                // Bind viewbuffer
-                _passDescriptorSet.Bind("_packedVertices"_h, _vertexBuffer);
-                _passDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
-                _passDescriptorSet.Bind("_chunkData"_h, _chunkBuffer);
-                _passDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
-
-                // Bind descriptorset
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
-
-                // 768 704 0 0
-                commandList.DrawIndexed(Terrain::NUM_INDICES_PER_CELL, 1, 0, 0, cellIndex);
-
-                commandList.EndPipeline(pipeline);
-            });
+u32 TerrainRenderer::GetInstanceIDFromChunkID(u32 chunkID)
+{
+    auto itr = _chunkIDToInstanceID.find(chunkID);
+    if (itr == _chunkIDToInstanceID.end())
+    {
+        DebugHandler::PrintFatal("TerrainRenderer : GetInstanceIDFromChunkID call with chunkID not matching any loaded Chunks");
     }
+
+    return itr->second;
 }
 
 void TerrainRenderer::CreatePermanentResources()
@@ -775,13 +471,15 @@ void TerrainRenderer::CreatePermanentResources()
     textureColorArrayDesc.size = 4096;
 
     _terrainColorTextureArray = _renderer->CreateTextureArray(textureColorArrayDesc);
-    _passDescriptorSet.Bind("_terrainColorTextures"_h, _terrainColorTextureArray);
+    _geometryPassDescriptorSet.Bind("_terrainColorTextures"_h, _terrainColorTextureArray);
+    _materialPassDescriptorSet.Bind("_terrainColorTextures"_h, _terrainColorTextureArray);
 
     Renderer::TextureArrayDesc textureAlphaArrayDesc;
     textureAlphaArrayDesc.size = Terrain::MAP_CHUNKS_PER_MAP;
 
     _terrainAlphaTextureArray = _renderer->CreateTextureArray(textureAlphaArrayDesc);
-    _passDescriptorSet.Bind("_terrainAlphaTextures"_h, _terrainAlphaTextureArray);
+    _geometryPassDescriptorSet.Bind("_terrainAlphaTextures"_h, _terrainAlphaTextureArray);
+    _materialPassDescriptorSet.Bind("_terrainAlphaTextures"_h, _terrainAlphaTextureArray);
 
     // Create and load a 1x1 pixel RGBA8 unorm texture with zero'ed data so we can use textureArray[0] as "invalid" textures, sampling it will return 0.0f on all channels
     Renderer::DataTextureDesc zeroColorTexture;
@@ -807,7 +505,8 @@ void TerrainRenderer::CreatePermanentResources()
     alphaSamplerDesc.shaderVisibility = Renderer::ShaderVisibility::PIXEL;
 
     _alphaSampler = _renderer->CreateSampler(alphaSamplerDesc);
-    _passDescriptorSet.Bind("_alphaSampler"_h, _alphaSampler);
+    _geometryPassDescriptorSet.Bind("_alphaSampler"_h, _alphaSampler);
+    _materialPassDescriptorSet.Bind("_alphaSampler"_h, _alphaSampler);
 
     Renderer::SamplerDesc colorSamplerDesc;
     colorSamplerDesc.enabled = true;
@@ -818,7 +517,21 @@ void TerrainRenderer::CreatePermanentResources()
     colorSamplerDesc.shaderVisibility = Renderer::ShaderVisibility::PIXEL;
 
     _colorSampler = _renderer->CreateSampler(colorSamplerDesc);
-    _passDescriptorSet.Bind("_colorSampler"_h, _colorSampler);
+    _geometryPassDescriptorSet.Bind("_colorSampler"_h, _colorSampler);
+    _materialPassDescriptorSet.Bind("_colorSampler"_h, _colorSampler);
+
+    Renderer::SamplerDesc occlusionSamplerDesc;
+    occlusionSamplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+
+    occlusionSamplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.minLOD = 0.f;
+    occlusionSamplerDesc.maxLOD = 16.f;
+    occlusionSamplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+    _occlusionSampler = _renderer->CreateSampler(occlusionSamplerDesc);
+    _cullingPassDescriptorSet.Bind("_depthSampler"_h, _occlusionSampler);
 
     {
         Renderer::BufferDesc desc;
@@ -834,6 +547,8 @@ void TerrainRenderer::CreatePermanentResources()
         desc.size = sizeof(VkDrawIndexedIndirectCommand);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _argumentBuffer = _renderer->CreateBuffer(_argumentBuffer, desc);
+
+        _cullingPassDescriptorSet.Bind("_drawCount"_h, _argumentBuffer);
 
         desc.size = sizeof(u32);
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
@@ -967,6 +682,9 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(CellInstance) * Terrain::MAP_CELLS_PER_CHUNK * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::VERTEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _instanceBuffer = _renderer->CreateBuffer(_instanceBuffer, desc);
+
+        _cullingPassDescriptorSet.Bind("_instances"_h, _instanceBuffer);
+        _editorPassDescriptorSet.Bind("_cellInstances"_h, _instanceBuffer);
     }
 
     {
@@ -975,6 +693,8 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(CellInstance) * Terrain::MAP_CELLS_PER_CHUNK * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::VERTEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _culledInstanceBuffer = _renderer->CreateBuffer(_culledInstanceBuffer, desc);
+
+        _cullingPassDescriptorSet.Bind("_culledInstances"_h, _culledInstanceBuffer);
     }
 
     {
@@ -983,6 +703,8 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(TerrainChunkData) * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _chunkBuffer = _renderer->CreateBuffer(_chunkBuffer, desc);
+
+        _materialPassDescriptorSet.Bind("_chunkData"_h, _chunkBuffer);
     }
 
     {
@@ -991,6 +713,10 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(TerrainCellData) * Terrain::MAP_CELLS_PER_CHUNK * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _cellBuffer = _renderer->CreateBuffer(_cellBuffer, desc);
+
+        _geometryPassDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
+        _materialPassDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
+        _editorPassDescriptorSet.Bind("_packedCellData"_h, _cellBuffer);
     }
 
     {
@@ -999,6 +725,10 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(TerrainVertex) * Terrain::NUM_VERTICES_PER_CHUNK * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _vertexBuffer = _renderer->CreateBuffer(_vertexBuffer, desc);
+
+        _geometryPassDescriptorSet.Bind("_packedTerrainVertices"_h, _vertexBuffer);
+        _materialPassDescriptorSet.Bind("_packedTerrainVertices"_h, _vertexBuffer);
+        _editorPassDescriptorSet.Bind("_packedTerrainVertices"_h, _vertexBuffer);
     }
 
     {
@@ -1007,6 +737,8 @@ void TerrainRenderer::ExecuteLoad()
         desc.size = sizeof(TerrainCellHeightRange) * Terrain::MAP_CELLS_PER_CHUNK * numChunksToLoad;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _cellHeightRangeBuffer = _renderer->CreateBuffer(_cellHeightRangeBuffer, desc);
+
+        _cullingPassDescriptorSet.Bind("_heightRanges"_h, _cellHeightRangeBuffer);
     }
 
 #if PARALLEL_LOADING
@@ -1050,7 +782,7 @@ bool TerrainRenderer::LoadMap(const NDBC::Map* map)
     _loadedChunks.Clear();
     _cellBoundingBoxes.Clear();
     _mapObjectRenderer->Clear();
-    _complexModelRenderer->Clear();
+    _cModelRenderer->Clear();
     _waterRenderer->Clear();
 
     // Unload everything but the first texture in our color array
@@ -1101,7 +833,7 @@ bool TerrainRenderer::LoadMap(const NDBC::Map* map)
     }
 
     _mapObjectRenderer->ExecuteLoad();
-    _complexModelRenderer->ExecuteLoad();
+    _cModelRenderer->ExecuteLoad();
 
     // Load Water
     //_waterRenderer->LoadWater(_loadedChunks);
@@ -1309,5 +1041,5 @@ void TerrainRenderer::LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded)
     }
 
     _mapObjectRenderer->RegisterMapObjectsToBeLoaded(chunkID, chunk, stringTable);
-    _complexModelRenderer->RegisterLoadFromChunk(chunkID, chunk, stringTable);
+    _cModelRenderer->RegisterLoadFromChunk(chunkID, chunk, stringTable);
 }

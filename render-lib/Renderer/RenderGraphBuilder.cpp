@@ -24,7 +24,25 @@ namespace Renderer
         for (ImageID image : colorClears)
         {
             ImageDesc& imageDesc = _renderer->GetImageDesc(image);
-            commandList.Clear(image, imageDesc.clearColor);
+
+            ImageComponentType imageComponentType = ToImageComponentType(imageDesc.format);
+
+            if (imageComponentType == ImageComponentType::FLOAT)
+            {
+                commandList.Clear(image, imageDesc.clearColor);
+            }
+            else if (imageComponentType == ImageComponentType::UINT)
+            {
+                commandList.Clear(image, imageDesc.clearUInts);
+            }
+            else if (imageComponentType == ImageComponentType::SINT)
+            {
+                commandList.Clear(image, imageDesc.clearInts);
+            }
+            else
+            {
+                DebugHandler::PrintFatal("Please implement more of these");
+            }
         }
 
         const DynamicArray<DepthImageID>& depthClears = _resources.GetDepthClears(passIndex);

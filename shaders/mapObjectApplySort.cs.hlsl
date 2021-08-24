@@ -8,11 +8,11 @@ struct DrawCall
     uint firstInstance;
 };
 
-[[vk::binding(0, PER_PASS)]] StructuredBuffer<uint> _sortValues;
+[[vk::binding(0, MAPOBJECT)]] StructuredBuffer<uint> _sortValues;
 
-[[vk::binding(1, PER_PASS)]] StructuredBuffer<uint> _culledDrawCount;
-[[vk::binding(2, PER_PASS)]] StructuredBuffer<DrawCall> _culledDrawCalls;
-[[vk::binding(3, PER_PASS)]] RWStructuredBuffer<DrawCall> _sortedCulledDrawCalls;
+[[vk::binding(1, MAPOBJECT)]] StructuredBuffer<uint> _culledDrawCount;
+[[vk::binding(2, MAPOBJECT)]] StructuredBuffer<DrawCall> _culledDrawCalls;
+[[vk::binding(3, MAPOBJECT)]] RWStructuredBuffer<DrawCall> _sortedCulledDrawCalls;
 
 [numthreads(32, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)

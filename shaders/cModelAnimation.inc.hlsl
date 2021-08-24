@@ -232,7 +232,7 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
     return boneMatrix;
 }
 
-void DebugRenderBone(InstanceData instanceData, int boneIndex, float3 pivotPoint, float4x4 boneMatrix, int parentBoneIndex, float3 parentPivotPoint, float4x4 parentBoneMatrix, bool drawLineToParent)
+void DebugRenderBone(CModelInstanceData instanceData, int boneIndex, float3 pivotPoint, float4x4 boneMatrix, int parentBoneIndex, float3 parentPivotPoint, float4x4 parentBoneMatrix, bool drawLineToParent)
 {
     float4 position = mul(float4(pivotPoint, 1.0f), boneMatrix);
     position.xy = -position.xy;

@@ -159,7 +159,7 @@ namespace Renderer
 
             if (!std::filesystem::exists(sourcePath))
             {
-                DebugHandler::PrintFatal("Tried to load a shader (%s) which does not exist at expected location (%s)", shaderPath, sourcePath.string());
+                DebugHandler::PrintFatal("Tried to load a shader (%s) which does not exist at expected location (%s)", shaderPath.c_str(), sourcePath.string().c_str());
             }
 
             if (_forceRecompileAll)

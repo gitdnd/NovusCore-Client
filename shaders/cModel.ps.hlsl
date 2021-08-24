@@ -1,329 +1,102 @@
-permutation COLOR_PASS = [0, 1];
+#define GEOMETRY_PASS 1
 
 #include "common.inc.hlsl"
 #include "globalData.inc.hlsl"
 #include "cModel.inc.hlsl"
+#include "visibilityBuffer.inc.hlsl"
 
-struct TextureUnit
-{
-    uint data1; // (Is Projected Texture (1 bit) + Material Flag (10 bit) + Material Blending Mode (3 bit) + Unused Padding (2 bits)) + Material Type (16 bit)
-    uint textureIDs[2];
-    uint padding;
-};
-
-[[vk::binding(9, PER_PASS)]] StructuredBuffer<TextureUnit> _textureUnits;
-[[vk::binding(10, PER_PASS)]] SamplerState _sampler;
-[[vk::binding(11, PER_PASS)]] Texture2D<float4> _ambientOcclusion;
-[[vk::binding(12, PER_PASS)]] Texture2D<float4> _textures[4096];
-
-#if COLOR_PASS
-struct Constants
-{
-    uint isTransparent;
-};
-[[vk::push_constant]] Constants _constants;
-#endif
-
-enum PixelShaderID
-{
-    Opaque,
-    Opaque_Opaque,
-    Opaque_Mod,
-    Opaque_Mod2x,
-    Opaque_Mod2xNA,
-    Opaque_Add,
-    Opaque_AddNA,
-    Opaque_AddAlpha,
-    Opaque_AddAlpha_Alpha,
-    Opaque_Mod2xNA_Alpha,
-    Mod,
-    Mod_Opaque,
-    Mod_Mod,
-    Mod_Mod2x,
-    Mod_Mod2xNA,
-    Mod_Add,
-    Mod_AddNA,
-    Mod2x,
-    Mod2x_Mod,
-    Mod2x_Mod2x,
-    Add,
-    Add_Mod,
-    Fade,
-    Decal
-};
-
-float4 Shade(uint pixelId, float4 texture1, float4 texture2, out float3 specular)
-{
-    float4 result = float4(0, 0, 0, 0);
-    float4 diffuseColor = float4(1, 1, 1, 1);
-    specular = float3(0, 0, 0);
-
-    if (pixelId == PixelShaderID::Opaque)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_Opaque)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_Mod)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb * texture2.rgb;
-        result.a = texture2.a * diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_Mod2x)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a * 2.0f * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_Mod2xNA)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_Add)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb + texture2.rgb;
-        result.a = diffuseColor.a + texture1.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_AddNA)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb + texture2.rgb;
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_AddAlpha)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = diffuseColor.a;
-
-        specular = texture2.rgb * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Opaque_AddAlpha_Alpha)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = diffuseColor.a;
-
-        specular = texture2.rgb * texture2.a * (1.0f - texture1.a);
-    }
-    else if (pixelId == PixelShaderID::Opaque_Mod2xNA_Alpha)
-    {
-        result.rgb = diffuseColor.rgb * lerp(texture1.rgb * texture2.rgb * 2.0f, texture1.rgb, texture1.aaa);
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Mod)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = diffuseColor.a * texture1.a;
-    }
-    else if (pixelId == PixelShaderID::Mod_Opaque)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a * texture1.a;
-    }
-    else if (pixelId == PixelShaderID::Mod_Mod)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a * texture1.a * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Mod_Mod2x)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a * 2.0f * texture1.a * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Mod_Mod2xNA)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb * texture2.rgb;
-        result.a = texture1.a * diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Mod_Add)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = diffuseColor.a * (texture1.a + texture2.a);
-        
-        specular = texture2.rgb;
-    }
-    else if (pixelId == PixelShaderID::Mod_AddNA)
-    {
-        result.rgb = diffuseColor.rgb * texture1.rgb;
-        result.a = texture1.a * diffuseColor.a;
-
-        specular = texture2.rgb;
-    }
-    else if (pixelId == PixelShaderID::Mod2x)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb;
-        result.a = diffuseColor.a * 2.0f * texture1.a;
-    }
-    else if (pixelId == PixelShaderID::Mod2x_Mod)
-    {
-        result.rgb = diffuseColor.rgb * 2.0f * texture1.rgb * texture2.rgb;
-        result.a = diffuseColor.a * 2.0f * texture1.a * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Mod2x_Mod2x)
-    {
-        result = diffuseColor * 4.0f * texture1 * texture2;
-    }
-    else if (pixelId == PixelShaderID::Add)
-    {
-        result = diffuseColor + texture1;
-    }
-    else if (pixelId == PixelShaderID::Add_Mod)
-    {
-        result.rgb = (diffuseColor.rgb + texture1.rgb) * texture2.a;
-        result.a = (diffuseColor.a + texture1.a) * texture2.a;
-    }
-    else if (pixelId == PixelShaderID::Fade)
-    {
-        result.rgb = (texture1.rgb - diffuseColor.rgb) * diffuseColor.a + diffuseColor.rgb;
-        result.a = diffuseColor.a;
-    }
-    else if (pixelId == PixelShaderID::Decal)
-    {
-        result.rgb = (diffuseColor.rgb - texture1.rgb) * diffuseColor.a + texture1.rgb;
-        result.a = diffuseColor.a;
-    }
-
-    result.rgb = result.rgb;
-    return result;
-}
-
-float4 Blend(uint blendingMode, float4 previousColor, float4 color)
-{
-    float4 result = previousColor;
-
-    if (blendingMode == 0) // OPAQUE
-    {
-        result = float4(color.rgb, 1);
-    }
-    else if (blendingMode == 1) // ALPHA KEY
-    {
-        if (color.a >= 224.0f / 255.0f)
-        {
-            float3 blendedColor = color.rgb * color.a + previousColor.rgb * (1 - color.a);
-            result.rgb += blendedColor;
-            result.a = max(color.a, previousColor.a); // TODO: Check if this is actually needed
-        }
-        else
-        {
-            discard;
-        }
-    }
-    else if (blendingMode == 2) // ALPHA
-    {
-        float3 blendedColor = color.rgb * color.a + previousColor.rgb * (1 - color.a);
-        result.rgb += blendedColor;
-        result.a = max(color.a, previousColor.a); // TODO: Check if this is actually needed
-    }
-    else if (blendingMode == 3) // NO ALPHA ADD
-    {
-        // TODO
-        result.rgb += color.rgb;
-    }
-    else if (blendingMode == 4) // ADD
-    {
-        // TODO
-        result.rgb += color.rgb * color.a;
-        result.a = color.a;
-    }
-    else if (blendingMode == 5) // MOD
-    {
-        // TODO
-    }
-    else if (blendingMode == 6) // MOD2X
-    {
-        // TODO
-    }
-    else if (blendingMode == 7) // BLEND ADD
-    {
-        // TODO
-    }
-
-    return result;
-}
+[[vk::binding(9, CMODEL)]] SamplerState _sampler;
 
 struct PSInput
 {
-    float4 position : SV_Position;
-    uint drawCallID : TEXCOORD0;
-    float4 uv01 : TEXCOORD1;
-#if COLOR_PASS
-    float3 normal : TEXCOORD2;
-#endif
+    uint triangleID : SV_PrimitiveID;
+    uint drawID : TEXCOORD0;
+    float3 modelPosition : TEXCOORD1;
+    float4 uv01 : TEXCOORD2;
 };
 
 struct PSOutput
 {
-#if COLOR_PASS
-    float4 color : SV_Target0;
-    uint objectID : SV_Target1;
-#endif
+    uint4 visibilityBuffer : SV_Target0;
 };
 
 PSOutput main(PSInput input)
 {
-    DrawCallData drawCallData = LoadDrawCallData(input.drawCallID);
-
-    float4 color = float4(0, 0, 0, 0);
-    float3 specular = float3(0, 0, 0);
-    bool isUnlit = false;
-
-    PSOutput output;
+    CModelDrawCallData drawCallData = LoadCModelDrawCallData(input.drawID);
 
     for (uint textureUnitIndex = drawCallData.textureUnitOffset; textureUnitIndex < drawCallData.textureUnitOffset + drawCallData.numTextureUnits; textureUnitIndex++)
     {
-        TextureUnit textureUnit = _textureUnits[textureUnitIndex];
+        CModelTextureUnit textureUnit = _cModelTextureUnits[textureUnitIndex];
 
-        uint isProjectedTexture = textureUnit.data1 & 0x1;
-        uint materialFlags = (textureUnit.data1 >> 1) & 0x3FF;
         uint blendingMode = (textureUnit.data1 >> 11) & 0x7;
 
-#if !COLOR_PASS
         if (blendingMode != 1) // ALPHA KEY
             continue;
-#endif
         
         uint materialType = (textureUnit.data1 >> 16) & 0xFFFF;
-        uint vertexShaderId = materialType & 0xFF;
-        uint pixelShaderId = materialType >> 8;
-
+        
         if (materialType == 0x8000)
             continue;
 
-        float4 texture1 = _textures[NonUniformResourceIndex(textureUnit.textureIDs[0])].Sample(_sampler, input.uv01.xy);
-        float4 texture2 = float4(0, 0, 0, 0);
+        float4 texture1 = _cModelTextures[NonUniformResourceIndex(textureUnit.textureIDs[0])].Sample(_sampler, input.uv01.xy);
+        float4 texture2 = float4(1, 1, 1, 1);
 
+        uint vertexShaderId = materialType & 0xFF;
         if (vertexShaderId > 2)
         {
             // ENV uses generated UVCoords based on camera pos + geometry normal in frame space
-            texture2 = _textures[NonUniformResourceIndex(textureUnit.textureIDs[1])].Sample(_sampler, input.uv01.zw);
+            texture2 = _cModelTextures[NonUniformResourceIndex(textureUnit.textureIDs[1])].Sample(_sampler, input.uv01.zw);
         }
 
-        isUnlit |= (materialFlags & 0x1);
+        // Experimental alphakey discard without shading, if this has issues check github history for cModel.ps.hlsl
+        float4 diffuseColor = float4(1, 1, 1, 1);
+        // TODO: per-instance diffuseColor
 
-        float4 shadedColor = Shade(pixelShaderId, texture1, texture2, specular);
-        color = Blend(blendingMode, color, shadedColor);
+        float minAlpha = min(texture1.a, min(texture2.a, diffuseColor.a));
+        if (minAlpha < 224.0f / 255.0f)
+        {
+            discard;
+        }
     }
 
-#if COLOR_PASS
-    bool isTransparent = _constants.isTransparent;
-    float ambientOcclusion = 1.0f;
+    CModelInstanceData instanceData = _cModelInstances[drawCallData.instanceID];
 
-    if (!isTransparent)
+    // Get the VertexIDs of the triangle we're in
+    Draw draw = _cModelDraws[input.drawID];
+    uint3 vertexIDs = GetVertexIDs(input.triangleID, draw, _cModelIndices);
+
+    // Load the vertices
+    CModelVertex vertices[3];
+
+    [unroll]
+    for (uint i = 0; i < 3; i++)
     {
-        ambientOcclusion = _ambientOcclusion.Load(float3(input.position.xy, 0)).x;
+        vertices[i] = LoadCModelVertex(vertexIDs[i]);
+
+        // Load the skinned vertex position (in model-space) if this vertex was animated
+        if (instanceData.boneDeformOffset != 4294967295)
+        {
+            uint localVertexID = vertexIDs[i] - instanceData.vertexOffset; // This gets the local vertex ID relative to the model
+            uint animatedVertexID = localVertexID + instanceData.animatedVertexOffset; // This makes it relative to the animated instance
+
+            vertices[i].position = LoadAnimatedVertexPosition(animatedVertexID);
+        }
+
+        // TODO: Calculating this bone transform matrix is rather expensive, we should do this once in the vertex shader and save the result
+        //float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertices[i]);
+
+        //vertices[i].position = mul(float4(vertices[i].position, 1.0f), boneTransformMatrix).xyz;
+        vertices[i].position = mul(float4(-vertices[i].position.x, -vertices[i].position.y, vertices[i].position.z, 1.0f), instanceData.instanceMatrix).xyz;
     }
-        
-    color.rgb = Lighting(color.rgb, float3(0.0f, 0.0f, 0.0f), input.normal, ambientOcclusion, !isUnlit) + specular;
 
-    output.color = saturate(color);
+    // Calculate Barycentrics
+    float2 barycentrics = NBLCalculateBarycentrics(input.modelPosition, float3x3(vertices[0].position.xyz, vertices[1].position.xyz, vertices[2].position.xyz));
 
-    // 4 most significant bits are used as a type identifier, remaining bits are drawCallID
-    uint objectType = (uint(ObjectType::ComplexModelOpaque) * !isTransparent) + (uint(ObjectType::ComplexModelTransparent) * isTransparent);
-    output.objectID = objectType << 28;
-    output.objectID += input.drawCallID;
-#endif
+    float2 ddxBarycentrics = ddx(barycentrics);
+    float2 ddyBarycentrics = ddy(barycentrics);
+
+    PSOutput output;
+    output.visibilityBuffer = PackVisibilityBuffer(ObjectType::CModelOpaque, input.drawID, input.triangleID, barycentrics, ddxBarycentrics, ddyBarycentrics);
 
     return output;
 }

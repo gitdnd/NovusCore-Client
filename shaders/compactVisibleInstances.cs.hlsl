@@ -1,8 +1,8 @@
 #include "common.inc.hlsl"
 
-[[vk::binding(0, PER_DRAW)]] ByteAddressBuffer _visibleInstanceMask;
-[[vk::binding(1, PER_DRAW)]] RWByteAddressBuffer _visibleInstanceCount;
-[[vk::binding(2, PER_DRAW)]] RWByteAddressBuffer _visibleInstanceIDs;
+[[vk::binding(0, CMODEL)]] ByteAddressBuffer _visibleInstanceMask;
+[[vk::binding(1, CMODEL)]] RWByteAddressBuffer _visibleInstanceCount;
+[[vk::binding(2, CMODEL)]] RWByteAddressBuffer _visibleInstanceIDs;
 
 [numthreads(32, 1, 1)]
 void main(uint3 groupID : SV_GroupID, uint groupThreadIndex : SV_GroupIndex)

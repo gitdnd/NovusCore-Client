@@ -36,11 +36,25 @@
 
 namespace Renderer
 {
-    void BackendDispatch::ClearImage(Renderer* renderer, CommandListID commandList, const void* data)
+    void BackendDispatch::ClearImageColor(Renderer* renderer, CommandListID commandList, const void* data)
     {
         ZoneScopedC(tracy::Color::Red3);
-        const Commands::ClearImage* actualData = static_cast<const Commands::ClearImage*>(data);
+        const Commands::ClearImageColor* actualData = static_cast<const Commands::ClearImageColor*>(data);
         renderer->Clear(commandList, actualData->image, actualData->color);
+    }
+
+    void BackendDispatch::ClearImageUInt(Renderer* renderer, CommandListID commandList, const void* data)
+    {
+        ZoneScopedC(tracy::Color::Red3);
+        const Commands::ClearImageUInt* actualData = static_cast<const Commands::ClearImageUInt*>(data);
+        renderer->Clear(commandList, actualData->image, actualData->values);
+    }
+
+    void BackendDispatch::ClearImageInt(Renderer* renderer, CommandListID commandList, const void* data)
+    {
+        ZoneScopedC(tracy::Color::Red3);
+        const Commands::ClearImageInt* actualData = static_cast<const Commands::ClearImageInt*>(data);
+        renderer->Clear(commandList, actualData->image, actualData->values);
     }
 
     void BackendDispatch::ClearDepthImage(Renderer* renderer, CommandListID commandList, const void* data)

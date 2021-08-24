@@ -41,6 +41,9 @@ namespace Renderer
         GLOBAL,
         PER_PASS,
         PER_DRAW,
+        TERRAIN,
+        MAPOBJECT,
+        CMODEL
     };
 
     class DescriptorSet

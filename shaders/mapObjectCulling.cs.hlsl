@@ -1,5 +1,7 @@
 permutation DETERMINISTIC_ORDER = [0, 1];
 
+#include "common.inc.hlsl"
+#include "cullingUtils.inc.hlsl"
 #include "globalData.inc.hlsl"
 #include "pyramidCulling.inc.hlsl"
 #include "mapObject.inc.hlsl"
@@ -12,15 +14,6 @@ struct Constants
     uint occlusionCull;
 };
 
-struct DrawCommand
-{
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    uint vertexOffset;
-    uint firstInstance;
-};
-
 struct PackedCullingData
 {
     uint packed0; // half minBoundingBox.x, half minBoundingBox.y, 
@@ -29,39 +22,28 @@ struct PackedCullingData
     float sphereRadius;
 }; // 16 bytes
 
-struct AABB
-{
-    float3 min;
-    float3 max;
-};
-
 struct CullingData
 {
     AABB boundingBox;
     float sphereRadius;
 };
 
-struct InstanceData
-{
-    float4x4 instanceMatrix;
-};
+[[vk::binding(5, MAPOBJECT)]] StructuredBuffer<Draw> _draws;
+[[vk::binding(6, MAPOBJECT)]] RWStructuredBuffer<Draw> _culledDraws;
+[[vk::binding(7, MAPOBJECT)]] RWByteAddressBuffer _drawCount;
+[[vk::binding(8, MAPOBJECT)]] RWByteAddressBuffer _triangleCount;
 
-[[vk::binding(1, PER_PASS)]] StructuredBuffer<DrawCommand> _drawCommands;
-[[vk::binding(2, PER_PASS)]] RWStructuredBuffer<DrawCommand> _culledDrawCommands;
-[[vk::binding(3, PER_PASS)]] RWByteAddressBuffer _drawCount;
-[[vk::binding(4, PER_PASS)]] RWByteAddressBuffer _triangleCount;
+[[vk::binding(9, MAPOBJECT)]] StructuredBuffer<PackedCullingData> _packedCullingData;
+//[[vk::binding(6, MAPOBJECT)]] StructuredBuffer<InstanceData> _instanceData;
 
-[[vk::binding(5, PER_PASS)]] StructuredBuffer<PackedCullingData> _packedCullingData;
-[[vk::binding(6, PER_PASS)]] StructuredBuffer<InstanceData> _instanceData;
+[[vk::binding(10, MAPOBJECT)]] ConstantBuffer<Constants> _constants;
 
-[[vk::binding(7, PER_PASS)]] ConstantBuffer<Constants> _constants;
-
-[[vk::binding(8, PER_PASS)]] SamplerState _depthSampler;
-[[vk::binding(9, PER_PASS)]] Texture2D<float> _depthPyramid;
+[[vk::binding(11, MAPOBJECT)]] SamplerState _depthSampler;
+[[vk::binding(12, MAPOBJECT)]] Texture2D<float> _depthPyramid;
 
 #if DETERMINISTIC_ORDER
-[[vk::binding(10, PER_PASS)]] RWStructuredBuffer<uint64_t> _sortKeys;
-[[vk::binding(11, PER_PASS)]] RWStructuredBuffer<uint> _sortValues;
+[[vk::binding(13, MAPOBJECT)]] RWStructuredBuffer<uint64_t> _sortKeys;
+[[vk::binding(14, MAPOBJECT)]] RWStructuredBuffer<uint> _sortValues;
 #endif // DETERMINISTIC_ORDER
 
 CullingData LoadCullingData(uint instanceIndex)
@@ -92,21 +74,21 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         float3 p;
 
         // X axis 
-        if (plane.x > 0) 
+        if (plane.x > 0)
         {
             p.x = aabb.max.x;
         }
-        else 
+        else
         {
             p.x = aabb.min.x;
         }
 
         // Y axis 
-        if (plane.y > 0) 
+        if (plane.y > 0)
         {
             p.y = aabb.max.y;
         }
-        else 
+        else
         {
             p.y = aabb.min.y;
         }
@@ -120,14 +102,14 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         {
             p.z = aabb.min.z;
         }
-        
+
         if (dot(plane.xyz, p) + plane.w <= 0)
         {
             return false;
         }
     }
 
-	return true;
+    return true;
 }
 
 [numthreads(32, 1, 1)]
@@ -138,15 +120,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;   
     }
     
-    const uint drawCommandIndex = dispatchThreadId.x;
+    const uint drawIndex = dispatchThreadId.x;
     
-    DrawCommand command = _drawCommands[drawCommandIndex];
-    uint instanceID = command.firstInstance;
+    Draw draw = _draws[drawIndex];
+    uint instanceID = draw.firstInstance;
     
     const InstanceLookupData lookupData = LoadInstanceLookupData(instanceID);
     
     const CullingData cullingData = LoadCullingData(lookupData.cullingDataID);
-    const InstanceData instanceData = _instanceData[lookupData.instanceID];
+    const InstanceData instanceData = _mapObjectInstanceData[lookupData.instanceID];
     
     // Get center and extents
     float3 center = (cullingData.boundingBox.min + cullingData.boundingBox.max) * 0.5f;
@@ -179,16 +161,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     uint outTriangles;
-    _triangleCount.InterlockedAdd(0, command.indexCount/3, outTriangles);
+    _triangleCount.InterlockedAdd(0, draw.indexCount/3, outTriangles);
 
     uint outIndex;
 	_drawCount.InterlockedAdd(0, 1, outIndex);
     
-	_culledDrawCommands[outIndex] = command;
+	_culledDraws[outIndex] = draw;
 
 #if DETERMINISTIC_ORDER
     // We want to set up sort keys and values so we can sort our drawcalls by firstInstance
-    _sortKeys[outIndex] = command.firstInstance;
+    _sortKeys[outIndex] = draw.firstInstance;
     _sortValues[outIndex] = outIndex;
 #endif // DETERMINISTIC_ORDER
 }

@@ -77,6 +77,8 @@ public:
             objectID = other.objectID;
             debugName = other.debugName;
             cullingDataID = other.cullingDataID;
+            numVertices = other.numVertices;
+            vertexOffset = other.vertexOffset;
             numBones = other.numBones;
             isAnimated = other.isAnimated;
             numOpaqueDrawCalls = other.numOpaqueDrawCalls;
@@ -92,6 +94,8 @@ public:
         bool failedToLoad = false;
 
         u32 cullingDataID = std::numeric_limits<u32>().max();
+        u32 numVertices = 0;
+        u32 vertexOffset = 0;
         u32 numBones = 0;
         bool isAnimated = false;
 
@@ -115,6 +119,10 @@ public:
         u32 boneInstanceDataOffset;
         u16 editorSequenceId; // This is used by the editor to display the sequenceId we want to play.
         u16 editorIsLoop; // This is used by the editor to display if the animation we want to play should looping.
+        u32 vertexOffset = 0;
+        u32 animatedVertexOffset = 0;
+        u32 padding1;
+        u32 padding2;
 
         /*u32 modelId = 0;
         u32 activeSequenceId = 0;
@@ -155,9 +163,10 @@ public:
 
     void Update(f32 deltaTime);
 
-    void AddComplexModelDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddComplexModelPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddComplexModelEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 drawCallDataID, bool isOpaque, u32 selectedRenderBatch, bool wireframeEntireObject);
+    void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddAnimationPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 
     void RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable);
     void RegisterLoadFromDecoration(const std::string& modelPath, const u32& modelPathHash, vec3 position, quaternion rotation, f32 scale);
@@ -217,6 +226,8 @@ public:
     u32 GetNumOpaqueSurvivingTriangles() { return _numOpaqueSurvivingTriangles; }
     u32 GetNumTransparentTriangles() { return _numTransparentTriangles; }
     u32 GetNumTransparentSurvivingTriangles() { return _numTransparentSurvivingTriangles; }
+
+    Renderer::DescriptorSet& GetMaterialPassDescriptorSet() { return _materialPassDescriptorSet; }
 
 private:
     struct ComplexModelToBeLoaded
@@ -304,6 +315,12 @@ private:
         u32 timestampOffset = 0;
         u32 valueOffset = 0;
     };
+    
+    struct PackedAnimatedVertexPositions
+    {
+        u32 packed0;
+        u32 packed1;
+    };
 
     struct RenderBatch
     {
@@ -337,7 +354,6 @@ private:
         vec4 frustumPlanes[6];       
         vec3 cameraPos;
         u32 maxDrawCount;
-        u32 shouldPrepareSort = false;
         u32 occlusionCull = false;
     };
 
@@ -357,10 +373,16 @@ private:
     Renderer::Renderer* _renderer;
 
     Renderer::SamplerID _sampler;
+    Renderer::SamplerID _occlusionSampler;
+
     Renderer::DescriptorSet _animationPrepassDescriptorSet;
-    Renderer::DescriptorSet _cullingDescriptorSet;
+    Renderer::DescriptorSet _compactDescriptorSet;
+    Renderer::DescriptorSet _visibleInstanceArgumentDescriptorSet;
+    Renderer::DescriptorSet _opaqueCullingDescriptorSet;
+    Renderer::DescriptorSet _transparentCullingDescriptorSet;
     Renderer::DescriptorSet _sortingDescriptorSet;
-    Renderer::DescriptorSet _passDescriptorSet;
+    Renderer::DescriptorSet _geometryPassDescriptorSet;
+    Renderer::DescriptorSet _materialPassDescriptorSet;
 
     robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
     std::shared_mutex _uniqueIdCounterMutex;
@@ -402,6 +424,7 @@ private:
     SafeVector<DrawCallData> _transparentDrawCallDatas;
 
     Renderer::BufferID _vertexBuffer;
+    Renderer::BufferID _animatedVertexPositions;
     Renderer::BufferID _indexBuffer;
     Renderer::BufferID _textureUnitBuffer;
     Renderer::BufferID _instanceBuffer;
@@ -444,6 +467,7 @@ private:
 
     Renderer::TextureArrayID _cModelTextures;
 
+    std::atomic<u32> _numTotalAnimatedVertices;
     u32 _numOpaqueSurvivingDrawCalls;
     u32 _numTransparentSurvivingDrawCalls;
 

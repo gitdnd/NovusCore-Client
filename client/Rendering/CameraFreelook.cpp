@@ -177,10 +177,13 @@ void CameraFreeLook::Disabled()
     keybindGroup->SetActive(false);
 }
 
-void CameraFreeLook::Update(f32 deltaTime, float fovInDegrees, float aspectRatioWH)
+void CameraFreeLook::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)
 {
     if (!IsActive())
         return;
+
+    _fovInDegrees = fovInDegrees;
+    _aspectRatio = aspectRatioWH;
 
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraFreeLook"_h);

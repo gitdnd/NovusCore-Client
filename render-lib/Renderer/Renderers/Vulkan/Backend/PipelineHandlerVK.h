@@ -50,7 +50,11 @@ namespace Renderer
             VkRenderPass GetRenderPass(GraphicsPipelineID id);
             VkFramebuffer GetFramebuffer(GraphicsPipelineID id);
 
+            u32 GetNumDescriptorSetLayouts(GraphicsPipelineID id);
+            u32 GetNumDescriptorSetLayouts(ComputePipelineID id);
+
             DescriptorSetLayoutData& GetDescriptorSetLayoutData(GraphicsPipelineID id, u32 index);
+            DescriptorSetLayoutData& GetDescriptorSetLayoutData(ComputePipelineID id, u32 index);
 
             VkDescriptorSetLayout& GetDescriptorSetLayout(GraphicsPipelineID id, u32 index);
             VkDescriptorSetLayout& GetDescriptorSetLayout(ComputePipelineID id, u32 index);

@@ -17,14 +17,6 @@ struct LightData
 };
 [[vk::binding(1, GLOBAL)]] ConstantBuffer<LightData> _lightData;
 
-enum ObjectType : uint
-{
-    Terrain = 1,
-    MapObject = 2,
-    ComplexModelOpaque = 3,
-    ComplexModelTransparent = 4
-};
-
 float3 Lighting(float3 color, float3 vertexColor, float3 normal, float ambientOcclusion, bool isLit)
 {
     // For Indoor WMO Groups

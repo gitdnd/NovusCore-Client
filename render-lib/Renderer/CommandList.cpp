@@ -275,12 +275,34 @@ namespace Renderer
 
     void CommandList::Clear(ImageID imageID, Color color)
     {
-        Commands::ClearImage* command = AddCommand<Commands::ClearImage>();                                                                                                       
+        Commands::ClearImageColor* command = AddCommand<Commands::ClearImageColor>();
         command->image = imageID;
         command->color = color;
 
 #if COMMANDLIST_DEBUG_IMMEDIATE_MODE
-        Commands::ClearImage::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
+        Commands::ClearImageColor::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
+#endif
+    }
+
+    void CommandList::Clear(ImageID imageID, uvec4 values)
+    {
+        Commands::ClearImageUInt* command = AddCommand<Commands::ClearImageUInt>();
+        command->image = imageID;
+        command->values = values;
+
+#if COMMANDLIST_DEBUG_IMMEDIATE_MODE
+        Commands::ClearImageUInt::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
+#endif
+    }
+
+    void CommandList::Clear(ImageID imageID, ivec4 values)
+    {
+        Commands::ClearImageInt* command = AddCommand<Commands::ClearImageInt>();
+        command->image = imageID;
+        command->values = values;
+
+#if COMMANDLIST_DEBUG_IMMEDIATE_MODE
+        Commands::ClearImageInt::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
 #endif
     }
 

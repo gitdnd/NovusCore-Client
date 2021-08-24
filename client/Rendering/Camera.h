@@ -28,7 +28,7 @@ class Camera
 public:
     Camera();
 
-    virtual void Update(f32 deltaTime, float fovInDegrees, float aspectRatioWH) = 0;
+    virtual void Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH) = 0;
 
     void SetWindow(Window* window) { _window = window; }
     Window* GetWindow() { return _window; }
@@ -83,6 +83,9 @@ public:
     f32 GetPitch() { return _pitch; }
     vec3 GetRotation() const { return vec3(0.0f, _pitch, _yaw); }
 
+    f32 GetFOVInDegrees() { return _fovInDegrees; }
+    f32 GetAspectRatio() { return _aspectRatio; }
+
     void SetMouseCaptured(bool state) { _captureMouse = state; }
     bool IsMouseCaptured() const { return _captureMouse; }
 
@@ -103,6 +106,8 @@ protected:
     bool _active = false;
     f32 _nearClip = 1.0f;
     f32 _farClip = 100000.0f;
+    f32 _fovInDegrees = 75.0f;
+    f32 _aspectRatio = 1.0f;
 
     vec3 _position = vec3(0, 0, 0);
     

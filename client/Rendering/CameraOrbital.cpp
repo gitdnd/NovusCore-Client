@@ -166,8 +166,11 @@ void CameraOrbital::Disabled()
     keybindGroup->SetActive(false);
 }
 
-void CameraOrbital::Update(f32 deltaTime, float fovInDegrees, float aspectRatioWH)
+void CameraOrbital::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)
 {
+    _fovInDegrees = fovInDegrees;
+    _aspectRatio = aspectRatioWH;
+
     // Compute matrices
     mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
     mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);

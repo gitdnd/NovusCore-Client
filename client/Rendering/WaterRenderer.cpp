@@ -63,7 +63,7 @@ void WaterRenderer::Clear()
 
 void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    struct WaterPassData
+    /*struct WaterPassData
     {
         Renderer::RenderPassMutableResource color;
         Renderer::RenderPassMutableResource depth;
@@ -137,7 +137,7 @@ void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResou
             commandList.PopMarker();
 
             commandList.EndPipeline(pipeline);
-        });
+        });*/
 }
 
 void WaterRenderer::CreatePermanentResources()

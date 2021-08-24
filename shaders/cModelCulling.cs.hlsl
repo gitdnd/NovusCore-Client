@@ -1,4 +1,6 @@
+permutation PREPARE_SORT = [0, 1];
 #include "common.inc.hlsl"
+#include "cullingUtils.inc.hlsl"
 #include "globalData.inc.hlsl"
 #include "cModel.inc.hlsl"
 #include "pyramidCulling.inc.hlsl"
@@ -8,17 +10,7 @@ struct Constants
 	float4 frustumPlanes[6];
     float3 cameraPosition;   
     uint maxDrawCount;
-    uint shouldPrepareSort;
     uint occlusionCull;
-};
-
-struct DrawCall
-{
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    uint vertexOffset;
-    uint firstInstance;
 };
 
 struct PackedCullingData
@@ -29,12 +21,6 @@ struct PackedCullingData
     float sphereRadius;
 }; // 16 bytes
 
-struct AABB
-{
-    float3 min;
-    float3 max;
-};
-
 struct CullingData
 {
     AABB boundingBox;
@@ -43,19 +29,20 @@ struct CullingData
 
 // Inputs
 [[vk::push_constant]] Constants _constants;
-[[vk::binding(1, PER_PASS)]] StructuredBuffer<DrawCall> _drawCalls;
-[[vk::binding(2, PER_PASS)]] StructuredBuffer<InstanceData> _instances;
-[[vk::binding(3, PER_PASS)]] StructuredBuffer<PackedCullingData> _cullingDatas;
-[[vk::binding(4, PER_PASS)]] SamplerState _depthSampler;
-[[vk::binding(5, PER_PASS)]] Texture2D<float> _depthPyramid;
+[[vk::binding(4, CMODEL)]] StructuredBuffer<Draw> _drawCalls;
+[[vk::binding(5, CMODEL)]] StructuredBuffer<PackedCullingData> _cullingDatas;
+[[vk::binding(6, CMODEL)]] SamplerState _depthSampler;
+[[vk::binding(7, CMODEL)]] Texture2D<float> _depthPyramid;
 
 // Outputs
-[[vk::binding(6, PER_PASS)]] RWByteAddressBuffer _drawCount;
-[[vk::binding(7, PER_PASS)]] RWByteAddressBuffer _triangleCount;
-[[vk::binding(8, PER_PASS)]] RWStructuredBuffer<DrawCall> _culledDrawCalls;
-[[vk::binding(9, PER_PASS)]] RWStructuredBuffer<uint64_t> _sortKeys; // OPTIONAL, only needed if _constants.shouldPrepareSort
-[[vk::binding(10, PER_PASS)]] RWStructuredBuffer<uint> _sortValues; // OPTIONAL, only needed if _constants.shouldPrepareSort
-[[vk::binding(11, PER_PASS)]] RWByteAddressBuffer _visibleInstanceMask;
+[[vk::binding(8, CMODEL)]] RWByteAddressBuffer _drawCount;
+[[vk::binding(9, CMODEL)]] RWByteAddressBuffer _triangleCount;
+[[vk::binding(10, CMODEL)]] RWStructuredBuffer<Draw> _culledDrawCalls;
+[[vk::binding(11, CMODEL)]] RWByteAddressBuffer _visibleInstanceMask;
+#if PREPARE_SORT
+[[vk::binding(12, CMODEL)]] RWStructuredBuffer<uint64_t> _sortKeys; // OPTIONAL, only needed if _constants.shouldPrepareSort
+[[vk::binding(13, CMODEL)]] RWStructuredBuffer<uint> _sortValues; // OPTIONAL, only needed if _constants.shouldPrepareSort
+#endif
 
 CullingData LoadCullingData(uint instanceIndex)
 {
@@ -85,21 +72,21 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         float3 p;
 
         // X axis 
-        if (plane.x > 0) 
+        if (plane.x > 0)
         {
             p.x = aabb.max.x;
         }
-        else 
+        else
         {
             p.x = aabb.min.x;
         }
 
         // Y axis 
-        if (plane.y > 0) 
+        if (plane.y > 0)
         {
             p.y = aabb.max.y;
         }
-        else 
+        else
         {
             p.y = aabb.min.y;
         }
@@ -113,19 +100,18 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         {
             p.z = aabb.min.z;
         }
-        
+
         if (dot(plane.xyz, p) + plane.w <= 0)
         {
             return false;
         }
     }
 
-	return true;
+    return true;
 }
 
-
 #define UINT_MAX 0xFFFFu
-uint64_t CalculateSortKey(DrawCall drawCall, DrawCallData drawCallData, InstanceData instance)
+uint64_t CalculateSortKey(Draw drawCall, CModelDrawCallData drawCallData, CModelInstanceData instance)
 {
     // Get the position to sort against
     const float3 refPos = _constants.cameraPosition;
@@ -171,13 +157,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Load DrawCall
     const uint drawCallIndex = dispatchThreadId.x;
     
-    DrawCall drawCall = _drawCalls[drawCallIndex];
+    Draw drawCall = _drawCalls[drawCallIndex];
     
     uint drawCallID = drawCall.firstInstance;
-    DrawCallData drawCallData = LoadDrawCallData(drawCallID);
+    CModelDrawCallData drawCallData = LoadCModelDrawCallData(drawCallID);
     
     const CullingData cullingData = LoadCullingData(drawCallData.cullingDataID);
-    const InstanceData instance = _instances[drawCallData.instanceID];
+    const CModelInstanceData instance = _cModelInstances[drawCallData.instanceID];
     
     // Get center and extents
     float3 center = (cullingData.boundingBox.min + cullingData.boundingBox.max) * 0.5f;
@@ -226,9 +212,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     _visibleInstanceMask.InterlockedOr(maskOffset * SIZEOF_UINT, mask);
 
     // If we expect to sort afterwards, output the data needed for it
-    if (_constants.shouldPrepareSort)
-    {
-        _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instance);
-        _sortValues[outIndex] = outIndex;
-    }
+#if PREPARE_SORT
+    _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instance);
+    _sortValues[outIndex] = outIndex;
+#endif
 }

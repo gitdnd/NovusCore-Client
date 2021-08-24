@@ -14,7 +14,7 @@
 #include "Descriptors/ComputePipelineDesc.h"
 #include "Descriptors/SemaphoreDesc.h"
 
-#define COMMANDLIST_DEBUG_IMMEDIATE_MODE 1 // This makes it easier to debug the renderer by providing better callstacks if it asserts or crashes inside of render-lib
+#define COMMANDLIST_DEBUG_IMMEDIATE_MODE 0 // This makes it easier to debug the renderer by providing better callstacks if it asserts or crashes inside of render-lib
 
 #if TRACY_ENABLE
 #define GPU_SCOPED_PROFILER_ZONE(commandList, name) \
@@ -71,6 +71,8 @@ namespace Renderer
         void SetBuffer(u32 slot, BufferID buffer);
 
         void Clear(ImageID imageID, Color color);
+        void Clear(ImageID imageID, uvec4 values);
+        void Clear(ImageID imageID, ivec4 values);
         void Clear(DepthImageID imageID, f32 depth, DepthClearFlags flags = DepthClearFlags::DEPTH, u8 stencil = 0);
 
         void Draw(u32 numVertices, u32 numInstances, u32 vertexOffset, u32 instanceOffset);

@@ -63,7 +63,7 @@ void PostProcessRenderer::AddCalculateSAOPass(Renderer::RenderGraph* renderGraph
             PostProcess::SAO::Params params;
             params.depth = resources.depth;
 
-            vec2 resolution = _renderer->GetImageDimension(resources.color, 0);
+            vec2 resolution = _renderer->GetImageDimension(resources.resolvedColor, 0);
 
             params.nearPlane = camera->GetNearClip();
             params.farPlane = camera->GetFarClip();

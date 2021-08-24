@@ -16,8 +16,8 @@ struct RenderResources
     Renderer::DescriptorSet debugDescriptorSet;
 
     // Permanent resources
-    Renderer::ImageID color;
-    Renderer::ImageID objectIDs;
+    Renderer::ImageID visibilityBuffer;
+    Renderer::ImageID resolvedColor;
     Renderer::ImageID depthPyramid;
     Renderer::ImageID ambientObscurance;
 

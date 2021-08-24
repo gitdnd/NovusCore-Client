@@ -168,8 +168,7 @@ namespace Editor
                             _selectedMapObjectData.instanceLookupDataID = pixelData.value;
 
                             ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-                            TerrainRenderer* terrainRenderer = clientRenderer->GetTerrainRenderer();
-                            MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
+                            MapObjectRenderer* mapObjectRenderer = clientRenderer->GetMapObjectRenderer();
 
                             SafeVector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
                             SafeVector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();
@@ -374,7 +373,7 @@ namespace Editor
     {
         ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
         TerrainRenderer* terrainRenderer = clientRenderer->GetTerrainRenderer();
-        MapObjectRenderer* mapObjectRenderer = terrainRenderer->GetMapObjectRenderer();
+        MapObjectRenderer* mapObjectRenderer = clientRenderer->GetMapObjectRenderer();
 
         SafeVector<MapObjectRenderer::InstanceLookupData>& instanceLookupDatas = mapObjectRenderer->GetInstanceLookupData();
         SafeVector<MapObjectRenderer::LoadedMapObject>& loadedMapObjects = mapObjectRenderer->GetLoadedMapObjects();

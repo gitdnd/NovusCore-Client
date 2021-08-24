@@ -7,12 +7,28 @@ namespace Renderer
 {
     namespace Commands
     {
-        struct ClearImage
+        struct ClearImageColor
         {
             static const BackendDispatchFunction DISPATCH_FUNCTION;
 
             ImageID image = ImageID::Invalid();
             Color color = Color::Clear;
+        };
+
+        struct ClearImageUInt
+        {
+            static const BackendDispatchFunction DISPATCH_FUNCTION;
+
+            ImageID image = ImageID::Invalid();
+            uvec4 values = uvec4(0, 0, 0, 0);
+        };
+
+        struct ClearImageInt
+        {
+            static const BackendDispatchFunction DISPATCH_FUNCTION;
+
+            ImageID image = ImageID::Invalid();
+            ivec4 values = ivec4(0, 0, 0, 0);
         };
         
         struct ClearDepthImage

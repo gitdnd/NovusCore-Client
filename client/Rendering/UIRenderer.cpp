@@ -131,7 +131,7 @@ void UIRenderer::AddUIPass(Renderer::RenderGraph* renderGraph, RenderResources& 
     renderGraph->AddPass<UIPassData>("UIPass",
         [=](UIPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
@@ -190,7 +190,7 @@ void UIRenderer::AddUIPass(Renderer::RenderGraph* renderGraph, RenderResources& 
             {
                 switch (renderable.renderType)
                 {
-                case UI::RenderType::Text:
+                    case UI::RenderType::Text:
                     {
                         UIComponent::Text& text = registry->get<UIComponent::Text>(entity);
                         if (!text.constantBuffer || text.vertexBufferID == Renderer::BufferID::Invalid())
@@ -221,7 +221,7 @@ void UIRenderer::AddUIPass(Renderer::RenderGraph* renderGraph, RenderResources& 
                         commandList.PopMarker();
                         break;
                     }
-                case UI::RenderType::Image:
+                    case UI::RenderType::Image:
                     {
                         UIComponent::Image& image = registry->get<UIComponent::Image>(entity);
                         if (!image.constantBuffer)
@@ -260,8 +260,8 @@ void UIRenderer::AddUIPass(Renderer::RenderGraph* renderGraph, RenderResources& 
                         commandList.PopMarker();
                         break;
                     }
-                default:
-                    DebugHandler::PrintFatal("Renderable widget tried to render with invalid render type.");
+                    default:
+                        DebugHandler::PrintFatal("Renderable widget tried to render with invalid render type.");
                 }
             });
 
@@ -280,7 +280,7 @@ void UIRenderer::AddImguiPass(Renderer::RenderGraph* renderGraph, RenderResource
     renderGraph->AddPass<UIPassData>("ImguiPass",
         [=](UIPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },

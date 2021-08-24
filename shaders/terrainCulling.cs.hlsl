@@ -1,3 +1,5 @@
+#include "common.inc.hlsl"
+#include "cullingUtils.inc.hlsl"
 #include "globalData.inc.hlsl"
 #include "terrain.inc.hlsl"
 #include "debug.inc.hlsl"
@@ -14,13 +16,13 @@ struct Constants
 };
 
 [[vk::push_constant]] Constants _constants;
-[[vk::binding(0, PER_PASS)]] StructuredBuffer<CellInstance> _instances;
-[[vk::binding(1, PER_PASS)]] StructuredBuffer<uint> _heightRanges;
-[[vk::binding(2, PER_PASS)]] RWStructuredBuffer<CellInstance> _culledInstances;
-[[vk::binding(3, PER_PASS)]] RWByteAddressBuffer _drawCount;
+[[vk::binding(0, TERRAIN)]] StructuredBuffer<CellInstance> _instances;
+[[vk::binding(1, TERRAIN)]] StructuredBuffer<uint> _heightRanges;
+[[vk::binding(2, TERRAIN)]] RWStructuredBuffer<CellInstance> _culledInstances;
+[[vk::binding(3, TERRAIN)]] RWByteAddressBuffer _drawCount;
 
-[[vk::binding(4, PER_PASS)]] SamplerState _depthSampler; 
-[[vk::binding(5, PER_PASS)]] Texture2D<float> _depthPyramid;
+[[vk::binding(4, TERRAIN)]] SamplerState _depthSampler;
+[[vk::binding(5, TERRAIN)]] Texture2D<float> _depthPyramid;
 
 float2 ReadHeightRange(uint instanceIndex)
 {
@@ -49,7 +51,7 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         {
             vmin.x = aabb.min.x;
         }
-        else 
+        else
         {
             vmin.x = aabb.max.x;
         }
@@ -59,7 +61,7 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
         {
             vmin.y = aabb.min.y;
         }
-        else 
+        else
         {
             vmin.y = aabb.max.y;
         }

@@ -194,9 +194,9 @@ public:
 
     void Update(f32 deltaTime);
 
-    void AddMapObjectDepthPrepass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddMapObjectPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
-    void AddMapObjectEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex, u32 instanceLookupDataID, u32 selectedRenderBatch, bool wireframeEntireObject);
+    void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 
     void RegisterMapObjectToBeLoaded(const std::string& mapObjectName, const Terrain::Placement& mapObjectPlacement);
     void RegisterMapObjectsToBeLoaded(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable);
@@ -219,6 +219,8 @@ public:
     // Triangle stats
     u32 GetNumTriangles() { return _numTriangles; }
     u32 GetNumSurvivingTriangles() { return _numSurvivingTriangles; }
+
+    Renderer::DescriptorSet& GetMaterialPassDescriptorSet() { return _materialPassDescriptorSet; };
 
 private:
     void CreatePermanentResources();
@@ -266,8 +268,8 @@ private:
 
     Renderer::SamplerID _sampler;
     Renderer::DescriptorSet _cullingDescriptorSet;
-    Renderer::DescriptorSet _passDescriptorSet;
-    Renderer::DescriptorSet _meshDescriptorSet;
+    Renderer::DescriptorSet _geometryPassDescriptorSet;
+    Renderer::DescriptorSet _materialPassDescriptorSet;
     Renderer::DescriptorSet _sortingDescriptorSet;
 
     SafeVector<LoadedMapObject> _loadedMapObjects;

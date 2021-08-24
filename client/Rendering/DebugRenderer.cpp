@@ -219,7 +219,7 @@ void DebugRenderer::Add3DPass(Renderer::RenderGraph* renderGraph, RenderResource
 	renderGraph->AddPass<Debug3DPassData>("DebugRender3D",
 		[=](Debug3DPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
 		{
-			data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+			data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 			data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
 			return true;// Return true from setup to enable this pass, return false to disable it
@@ -298,7 +298,7 @@ void DebugRenderer::Add2DPass(Renderer::RenderGraph* renderGraph, RenderResource
 	renderGraph->AddPass<Debug2DPassData>("DebugRender2D",
 		[=](Debug2DPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
 		{
-			data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+			data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
 			return true;// Return true from setup to enable this pass, return false to disable it
 		},

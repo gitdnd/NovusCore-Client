@@ -1,7 +1,9 @@
 #include "ClientRenderer.h"
 #include "UIRenderer.h"
 #include "TerrainRenderer.h"
+#include "MapObjectRenderer.h"
 #include "CModelRenderer.h"
+#include "MaterialRenderer.h"
 #include "SkyboxRenderer.h"
 #include "PostProcessRenderer.h"
 #include "RendertargetVisualizer.h"
@@ -101,7 +103,9 @@ ClientRenderer::ClientRenderer()
     _skyboxRenderer = new SkyboxRenderer(_renderer, _debugRenderer);
     _postProcessRenderer = new PostProcessRenderer(_renderer);
     _rendertargetVisualizer = new RendertargetVisualizer(_renderer);
-    _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _cModelRenderer);
+    _mapObjectRenderer = new MapObjectRenderer(_renderer, _debugRenderer);
+    _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _mapObjectRenderer, _cModelRenderer);
+    _materialRenderer = new MaterialRenderer(_renderer, _terrainRenderer, _mapObjectRenderer, _cModelRenderer);
     _pixelQuery = new PixelQuery(_renderer);
 }
 
@@ -116,6 +120,7 @@ void ClientRenderer::Update(f32 deltaTime)
     _frameAllocator->Reset();
 
     _terrainRenderer->Update(deltaTime);
+    _mapObjectRenderer->Update(deltaTime);
     _cModelRenderer->Update(deltaTime);
     _postProcessRenderer->Update(deltaTime);
     _rendertargetVisualizer->Update(deltaTime);
@@ -176,23 +181,23 @@ void ClientRenderer::Render()
     {
         struct StartFramePassData
         {
-            Renderer::RenderPassMutableResource color;
-            Renderer::RenderPassMutableResource objectIDs;
+            Renderer::RenderPassMutableResource visibilityBuffer;
+            Renderer::RenderPassMutableResource resolvedColor;
             Renderer::RenderPassMutableResource depth;
         };
 
         renderGraph.AddPass<StartFramePassData>("StartFramePass",
             [=](StartFramePassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
-            data.color = builder.Write(_resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.objectIDs = builder.Write(_resources.objectIDs, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.visibilityBuffer = builder.Write(_resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.resolvedColor = builder.Write(_resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
             data.depth = builder.Write(_resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
 
             return true; // Return true from setup to enable this pass, return false to disable it
         },
             [&](StartFramePassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
         {
-            GPU_SCOPED_PROFILER_ZONE(commandList, MainPass);
+            GPU_SCOPED_PROFILER_ZONE(commandList, StartFramePass);
             commandList.MarkFrameStart(_frameIndex);
 
             // Set viewport
@@ -201,16 +206,29 @@ void ClientRenderer::Render()
         });
     }
 
-    // Depth Prepass
-    _terrainRenderer->AddTerrainDepthPrepass(&renderGraph, _resources, _frameIndex);
-    _cModelRenderer->AddComplexModelDepthPrepass(&renderGraph, _resources, _frameIndex);
+    // Culling Pass
+    _terrainRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
+    _mapObjectRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
+    _cModelRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
+
+    // Animation Pass
+    _cModelRenderer->AddAnimationPass(&renderGraph, _resources, _frameIndex);
+
+    // Geometry Pass
+    _terrainRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
+    _mapObjectRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
+    _cModelRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
 
     // Calculate SAO
     _postProcessRenderer->AddCalculateSAOPass(&renderGraph, _resources, _frameIndex);
 
-    // Color pass
-    _terrainRenderer->AddTerrainPass(&renderGraph, _resources, _frameIndex);
-    _cModelRenderer->AddComplexModelPass(&renderGraph, _resources, _frameIndex);
+    // Visibility Buffer Material pass
+    _materialRenderer->AddMaterialPass(&renderGraph, _resources, _frameIndex);
+
+    // Editor Pass
+    _terrainRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
+    _mapObjectRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
+    _cModelRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
 
     // Skybox
     _skyboxRenderer->AddSkyboxPass(&renderGraph, _resources, _frameIndex);
@@ -219,7 +237,7 @@ void ClientRenderer::Render()
     _postProcessRenderer->AddPostProcessPass(&renderGraph, _resources, _frameIndex);
     _rendertargetVisualizer->AddVisualizerPass(&renderGraph, _resources, _frameIndex);
 
-    // UI Pass
+    // Depth Pyramid Pass
     struct PyramidPassData
     {
         Renderer::RenderPassResource depth;
@@ -274,7 +292,7 @@ void ClientRenderer::Render()
     
     {
         ZoneScopedNC("Present", tracy::Color::Red2);
-        _renderer->Present(_window, _resources.color, _sceneRenderedSemaphore);
+        _renderer->Present(_window, _resources.resolvedColor, _sceneRenderedSemaphore);
     }
 
     // Flip the frameIndex between 0 and 1
@@ -283,7 +301,7 @@ void ClientRenderer::Render()
 
 uvec2 ClientRenderer::GetRenderResolution()
 {
-    return _renderer->GetImageDimension(_resources.color, 0);
+    return _renderer->GetImageDimension(_resources.visibilityBuffer, 0);
 }
 
 void ClientRenderer::InitImgui()
@@ -317,27 +335,27 @@ size_t ClientRenderer::GetVRAMBudget()
 
 void ClientRenderer::CreatePermanentResources()
 {
-    // Main color rendertarget
-    Renderer::ImageDesc mainColorDesc;
-    mainColorDesc.debugName = "MainColor";
-    mainColorDesc.dimensions = vec2(1.0f, 1.0f);
-    mainColorDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
-    mainColorDesc.format = Renderer::ImageFormat::R16G16B16A16_FLOAT;
-    mainColorDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
-    mainColorDesc.clearColor = Color::Clear;
+    // Visibility Buffer rendertarget
+    Renderer::ImageDesc visibilityBufferDesc;
+    visibilityBufferDesc.debugName = "VisibilityBuffer";
+    visibilityBufferDesc.dimensions = vec2(1.0f, 1.0f);
+    visibilityBufferDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    visibilityBufferDesc.format = Renderer::ImageFormat::R32G32B32A32_UINT;
+    visibilityBufferDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    visibilityBufferDesc.clearUInts = uvec4(0,0,0,0);
 
-    _resources.color = _renderer->CreateImage(mainColorDesc);
+    _resources.visibilityBuffer = _renderer->CreateImage(visibilityBufferDesc);
 
-    // Object ID rendertarget
-    Renderer::ImageDesc objectIDsDesc;
-    objectIDsDesc.debugName = "ObjectIDs";
-    objectIDsDesc.dimensions = vec2(1.0f, 1.0f);
-    objectIDsDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
-    objectIDsDesc.format = Renderer::ImageFormat::R32_UINT;
-    objectIDsDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
-    objectIDsDesc.clearColor = Color::Clear;
+    // ResolvedColor rendertarget
+    Renderer::ImageDesc resolvedColorDesc;
+    resolvedColorDesc.debugName = "ResolvedColor";
+    resolvedColorDesc.dimensions = vec2(1.0f, 1.0f);
+    resolvedColorDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    resolvedColorDesc.format = Renderer::ImageFormat::R16G16B16A16_FLOAT;
+    resolvedColorDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    resolvedColorDesc.clearColor = Color::Clear;
 
-    _resources.objectIDs = _renderer->CreateImage(objectIDsDesc);
+    _resources.resolvedColor = _renderer->CreateImage(resolvedColorDesc);
 
     // depth pyramid ID rendertarget
     Renderer::ImageDesc pyramidDesc;
