@@ -9,6 +9,7 @@
 
 enum ObjectType : uint
 {
+    Skybox = 0, // We clear to this color so we won't be writing it
     Terrain = 1,
     MapObject = 2,
     CModelOpaque = 3,
@@ -37,6 +38,11 @@ float3 OctNormalDecode(float2 f)
     float t = saturate(-n.z);
     n.xy += n.xy >= 0.0 ? -t : t;
     return normalize(n);
+}
+
+float Map(float value, float originalMin, float originalMax, float newMin, float newMax)
+{
+    return (value - originalMin) / (originalMax - originalMin) * (newMax - newMin) + newMin;
 }
 
 float4 ToFloat4(int input, float defaultAlphaVal)
@@ -131,4 +137,26 @@ uint3 GetVertexIDs(uint triangleID, Draw draw, StructuredBuffer<uint> indexBuffe
 
     return vertexIDs;
 }
+
+// This assumes the float components are between 0 and 1, and it will be stored as a unorm
+uint Float4ToPackedUnorms(float4 f)
+{
+    uint packed = 0;
+    packed |= uint(f.x * 255) << 0;
+    packed |= uint(f.y * 255) << 8;
+    packed |= uint(f.z * 255) << 16;
+    packed |= uint(f.w * 255) << 24;
+    return packed;
+}
+
+float4 PackedUnormsToFloat4(uint packed)
+{
+    float4 f = 0;
+    f.x = ((packed >> 0) & 0xFF) / 255.0f;
+    f.y = ((packed >> 8) & 0xFF) / 255.0f;
+    f.z = ((packed >> 16) & 0xFF) / 255.0f;
+    f.w = ((packed >> 24) & 0xFF) / 255.0f;
+    return f;
+}
+
 #endif // COMMON_INCLUDED

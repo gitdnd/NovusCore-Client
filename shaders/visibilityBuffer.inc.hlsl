@@ -81,10 +81,13 @@ struct VisibilityBuffer
     Barycentrics barycentrics;
 };
 
-const VisibilityBuffer LoadVisibilityBuffer(uint2 pixelPos)
+uint4 LoadVisibilityBuffer(uint2 pixelPos)
 {
-    uint4 data = _visibilityBuffer[pixelPos];
+    return _visibilityBuffer[pixelPos];
+}
 
+const VisibilityBuffer UnpackVisibilityBuffer(uint4 data)
+{
     // VisibilityBuffer is 4 uints packed like this:
     // X
     //      TriangleID 8 bits (out of 16), we had to split this to fit
@@ -141,12 +144,6 @@ uint GetObjectID(uint typeID, uint drawID)
 
     return drawID;
 }
-
-/*float InterpolateWithBarycentrics(float3 barycentrics, float v0, float v1, float v2)
-{
-    float3 mergedV = float3(v0, v1, v2);
-    return dot(barycentrics, mergedV);
-}*/
 
 float InterpolateWithBarycentrics(Barycentrics barycentrics, float v0, float v1, float v2)
 {
@@ -216,7 +213,6 @@ FullBary CalcFullBary(Barycentrics barycentrics, float2 v0, float2 v1, float2 v2
 
     return result;
 }
-
 #endif // GEOMETRY_PASS
 
 #define RED_SEED 3

@@ -219,6 +219,12 @@ void ClientRenderer::Render()
     _mapObjectRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
     _cModelRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
 
+    // Skybox
+    _skyboxRenderer->AddSkyboxPass(&renderGraph, _resources, _frameIndex);
+
+    // Transparency pass
+    _cModelRenderer->AddTransparencyPass(&renderGraph, _resources, _frameIndex);
+
     // Calculate SAO
     _postProcessRenderer->AddCalculateSAOPass(&renderGraph, _resources, _frameIndex);
 
@@ -229,9 +235,6 @@ void ClientRenderer::Render()
     _terrainRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
     _mapObjectRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
     _cModelRenderer->AddEditorPass(&renderGraph, _resources, _frameIndex);
-
-    // Skybox
-    _skyboxRenderer->AddSkyboxPass(&renderGraph, _resources, _frameIndex);
 
     // Postprocessing
     _postProcessRenderer->AddPostProcessPass(&renderGraph, _resources, _frameIndex);
@@ -356,6 +359,28 @@ void ClientRenderer::CreatePermanentResources()
     resolvedColorDesc.clearColor = Color::Clear;
 
     _resources.resolvedColor = _renderer->CreateImage(resolvedColorDesc);
+
+    // Transparency rendertarget
+    Renderer::ImageDesc transparencyDesc;
+    transparencyDesc.debugName = "Transparency";
+    transparencyDesc.dimensions = vec2(1.0f, 1.0f);
+    transparencyDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    transparencyDesc.format = Renderer::ImageFormat::R16G16B16A16_FLOAT;
+    transparencyDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    transparencyDesc.clearColor = Color::Clear;
+
+    _resources.transparency = _renderer->CreateImage(transparencyDesc);
+
+    // Transparency Weights rendertarget
+    Renderer::ImageDesc transparencyWeightsDesc;
+    transparencyWeightsDesc.debugName = "TransparencyWeights";
+    transparencyWeightsDesc.dimensions = vec2(1.0f, 1.0f);
+    transparencyWeightsDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    transparencyWeightsDesc.format = Renderer::ImageFormat::R8_UNORM;
+    transparencyWeightsDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    transparencyWeightsDesc.clearColor = Color::Red;
+
+    _resources.transparencyWeights = _renderer->CreateImage(transparencyWeightsDesc);
 
     // depth pyramid ID rendertarget
     Renderer::ImageDesc pyramidDesc;

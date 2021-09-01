@@ -34,21 +34,11 @@ void MaterialRenderer::Update(f32 deltaTime)
 
 void MaterialRenderer::AddMaterialPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    entt::registry* registry = ServiceLocator::GetGameRegistry();
-    MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
-
-    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
-
-    if (!currentMap.IsLoadedMap())
-        return;
-
-    if (currentMap.header.flags.UseMapObjectInsteadOfTerrain)
-        return;
-
     struct MaterialPassData
     {
         Renderer::RenderPassMutableResource visibilityBuffer;
-        Renderer::RenderPassMutableResource depth;
+        Renderer::RenderPassMutableResource transparency;
+        Renderer::RenderPassMutableResource transparencyWeights;
         Renderer::RenderPassMutableResource resolvedColor;
     };
 
@@ -58,7 +48,8 @@ void MaterialRenderer::AddMaterialPass(Renderer::RenderGraph* renderGraph, Rende
         [=](MaterialPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
         {
             data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::UAV, Renderer::RenderGraphBuilder::LoadMode::LOAD);
-            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::UAV, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.transparency = builder.Write(resources.transparency, Renderer::RenderGraphBuilder::WriteMode::UAV, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.transparencyWeights = builder.Write(resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::UAV, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.resolvedColor = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::UAV, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -68,7 +59,8 @@ void MaterialRenderer::AddMaterialPass(Renderer::RenderGraph* renderGraph, Rende
             GPU_SCOPED_PROFILER_ZONE(commandList, MaterialPass);
 
             commandList.ImageBarrier(resources.visibilityBuffer);
-            commandList.ImageBarrier(resources.depth);
+            commandList.ImageBarrier(resources.transparency);
+            commandList.ImageBarrier(resources.transparencyWeights);
             commandList.ImageBarrier(resources.resolvedColor);
 
             Renderer::ComputePipelineDesc pipelineDesc;
@@ -83,6 +75,8 @@ void MaterialRenderer::AddMaterialPass(Renderer::RenderGraph* renderGraph, Rende
             commandList.BeginPipeline(pipeline);
 
             _materialPassDescriptorSet.Bind("_visibilityBuffer", resources.visibilityBuffer);
+            _materialPassDescriptorSet.Bind("_transparency", resources.transparency);
+            _materialPassDescriptorSet.Bind("_transparencyWeights", resources.transparencyWeights);
             _materialPassDescriptorSet.Bind("_ambientOcclusion", resources.ambientObscurance);
             _materialPassDescriptorSet.BindStorage("_resolvedColor", resources.resolvedColor, 0);
 

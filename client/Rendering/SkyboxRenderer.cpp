@@ -37,14 +37,14 @@ void SkyboxRenderer::AddSkyboxPass(Renderer::RenderGraph* renderGraph, RenderRes
 {
     struct SkyboxPassData
     {
-        Renderer::RenderPassMutableResource color;
+        Renderer::RenderPassMutableResource visibilityBuffer;
         Renderer::RenderPassMutableResource depth;
     };
 
     renderGraph->AddPass<SkyboxPassData>("Skybox Pass",
         [=](SkyboxPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.color = builder.Write(resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -77,7 +77,7 @@ void SkyboxRenderer::AddSkyboxPass(Renderer::RenderGraph* renderGraph, RenderRes
             pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
 
             // Render targets
-            pipelineDesc.renderTargets[0] = data.color;
+            pipelineDesc.renderTargets[0] = data.visibilityBuffer;
 
             pipelineDesc.depthStencil = data.depth;
 

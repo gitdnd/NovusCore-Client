@@ -18,6 +18,8 @@ struct RenderResources
     // Permanent resources
     Renderer::ImageID visibilityBuffer;
     Renderer::ImageID resolvedColor;
+    Renderer::ImageID transparency;
+    Renderer::ImageID transparencyWeights;
     Renderer::ImageID depthPyramid;
     Renderer::ImageID ambientObscurance;
 

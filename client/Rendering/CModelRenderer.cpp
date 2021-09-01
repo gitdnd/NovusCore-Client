@@ -402,6 +402,7 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
                 _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrix"_h, _animationBoneDeformMatrixBuffer);
                 _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
                 _materialPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+                _transparencyPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
             }
 
             if (_hasToResizeAnimationBoneInstanceBuffer)
@@ -418,6 +419,7 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
                     _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
                     commandList.CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _previousAnimationBoneInstanceBufferSize);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneInstanceBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, newBoneInstanceBuffer);
                 }
 
                 _previousAnimationBoneInstanceBufferSize = _newAnimationBoneInstanceBufferSize;
@@ -444,34 +446,34 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
                         continue;
 
                     _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
+                    {
+                        if (animationRequest.flags.isPlaying)
                         {
-                            if (animationRequest.flags.isPlaying)
+                            for (u32 i = 0; i < modelInfo.numBones; i++)
                             {
-                                for (u32 i = 0; i < modelInfo.numBones; i++)
-                                {
-                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                    bool animationIsLooping = animationRequest.flags.isLooping;
+                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                bool animationIsLooping = animationRequest.flags.isLooping;
 
-                                    boneInstance.animationProgress = 0.f;
-                                    boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                    boneInstance.sequenceIndex = sequenceIndex;
-                                }
+                                boneInstance.animationProgress = 0.f;
+                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                boneInstance.sequenceIndex = sequenceIndex;
                             }
-                            else
+                        }
+                        else
+                        {
+                            for (u32 i = 0; i < modelInfo.numBones; i++)
                             {
-                                for (u32 i = 0; i < modelInfo.numBones; i++)
-                                {
-                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                    boneInstance.animationProgress = 0.f;
-                                    boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                    boneInstance.sequenceIndex = 0;
-                                }
+                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                boneInstance.animationProgress = 0.f;
+                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                boneInstance.sequenceIndex = 0;
                             }
+                        }
 
-                            commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
-                            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstancesBuffer);
-                        });
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstancesBuffer);
+                        commandList.UpdateBuffer(_animationBoneInstancesBuffer, (instance.boneInstanceDataOffset * sizeof(AnimationBoneInstance)), modelInfo.numBones * sizeof(AnimationBoneInstance), &animationBoneInstances[instance.boneInstanceDataOffset]);
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstancesBuffer);
+                        commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstancesBuffer);
+                    });
                 }
 
                 commandList.PopMarker();
@@ -588,27 +590,19 @@ void CModelRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderR
             pipelineDesc.renderTargets[0] = data.visibilityBuffer;
             pipelineDesc.depthStencil = data.depth;
 
+            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+
             if (cullingEnabled)
             {
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueCulledDrawCallBuffer);
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueDrawCountBuffer);
-
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentCulledDrawCallBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentDrawCountBuffer);
             }
             else
             {
-                const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
-                const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
-
                 // Reset the counters
                 commandList.FillBuffer(_opaqueDrawCountBuffer, 0, 4, numOpaqueDrawCalls);
-                commandList.FillBuffer(_transparentDrawCountBuffer, 0, 4, numTransparentDrawCalls);
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _opaqueDrawCountBuffer);
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _transparentDrawCountBuffer);
             }
-
-            const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
 
             // Set Opaque Pipeline
             if (numOpaqueDrawCalls > 0)
@@ -779,6 +773,128 @@ void CModelRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderRes
 
             commandList.EndPipeline(pipeline);
             commandList.PopMarker();
+        });
+}
+
+void CModelRenderer::AddTransparencyPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    const u32 numInstances = static_cast<u32>(_instances.Size());
+    if (numInstances == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_ComplexModelCullingEnabled.Get();
+
+    struct CModelTransparencyPassData
+    {
+        Renderer::RenderPassMutableResource transparency;
+        Renderer::RenderPassMutableResource transparencyWeights;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<CModelTransparencyPassData>("CModel OIT Transparency",
+        [=](CModelTransparencyPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.transparency = builder.Write(resources.transparency, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.transparencyWeights = builder.Write(resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](CModelTransparencyPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelOITTransparencyPass);
+
+            Renderer::GraphicsPipelineDesc pipelineDesc;
+            graphResources.InitializePipelineDesc(pipelineDesc);
+
+            // Shaders
+            Renderer::VertexShaderDesc vertexShaderDesc;
+            vertexShaderDesc.path = "cModelTransparency.vs.hlsl";
+            pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+            Renderer::PixelShaderDesc pixelShaderDesc;
+            pixelShaderDesc.path = "cModelTransparency.ps.hlsl";
+            pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+            // Depth state
+            pipelineDesc.states.depthStencilState.depthEnable = true;
+            pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+
+            // Rasterizer state
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+
+            // Blend state
+            pipelineDesc.states.blendState.independentBlendEnable = true;
+
+            pipelineDesc.states.blendState.renderTargets[0].blendEnable = true;
+            pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
+            pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
+            //pipelineDesc.states.blendState.renderTargets[0].srcBlendAlpha = Renderer::BlendMode::ONE;
+            //pipelineDesc.states.blendState.renderTargets[0].destBlendAlpha = Renderer::BlendMode::ZERO;
+            pipelineDesc.states.blendState.renderTargets[0].srcBlendAlpha = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].destBlendAlpha = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].blendOpAlpha = Renderer::BlendOp::ADD;
+
+            pipelineDesc.states.blendState.renderTargets[1].blendEnable = true;
+            pipelineDesc.states.blendState.renderTargets[1].blendOp = Renderer::BlendOp::ADD;
+            pipelineDesc.states.blendState.renderTargets[1].srcBlend = Renderer::BlendMode::ZERO;
+            pipelineDesc.states.blendState.renderTargets[1].destBlend = Renderer::BlendMode::INV_SRC_COLOR;
+            pipelineDesc.states.blendState.renderTargets[1].srcBlendAlpha = Renderer::BlendMode::ZERO;
+            pipelineDesc.states.blendState.renderTargets[1].destBlendAlpha = Renderer::BlendMode::INV_SRC_ALPHA;
+            pipelineDesc.states.blendState.renderTargets[1].blendOpAlpha = Renderer::BlendOp::ADD;
+
+            // Render targets
+            pipelineDesc.renderTargets[0] = data.transparency;
+            pipelineDesc.renderTargets[1] = data.transparencyWeights;
+            pipelineDesc.depthStencil = data.depth;
+
+            const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
+
+            if (cullingEnabled)
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentCulledDrawCallBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _transparentDrawCountBuffer);
+            }
+            else
+            {
+                // Reset the counters
+                commandList.FillBuffer(_transparentDrawCountBuffer, 0, 4, numTransparentDrawCalls);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToIndirectArguments, _transparentDrawCountBuffer);
+            }
+
+            // Set Transparent Pipeline
+            if (numTransparentDrawCalls > 0)
+            {
+                commandList.PushMarker("Transparent " + std::to_string(numTransparentDrawCalls), Color::White);
+
+                // Draw
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_transparencyPassDescriptorSet, frameIndex);
+
+                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
+                Renderer::BufferID argumentBuffer = (cullingEnabled) ? _transparentCulledDrawCallBuffer : _transparentDrawCallBuffer;
+                commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _transparentDrawCountBuffer, 0, numTransparentDrawCalls);
+
+                commandList.EndPipeline(pipeline);
+
+                // Copy from our draw count buffer to the readback buffer
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentDrawCountBuffer);
+                commandList.CopyBuffer(_transparentDrawCountReadBackBuffer, 0, _transparentDrawCountBuffer, 0, 4);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _transparentDrawCountReadBackBuffer);
+
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _transparentTriangleCountBuffer);
+                commandList.CopyBuffer(_transparentTriangleCountReadBackBuffer, 0, _transparentTriangleCountBuffer, 0, 4);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _transparentTriangleCountReadBackBuffer);
+
+                commandList.PopMarker();
+            }
         });
 }
 
@@ -1003,6 +1119,7 @@ void CModelRenderer::CreatePermanentResources()
     _cModelTextures = _renderer->CreateTextureArray(textureArrayDesc);
     _geometryPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
     _materialPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
+    _transparencyPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
 
     Renderer::SamplerDesc samplerDesc;
     samplerDesc.enabled = true;
@@ -1014,6 +1131,7 @@ void CModelRenderer::CreatePermanentResources()
 
     _sampler = _renderer->CreateSampler(samplerDesc);
     _geometryPassDescriptorSet.Bind("_sampler"_h, _sampler);
+    _transparencyPassDescriptorSet.Bind("_sampler"_h, _sampler);
 
     Renderer::SamplerDesc occlusionSamplerDesc;
     occlusionSamplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
@@ -1103,6 +1221,7 @@ void CModelRenderer::CreatePermanentResources()
         _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrix"_h, _animationBoneDeformMatrixBuffer);
         _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
         _materialPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
+        _transparencyPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
 
         _animationBoneDeformRangeAllocator.Init(0, boneDeformMatrixBufferSize);
     }
@@ -1988,78 +2107,84 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
     }
 
     // Add the opaque DrawCalls and DrawCallDatas
-    _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
+    if (complexModel.numOpaqueDrawCalls > 0)
     {
-        _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
+        _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
         {
-            size_t numOpaqueDrawCallsBeforeAdd = opaqueDrawCalls.size();
-            for (u32 i = 0; i < complexModel.numOpaqueDrawCalls; i++)
+            _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
             {
-                const DrawCall& drawCallTemplate = complexModel.opaqueDrawCallTemplates[i];
-                const DrawCallData& drawCallDataTemplate = complexModel.opaqueDrawCallDataTemplates[i];
-
-                DrawCall& drawCall = opaqueDrawCalls.emplace_back();
-                DrawCallData& drawCallData = opaqueDrawCallDatas.emplace_back();
-
-                _opaqueDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& opaqueDrawCallDataIndexToLoadedModelIndex)
+                size_t numOpaqueDrawCallsBeforeAdd = opaqueDrawCalls.size();
+                for (u32 i = 0; i < complexModel.numOpaqueDrawCalls; i++)
                 {
-                    opaqueDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numOpaqueDrawCallsBeforeAdd) + i] = complexModel.objectID;
-                });
+                    const DrawCall& drawCallTemplate = complexModel.opaqueDrawCallTemplates[i];
+                    const DrawCallData& drawCallDataTemplate = complexModel.opaqueDrawCallDataTemplates[i];
 
-                // Copy data from the templates
-                drawCall.firstIndex = drawCallTemplate.firstIndex;
-                drawCall.indexCount = drawCallTemplate.indexCount;
-                drawCall.instanceCount = drawCallTemplate.instanceCount;
-                drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+                    DrawCall& drawCall = opaqueDrawCalls.emplace_back();
+                    DrawCallData& drawCallData = opaqueDrawCallDatas.emplace_back();
 
-                drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
-                drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
-                drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
-                drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                    _opaqueDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& opaqueDrawCallDataIndexToLoadedModelIndex)
+                        {
+                            opaqueDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numOpaqueDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                        });
 
-                // Fill in the data that shouldn't be templated
-                drawCall.firstInstance = static_cast<u32>(numOpaqueDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
-                drawCallData.instanceID = static_cast<u32>(instanceIndex);
-            }
+                    // Copy data from the templates
+                    drawCall.firstIndex = drawCallTemplate.firstIndex;
+                    drawCall.indexCount = drawCallTemplate.indexCount;
+                    drawCall.instanceCount = drawCallTemplate.instanceCount;
+                    drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+
+                    drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
+                    drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
+                    drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
+                    drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+
+                    // Fill in the data that shouldn't be templated
+                    drawCall.firstInstance = static_cast<u32>(numOpaqueDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
+                    drawCallData.instanceID = static_cast<u32>(instanceIndex);
+                }
+            });
         });
-    });
+    }
 
     // Add the transparent DrawCalls and DrawCallDatas
-    _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& transparentDrawCalls)
+    if (complexModel.numTransparentDrawCalls > 0)
     {
-        _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
+        _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& transparentDrawCalls)
         {
-            size_t numTransparentDrawCallsBeforeAdd = transparentDrawCalls.size();
-            for (u32 i = 0; i < complexModel.numTransparentDrawCalls; i++)
+            _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
             {
-                const DrawCall& drawCallTemplate = complexModel.transparentDrawCallTemplates[i];
-                const DrawCallData& drawCallDataTemplate = complexModel.transparentDrawCallDataTemplates[i];
-
-                DrawCall& drawCall = transparentDrawCalls.emplace_back();
-                DrawCallData& drawCallData = transparentDrawCallDatas.emplace_back();
-
-                _transparentDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& transparentDrawCallDataIndexToLoadedModelIndex)
+                size_t numTransparentDrawCallsBeforeAdd = transparentDrawCalls.size();
+                for (u32 i = 0; i < complexModel.numTransparentDrawCalls; i++)
                 {
-                    transparentDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numTransparentDrawCallsBeforeAdd) + i] = complexModel.objectID;
-                });
+                    const DrawCall& drawCallTemplate = complexModel.transparentDrawCallTemplates[i];
+                    const DrawCallData& drawCallDataTemplate = complexModel.transparentDrawCallDataTemplates[i];
 
-                // Copy data from the templates
-                drawCall.firstIndex = drawCallTemplate.firstIndex;
-                drawCall.indexCount = drawCallTemplate.indexCount;
-                drawCall.instanceCount = drawCallTemplate.instanceCount;
-                drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+                    DrawCall& drawCall = transparentDrawCalls.emplace_back();
+                    DrawCallData& drawCallData = transparentDrawCallDatas.emplace_back();
 
-                drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
-                drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
-                drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
-                drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                    _transparentDrawCallDataIndexToLoadedModelIndex.WriteLock([&](robin_hood::unordered_map<u32, u32>& transparentDrawCallDataIndexToLoadedModelIndex)
+                        {
+                            transparentDrawCallDataIndexToLoadedModelIndex[static_cast<u32>(numTransparentDrawCallsBeforeAdd) + i] = complexModel.objectID;
+                        });
 
-                // Fill in the data that shouldn't be templated
-                drawCall.firstInstance = static_cast<u32>(numTransparentDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
-                drawCallData.instanceID = static_cast<u32>(instanceIndex);
-            }
+                    // Copy data from the templates
+                    drawCall.firstIndex = drawCallTemplate.firstIndex;
+                    drawCall.indexCount = drawCallTemplate.indexCount;
+                    drawCall.instanceCount = drawCallTemplate.instanceCount;
+                    drawCall.vertexOffset = drawCallTemplate.vertexOffset;
+
+                    drawCallData.cullingDataID = drawCallDataTemplate.cullingDataID;
+                    drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
+                    drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
+                    drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+
+                    // Fill in the data that shouldn't be templated
+                    drawCall.firstInstance = static_cast<u32>(numTransparentDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
+                    drawCallData.instanceID = static_cast<u32>(instanceIndex);
+                }
+            });
         });
-    });
+    }
 }
 
 void CModelRenderer::CreateBuffers()
@@ -2076,6 +2201,7 @@ void CModelRenderer::CreateBuffers()
             _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, vertices.data(), desc.size);
             _geometryPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertexBuffer);
             _materialPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertexBuffer);
+            _transparencyPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertexBuffer);
         });
     }
 
@@ -2090,6 +2216,7 @@ void CModelRenderer::CreateBuffers()
 
         _geometryPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
         _materialPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
+        _transparencyPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
     }
     
     // Create Index buffer
@@ -2104,6 +2231,7 @@ void CModelRenderer::CreateBuffers()
 
             _geometryPassDescriptorSet.Bind("_cModelIndices"_h, _indexBuffer);
             _materialPassDescriptorSet.Bind("_cModelIndices"_h, _indexBuffer);
+            _transparencyPassDescriptorSet.Bind("_cModelIndices"_h, _indexBuffer);
         });
     }
 
@@ -2118,6 +2246,7 @@ void CModelRenderer::CreateBuffers()
             _textureUnitBuffer = _renderer->CreateAndFillBuffer(_textureUnitBuffer, desc, textureUnits.data(), desc.size);
             _geometryPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnitBuffer);
             _materialPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnitBuffer);
+            _transparencyPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnitBuffer);
         });
     }
 
@@ -2136,6 +2265,7 @@ void CModelRenderer::CreateBuffers()
             _animationPrepassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
             _geometryPassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
             _materialPassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
+            _transparencyPassDescriptorSet.Bind("_cModelInstances"_h, _instanceBuffer);
         });
     }
 
@@ -2321,6 +2451,7 @@ void CModelRenderer::CreateBuffers()
                 _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
 
                 _transparentCullingDescriptorSet.Bind("_culledDrawCalls"_h, _transparentCulledDrawCallBuffer);
+                
 
                 desc.name = "CModelAlphaSortCullDrawCalls";
                 _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
@@ -2330,6 +2461,7 @@ void CModelRenderer::CreateBuffers()
                 _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, transparentDrawCalls.data(), desc.size);
 
                 _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCallBuffer);
+                _transparencyPassDescriptorSet.Bind("_cModelDraws"_h, _transparentDrawCallBuffer);
             }
 
             // Create TransparentDrawCallData buffer
@@ -2342,6 +2474,7 @@ void CModelRenderer::CreateBuffers()
                 _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, transparentDrawCallDatas.data(), desc.size);
             
                 _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
+                _transparencyPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
             });
 
             // Create transparent sort keys/values buffer

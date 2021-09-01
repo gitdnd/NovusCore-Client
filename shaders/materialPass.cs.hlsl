@@ -7,6 +7,8 @@ permutation DEBUG_ID = [0, 1, 2, 3];
 #include "cModel.inc.hlsl"
 
 [[vk::binding(0, PER_PASS)]] SamplerState _sampler;
+[[vk::binding(3, PER_PASS)]] Texture2D<float4> _transparency;
+[[vk::binding(4, PER_PASS)]] Texture2D<float> _transparencyWeights;
 
 float4 ShadeTerrain(const uint2 pixelPos, const VisibilityBuffer vBuffer)
 {
@@ -186,6 +188,14 @@ float4 ShadeCModel(const uint2 pixelPos, const VisibilityBuffer vBuffer)
 	{
 		vertices[i] = LoadCModelVertex(vertexIDs[i]);
 
+		// Animate the vertex normal if we need to
+		if (instanceData.boneDeformOffset != 4294967295)
+		{
+			// Calculate bone transform matrix
+			float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertices[i]);
+			vertices[i].normal = mul(vertices[i].normal, (float3x3)boneTransformMatrix);
+		}
+
 		// Convert normals to world normals
 		vertices[i].normal = mul(vertices[i].normal, (float3x3)instanceData.instanceMatrix);
 	}
@@ -251,10 +261,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const VisibilityBuffer vBuffer = LoadVisibilityBuffer(pixelPos);
-
-	if (vBuffer.typeID == 0)
-		return; // Skybox early exit
+	uint4 vBufferData = LoadVisibilityBuffer(pixelPos);
+	const VisibilityBuffer vBuffer = UnpackVisibilityBuffer(vBufferData);
 
 #if DEBUG_ID == 1 // TypeID debug output
 	float3 debugColor = IDToColor3(vBuffer.typeID);
@@ -271,7 +279,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 #endif
 
 	float4 color = float4(0,0,0,1);
-	if (vBuffer.typeID == ObjectType::Terrain)
+	if (vBuffer.typeID == ObjectType::Skybox)
+	{
+		color = PackedUnormsToFloat4(vBufferData.y); // Skybox is a unique case that packs the resulting color in the Y component of the visibility buffer
+	}
+	else if (vBuffer.typeID == ObjectType::Terrain)
 	{
 		color = ShadeTerrain(pixelPos, vBuffer);
 	}
@@ -287,6 +299,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	{
 		color.rg = vBuffer.barycentrics.bary;
 	}
+
+	// Composite Transparency
+	float4 transparency = _transparency.Load(uint3(pixelPos, 0));
+	float transparencyWeight = _transparencyWeights.Load(uint3(pixelPos, 0));
+
+	float3 transparencyColor = transparency.rgb / max(transparency.a, 1e-5);
+
+	// Src: ONE_MINUS_SRC_ALPHA, Dst: SRC_ALPHA
+	color.rgb = (transparencyColor.rgb * (1.0f - transparencyWeight)) + (color.rgb /** transparencyWeight*/);
 
 	_resolvedColor[pixelPos] = color;
 }

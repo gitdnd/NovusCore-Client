@@ -167,6 +167,7 @@ public:
     void AddAnimationPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
+    void AddTransparencyPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 
     void RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable);
     void RegisterLoadFromDecoration(const std::string& modelPath, const u32& modelPathHash, vec3 position, quaternion rotation, f32 scale);
@@ -383,6 +384,7 @@ private:
     Renderer::DescriptorSet _sortingDescriptorSet;
     Renderer::DescriptorSet _geometryPassDescriptorSet;
     Renderer::DescriptorSet _materialPassDescriptorSet;
+    Renderer::DescriptorSet _transparencyPassDescriptorSet;
 
     robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
     std::shared_mutex _uniqueIdCounterMutex;

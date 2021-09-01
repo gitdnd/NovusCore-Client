@@ -451,13 +451,13 @@ float4 BlendCModel(uint blendingMode, float4 previousColor, float4 color)
     else if (blendingMode == 1) // ALPHA KEY
     {
         // I don't think discarding here is needed since we already discard alphakeyed pixels in the geometry pass
-        /*if (color.a >= 224.0f / 255.0f)
-        {*/
+        if (color.a >= 224.0f / 255.0f)
+        {
             float3 blendedColor = color.rgb * color.a + previousColor.rgb * (1 - color.a);
             result.rgb += blendedColor;
             result.a = max(color.a, previousColor.a); // TODO: Check if this is actually needed
-        /*}
-        else
+        }
+        /*else
         {
             discard;
         }*/

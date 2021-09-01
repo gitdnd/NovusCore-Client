@@ -1,4 +1,5 @@
 #include "globalData.inc.hlsl"
+#include "common.inc.hlsl"
 
 struct SkybandColors
 {
@@ -16,16 +17,15 @@ struct VertexOutput
     float2 uv : TEXCOORD0;
 };
 
-float Map(float value, float originalMin, float originalMax, float newMin, float newMax)
+struct PSOutput
 {
-    return (value - originalMin) / (originalMax - originalMin) * (newMax - newMin) + newMin;
-}
+    uint4 vBuffer : SV_Target0;
+};
 
-float4 main(VertexOutput input) : SV_Target
+PSOutput main(VertexOutput input) : SV_Target
 {
     float3 rotation = _viewData.eyeRotation.xyz;
 
-    float resolutionY = 1080.0f;
     float fovY = 75.0f;
     float halfFovY = fovY / 2.0f;
 
@@ -33,26 +33,34 @@ float4 main(VertexOutput input) : SV_Target
     float val = (rotation.y + uvRotationOffset + 89.0f) / 178.0f;
     val = clamp(val, 0.0f, 1.0f);
 
+    float4 color = float4(0, 0, 0, 0);
     if (val < 0.50f)
     {
-        return _skybandColors.horizon;
+        color = _skybandColors.horizon;
     }
     else if (val < 0.515f)
     {
         float blendFactor = Map(val, 0.50f, 0.515f, 0.0f, 1.0f);
-        return lerp(_skybandColors.horizon, _skybandColors.aboveHorizon, blendFactor);
+        color = lerp(_skybandColors.horizon, _skybandColors.aboveHorizon, blendFactor);
     }
     else if (val < 0.60f)
     {
         float blendFactor = Map(val, 0.515f, 0.60f, 0.0f, 1.0f);
-        return lerp(_skybandColors.aboveHorizon, _skybandColors.bottom, blendFactor);
+        color = lerp(_skybandColors.aboveHorizon, _skybandColors.bottom, blendFactor);
     }
     else if (val < 0.75f)
     {
         float blendFactor = Map(val, 0.60f, 0.75f, 0.0f, 1.0f);
-        return lerp(_skybandColors.bottom, _skybandColors.middle, blendFactor);
+        color = lerp(_skybandColors.bottom, _skybandColors.middle, blendFactor);
+    }
+    else
+    {
+        float blendFactor = Map(val, 0.75f, 1.0f, 0.0f, 1.0f);
+        color = lerp(_skybandColors.middle, _skybandColors.top, blendFactor);
     }
 
-    float blendFactor = Map(val, 0.75f, 1.0f, 0.0f, 1.0f);
-    return lerp(_skybandColors.middle, _skybandColors.top, blendFactor);
+    PSOutput output;
+    output.vBuffer.xzw = 0; // Zero out everything else, skybox is a pretty unique case
+    output.vBuffer.y = Float4ToPackedUnorms(color);
+    return output;
 }

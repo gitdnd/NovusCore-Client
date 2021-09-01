@@ -27,7 +27,7 @@ namespace Renderer
 
             ImageComponentType imageComponentType = ToImageComponentType(imageDesc.format);
 
-            if (imageComponentType == ImageComponentType::FLOAT)
+            if (imageComponentType == ImageComponentType::FLOAT || imageComponentType == ImageComponentType::UNORM || imageComponentType == ImageComponentType::SNORM)
             {
                 commandList.Clear(image, imageDesc.clearColor);
             }
