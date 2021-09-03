@@ -89,9 +89,6 @@ namespace Renderer
 
     BufferID RendererVK::CreateBuffer(BufferDesc& desc)
     {
-        if (desc.size == 0)
-            desc.size = 1;
-
         return _bufferHandler->CreateBuffer(desc);
     }
 

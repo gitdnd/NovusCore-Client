@@ -471,6 +471,7 @@ void TerrainRenderer::CreatePermanentResources()
     textureColorArrayDesc.size = 4096;
 
     _terrainColorTextureArray = _renderer->CreateTextureArray(textureColorArrayDesc);
+
     _geometryPassDescriptorSet.Bind("_terrainColorTextures"_h, _terrainColorTextureArray);
     _materialPassDescriptorSet.Bind("_terrainColorTextures"_h, _terrainColorTextureArray);
 
@@ -478,6 +479,7 @@ void TerrainRenderer::CreatePermanentResources()
     textureAlphaArrayDesc.size = Terrain::MAP_CHUNKS_PER_MAP;
 
     _terrainAlphaTextureArray = _renderer->CreateTextureArray(textureAlphaArrayDesc);
+
     _geometryPassDescriptorSet.Bind("_terrainAlphaTextures"_h, _terrainAlphaTextureArray);
     _materialPassDescriptorSet.Bind("_terrainAlphaTextures"_h, _terrainAlphaTextureArray);
 
@@ -488,10 +490,13 @@ void TerrainRenderer::CreatePermanentResources()
     zeroColorTexture.width = 1;
     zeroColorTexture.height = 1;
     zeroColorTexture.format = Renderer::ImageFormat::R8G8B8A8_UNORM;
-    zeroColorTexture.data = new u8[4]{ 0, 0, 0, 0 };
+    zeroColorTexture.data = new u8[8]{ 0, 0, 0, 0, 0, 0, 0, 0 };
 
     u32 index;
     _renderer->CreateDataTextureIntoArray(zeroColorTexture, _terrainColorTextureArray, index);
+
+    zeroColorTexture.layers = 2;
+    _renderer->CreateDataTextureIntoArray(zeroColorTexture, _terrainAlphaTextureArray, index);
 
     delete[] zeroColorTexture.data;
 
@@ -607,18 +612,20 @@ void TerrainRenderer::CreatePermanentResources()
     // Check if we should load a default map specified by Config
     {
         ConfigSingleton& configSingleton = registry->ctx<ConfigSingleton>();
-        const std::string& defaultMap = configSingleton.uiConfig.GetDefaultMap();
+        const std::string& defaultMapString = configSingleton.uiConfig.GetDefaultMap();
 
-        if (defaultMap.length() != 0)
+        u32 defaultMapHash = StringUtils::fnv1a_32(defaultMapString.c_str(), defaultMapString.length());
+        const NDBC::Map* defaultMap = mapSingleton.GetMapByNameHash(defaultMapHash);
+
+        if (defaultMap != nullptr)
         {
-            u32 defaultMapHash = StringUtils::fnv1a_32(defaultMap.c_str(), defaultMap.length());
-            const NDBC::Map* defaultMap = mapSingleton.GetMapByNameHash(defaultMapHash);
-            if (defaultMap != nullptr)
-            {
-                CameraFreeLook* cameraFreeLook = ServiceLocator::GetCameraFreeLook();
-                cameraFreeLook->LoadFromFile("freelook.cameradata");
-                LoadMap(defaultMap);
-            }
+            CameraFreeLook* cameraFreeLook = ServiceLocator::GetCameraFreeLook();
+            cameraFreeLook->LoadFromFile("freelook.cameradata");
+            LoadMap(defaultMap);
+        }
+        else
+        {
+            ExecuteLoad(); // We have to ExecuteLoad to create buffers and bind descriptors, the buffers will be empty though
         }
     }
 }
@@ -685,6 +692,8 @@ void TerrainRenderer::ExecuteLoad()
 
         _cullingPassDescriptorSet.Bind("_instances"_h, _instanceBuffer);
         _editorPassDescriptorSet.Bind("_cellInstances"_h, _instanceBuffer);
+        _geometryPassDescriptorSet.Bind("_cellInstances"_h, _instanceBuffer);
+        _materialPassDescriptorSet.Bind("_cellInstances"_h, _instanceBuffer);
     }
 
     {

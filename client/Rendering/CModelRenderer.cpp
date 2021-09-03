@@ -831,8 +831,6 @@ void CModelRenderer::AddTransparencyPass(Renderer::RenderGraph* renderGraph, Ren
             pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
             pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::ONE;
             pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
-            //pipelineDesc.states.blendState.renderTargets[0].srcBlendAlpha = Renderer::BlendMode::ONE;
-            //pipelineDesc.states.blendState.renderTargets[0].destBlendAlpha = Renderer::BlendMode::ZERO;
             pipelineDesc.states.blendState.renderTargets[0].srcBlendAlpha = Renderer::BlendMode::ONE;
             pipelineDesc.states.blendState.renderTargets[0].destBlendAlpha = Renderer::BlendMode::ONE;
             pipelineDesc.states.blendState.renderTargets[0].blendOpAlpha = Renderer::BlendOp::ADD;
@@ -1241,6 +1239,8 @@ void CModelRenderer::CreatePermanentResources()
 
         _animationBoneInstancesRangeAllocator.Init(0, boneInstanceBufferSize);
     }
+
+    CreateBuffers();
 }
 
 bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, LoadedComplexModel& complexModel)
@@ -2289,16 +2289,13 @@ void CModelRenderer::CreateBuffers()
         _animationSequence.WriteLock([&](std::vector<AnimationSequence>& animationSequence)
         {
             size_t numSequences = animationSequence.size();
-            if (numSequences > 0)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "AnimationSequenceBuffer";
-                desc.size = sizeof(AnimationSequence) * numSequences;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _animationSequenceBuffer = _renderer->CreateAndFillBuffer(_animationSequenceBuffer, desc, animationSequence.data(), desc.size);
+            Renderer::BufferDesc desc;
+            desc.name = "AnimationSequenceBuffer";
+            desc.size = sizeof(AnimationSequence) * numSequences;
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _animationSequenceBuffer = _renderer->CreateAndFillBuffer(_animationSequenceBuffer, desc, animationSequence.data(), desc.size);
 
-                _animationPrepassDescriptorSet.Bind("_animationSequence"_h, _animationSequenceBuffer);
-            }
+            _animationPrepassDescriptorSet.Bind("_animationSequence"_h, _animationSequenceBuffer);
         });
     }    
     
@@ -2307,16 +2304,14 @@ void CModelRenderer::CreateBuffers()
         _animationModelInfo.WriteLock([&](std::vector<AnimationModelInfo>& animationModelInfo)
         {
             size_t numModelInfo = animationModelInfo.size();
-            if (numModelInfo > 0)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "AnimationModelInfoBuffer";
-                desc.size = sizeof(AnimationModelInfo) * numModelInfo;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _animationModelInfoBuffer = _renderer->CreateAndFillBuffer(_animationModelInfoBuffer, desc, animationModelInfo.data(), desc.size);
+            
+            Renderer::BufferDesc desc;
+            desc.name = "AnimationModelInfoBuffer";
+            desc.size = sizeof(AnimationModelInfo) * numModelInfo;
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _animationModelInfoBuffer = _renderer->CreateAndFillBuffer(_animationModelInfoBuffer, desc, animationModelInfo.data(), desc.size);
 
-                _animationPrepassDescriptorSet.Bind("_animationModelInfo"_h, _animationModelInfoBuffer);
-            }
+            _animationPrepassDescriptorSet.Bind("_animationModelInfo"_h, _animationModelInfoBuffer);
         });
     }    
     
@@ -2325,16 +2320,14 @@ void CModelRenderer::CreateBuffers()
         _animationBoneInfo.WriteLock([&](std::vector<AnimationBoneInfo>& animationBoneInfo)
         {
             size_t numBoneInfo = animationBoneInfo.size();
-            if (numBoneInfo > 0)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "AnimationBoneInfoBuffer";
-                desc.size = sizeof(AnimationBoneInfo) * numBoneInfo;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _animationBoneInfoBuffer = _renderer->CreateAndFillBuffer(_animationBoneInfoBuffer, desc, animationBoneInfo.data(), desc.size);
+            
+            Renderer::BufferDesc desc;
+            desc.name = "AnimationBoneInfoBuffer";
+            desc.size = sizeof(AnimationBoneInfo) * numBoneInfo;
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _animationBoneInfoBuffer = _renderer->CreateAndFillBuffer(_animationBoneInfoBuffer, desc, animationBoneInfo.data(), desc.size);
 
-                _animationPrepassDescriptorSet.Bind("_animationBoneInfo"_h, _animationBoneInfoBuffer);
-            }
+            _animationPrepassDescriptorSet.Bind("_animationBoneInfo"_h, _animationBoneInfoBuffer);
         });
     }
 
@@ -2346,14 +2339,7 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(AnimationTrackInfo) * numSequenceInfo;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
-        if (numSequenceInfo > 0)
-        {
-            _animationTrackInfoBuffer = _renderer->CreateAndFillBuffer(_animationTrackInfoBuffer, desc, _animationTrackInfo.data(), desc.size);
-        }
-        else
-        {
-            _animationTrackInfoBuffer = _renderer->CreateBuffer(desc);
-        }
+        _animationTrackInfoBuffer = _renderer->CreateAndFillBuffer(_animationTrackInfoBuffer, desc, _animationTrackInfo.data(), desc.size);
         _animationPrepassDescriptorSet.Bind("_animationTrackInfo"_h, _animationTrackInfoBuffer);
     }
     
@@ -2365,14 +2351,7 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(u32) * numTrackTimestamps;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
-        if (numTrackTimestamps > 0)
-        {
-            _animationTrackTimestampBuffer = _renderer->CreateAndFillBuffer(_animationTrackTimestampBuffer, desc, _animationTrackTimestamps.data(), desc.size);
-        }
-        else
-        {
-            _animationTrackTimestampBuffer = _renderer->CreateBuffer(desc);
-        }
+        _animationTrackTimestampBuffer = _renderer->CreateAndFillBuffer(_animationTrackTimestampBuffer, desc, _animationTrackTimestamps.data(), desc.size);
         _animationPrepassDescriptorSet.Bind("_animationTrackTimestamp"_h, _animationTrackTimestampBuffer);
     }
 
@@ -2384,141 +2363,105 @@ void CModelRenderer::CreateBuffers()
         desc.size = sizeof(vec4) * numTrackValues;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
-        if (numTrackValues > 0)
-        {
-            _animationTrackValueBuffer = _renderer->CreateAndFillBuffer(_animationTrackValueBuffer, desc, _animationTrackValues.data(), desc.size);
-        }
-        else
-        {
-            _animationTrackValueBuffer = _renderer->CreateBuffer(desc);
-        }
-
+        _animationTrackValueBuffer = _renderer->CreateAndFillBuffer(_animationTrackValueBuffer, desc, _animationTrackValues.data(), desc.size);
         _animationPrepassDescriptorSet.Bind("_animationTrackValue"_h, _animationTrackValueBuffer);
     }
 
     _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& opaqueDrawCalls)
     {
-        if (opaqueDrawCalls.size() > 0)
+        // Create OpaqueDrawCall and OpaqueCulledDrawCall buffer
         {
-            // Create OpaqueDrawCall and OpaqueCulledDrawCall buffer
+            Renderer::BufferDesc desc;
+            desc.name = "CModelOpaqueDrawCallBuffer";
+            desc.size = sizeof(DrawCall) * opaqueDrawCalls.size();
+            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _opaqueDrawCallBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallBuffer, desc, opaqueDrawCalls.data(), desc.size);
+
+            _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCallBuffer);
+            _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
+            _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
+
+            desc.name = "CModelOpaqueCullDrawCallBuffer";
+            _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
+
+            _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
+        }
+
+        _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
+        {
+            // Create OpaqueDrawCallData buffer
             {
                 Renderer::BufferDesc desc;
-                desc.name = "CModelOpaqueDrawCallBuffer";
-                desc.size = sizeof(DrawCall) * opaqueDrawCalls.size();
-                desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _opaqueDrawCallBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallBuffer, desc, opaqueDrawCalls.data(), desc.size);
+                desc.name = "CModelOpaqueDrawCallDataBuffer";
+                desc.size = sizeof(DrawCallData) * opaqueDrawCallDatas.size();
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+                _opaqueDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallDataBuffer, desc, opaqueDrawCallDatas.data(), desc.size);
 
-                _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCallBuffer);
-                _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
-                _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCallBuffer);
-
-                desc.name = "CModelOpaqueCullDrawCallBuffer";
-                _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
-
-                _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
+                _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
+                _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
+                _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
             }
-
-            _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
-                {
-                    // Create OpaqueDrawCallData buffer
-                    {
-                        Renderer::BufferDesc desc;
-                        desc.name = "CModelOpaqueDrawCallDataBuffer";
-                        desc.size = sizeof(DrawCallData) * opaqueDrawCallDatas.size();
-                        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                        _opaqueDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_opaqueDrawCallDataBuffer, desc, opaqueDrawCallDatas.data(), desc.size);
-
-                        _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
-                        _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
-                        _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDataBuffer);
-                    }
-                });
-        }
+        });
     });
     
     _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& transparentDrawCalls)
     {
-        if (transparentDrawCalls.size() > 0)
+        // Create TransparentDrawCall, TransparentCulledDrawCall and TransparentSortedCulledDrawCall buffer
         {
-            // Create TransparentDrawCall, TransparentCulledDrawCall and TransparentSortedCulledDrawCall buffer
-            {
-                u32 size = sizeof(DrawCall) * static_cast<u32>(transparentDrawCalls.size());
+            u32 size = sizeof(DrawCall) * static_cast<u32>(transparentDrawCalls.size());
 
-                Renderer::BufferDesc desc;
-                desc.name = "CModelAlphaCullDrawCalls";
-                desc.size = size;
-                desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
+            Renderer::BufferDesc desc;
+            desc.name = "CModelAlphaCullDrawCalls";
+            desc.size = size;
+            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
 
-                _transparentCullingDescriptorSet.Bind("_culledDrawCalls"_h, _transparentCulledDrawCallBuffer);
+            _transparentCullingDescriptorSet.Bind("_culledDrawCalls"_h, _transparentCulledDrawCallBuffer);
                 
 
-                desc.name = "CModelAlphaSortCullDrawCalls";
-                _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
+            desc.name = "CModelAlphaSortCullDrawCalls";
+            _transparentSortedCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentSortedCulledDrawCallBuffer, desc);
 
-                desc.name = "CModelAlphaDrawCalls";
-                desc.usage |= Renderer::BufferUsage::TRANSFER_SOURCE;
-                _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, transparentDrawCalls.data(), desc.size);
+            desc.name = "CModelAlphaDrawCalls";
+            desc.usage |= Renderer::BufferUsage::TRANSFER_SOURCE;
+            _transparentDrawCallBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallBuffer, desc, transparentDrawCalls.data(), desc.size);
 
-                _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCallBuffer);
-                _transparencyPassDescriptorSet.Bind("_cModelDraws"_h, _transparentDrawCallBuffer);
-            }
-
-            // Create TransparentDrawCallData buffer
-            _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
-            {
-                Renderer::BufferDesc desc;
-                desc.name = "CModelAlphaDrawCallDataBuffer";
-                desc.size = sizeof(DrawCallData) * transparentDrawCallDatas.size();
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, transparentDrawCallDatas.data(), desc.size);
-            
-                _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
-                _transparencyPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
-            });
-
-            // Create transparent sort keys/values buffer
-            {
-                u32 numDrawCalls = static_cast<u32>(transparentDrawCalls.size());
-                u32 keysSize = sizeof(u64) * numDrawCalls;
-                u32 valuesSize = sizeof(u32) * numDrawCalls;
-
-                Renderer::BufferDesc desc;
-                desc.name = "CModelAlphaSortKeys";
-                desc.size = keysSize;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
-
-                _transparentCullingDescriptorSet.Bind("_sortKeys"_h, _transparentSortKeys);
-
-                desc.name = "CModelAlphaSortValues";
-                desc.size = valuesSize;
-                _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
-
-                _transparentCullingDescriptorSet.Bind("_sortValues"_h, _transparentSortValues);
-            }
+            _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCallBuffer);
+            _transparencyPassDescriptorSet.Bind("_cModelDraws"_h, _transparentDrawCallBuffer);
         }
-        else
+
+        // Create TransparentDrawCallData buffer
+        _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
         {
-            // Create transparent sort keys/values buffer
-            {
-                u32 keysSize = sizeof(u64) * 1;
-                u32 valuesSize = sizeof(u32) * 1;
+            Renderer::BufferDesc desc;
+            desc.name = "CModelAlphaDrawCallDataBuffer";
+            desc.size = sizeof(DrawCallData) * transparentDrawCallDatas.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _transparentDrawCallDataBuffer = _renderer->CreateAndFillBuffer(_transparentDrawCallDataBuffer, desc, transparentDrawCallDatas.data(), desc.size);
+            
+            _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
+            _transparencyPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDataBuffer);
+        });
 
-                Renderer::BufferDesc desc;
-                desc.name = "CModelAlphaSortKeys";
-                desc.size = keysSize;
-                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-                _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
+        // Create transparent sort keys/values buffer
+        {
+            u32 numDrawCalls = static_cast<u32>(transparentDrawCalls.size());
+            u32 keysSize = sizeof(u64) * numDrawCalls;
+            u32 valuesSize = sizeof(u32) * numDrawCalls;
 
-                _transparentCullingDescriptorSet.Bind("_sortKeys"_h, _transparentSortKeys);
+            Renderer::BufferDesc desc;
+            desc.name = "CModelAlphaSortKeys";
+            desc.size = keysSize;
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _transparentSortKeys = _renderer->CreateBuffer(_transparentSortKeys, desc);
 
-                desc.name = "CModelAlphaSortValues";
-                desc.size = valuesSize;
-                _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+            _transparentCullingDescriptorSet.Bind("_sortKeys"_h, _transparentSortKeys);
 
-                _transparentCullingDescriptorSet.Bind("_sortValues"_h, _transparentSortValues);
-            }
+            desc.name = "CModelAlphaSortValues";
+            desc.size = valuesSize;
+            _transparentSortValues = _renderer->CreateBuffer(_transparentSortValues, desc);
+
+            _transparentCullingDescriptorSet.Bind("_sortValues"_h, _transparentSortValues);
         }
     });
 

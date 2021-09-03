@@ -355,6 +355,11 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
             Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
             commandList.BeginPipeline(pipeline);
 
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
+
+            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+
             Renderer::BufferID argumentBuffer;
             if (cullingEnabled)
             {
@@ -364,15 +369,6 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
             {
                 argumentBuffer = _argumentBuffer;
             }
-
-            _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
-            _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
-
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
-
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
-
             commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
 
             commandList.EndPipeline(pipeline);
@@ -526,15 +522,15 @@ void MapObjectRenderer::RegisterMapObjectToBeLoaded(const std::string& mapObject
     u32 uniqueID = mapObjectPlacement.uniqueID;
 
     _uniqueIdCounter.WriteLock([&](robin_hood::unordered_map<u32, u8>& uniqueIdCounter)
+    {
+        if (uniqueIdCounter[uniqueID]++ == 0)
         {
-            if (uniqueIdCounter[uniqueID]++ == 0)
-            {
-                MapObjectToBeLoaded& mapObjectToBeLoaded = _mapObjectsToBeLoaded.EmplaceBack();
-                mapObjectToBeLoaded.placement = &mapObjectPlacement;
-                mapObjectToBeLoaded.nmorName = &mapObjectName;
-                mapObjectToBeLoaded.nmorNameHash = StringUtils::fnv1a_32(mapObjectName.c_str(), mapObjectName.length());
-            }
-        });
+            MapObjectToBeLoaded& mapObjectToBeLoaded = _mapObjectsToBeLoaded.EmplaceBack();
+            mapObjectToBeLoaded.placement = &mapObjectPlacement;
+            mapObjectToBeLoaded.nmorName = &mapObjectName;
+            mapObjectToBeLoaded.nmorNameHash = StringUtils::fnv1a_32(mapObjectName.c_str(), mapObjectName.length());
+        }
+    });
 }
 
 void MapObjectRenderer::RegisterMapObjectsToBeLoaded(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable)
@@ -675,13 +671,12 @@ void MapObjectRenderer::ExecuteLoad()
         _numTriangles = 0;
 
         _drawCalls.ReadLock([&](const std::vector<DrawCall>& drawCalls)
+        {
+            for (const DrawCall& drawCall : drawCalls)
             {
-                for (const DrawCall& drawCall : drawCalls)
-                {
-                    _numTriangles += drawCall.indexCount / 3;
-                }
-            });
-        
+                _numTriangles += drawCall.indexCount / 3;
+            }
+        });
     }
 }
 
@@ -723,8 +718,6 @@ void MapObjectRenderer::CreatePermanentResources()
     u32 textureID;
     _renderer->CreateDataTextureIntoArray(dataTextureDesc, _mapObjectTextures, textureID);
 
-    delete[] dataTextureDesc.data;
-
     Renderer::SamplerDesc samplerDesc;
     samplerDesc.enabled = true;
     samplerDesc.filter = Renderer::SamplerFilter::MIN_MAG_MIP_LINEAR;
@@ -763,6 +756,8 @@ void MapObjectRenderer::CreatePermanentResources()
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _triangleCountReadBackBuffer = _renderer->CreateBuffer(_triangleCountReadBackBuffer, desc);
     }
+
+    CreateBuffers();
 }
 
 bool MapObjectRenderer::LoadMapObject(MapObjectToBeLoaded& mapObjectToBeLoaded, LoadedMapObject& mapObject)
@@ -920,44 +915,44 @@ bool MapObjectRenderer::LoadRoot(std::filesystem::path nmorPath, MeshRoot& meshR
     bool failed = false;
 
     _materials.WriteLock([&](std::vector<Material>& materials)
+    {
+        mapObject.baseMaterialOffset = static_cast<u32>(materials.size());
+
+        for (u32 i = 0; i < meshRoot.numMaterials; i++)
         {
-            mapObject.baseMaterialOffset = static_cast<u32>(materials.size());
-
-            for (u32 i = 0; i < meshRoot.numMaterials; i++)
+            Terrain::MapObjectMaterial mapObjectMaterial;
+            if (!buffer.GetBytes(reinterpret_cast<u8*>(&mapObjectMaterial), sizeof(Terrain::MapObjectMaterial)))
             {
-                Terrain::MapObjectMaterial mapObjectMaterial;
-                if (!buffer.GetBytes(reinterpret_cast<u8*>(&mapObjectMaterial), sizeof(Terrain::MapObjectMaterial)))
+                failed = true;
+                return;
+            }
+
+            Material& material = materials.emplace_back();
+            material.materialType = mapObjectMaterial.materialType;
+            material.unlit = mapObjectMaterial.flags.unlit;
+
+            // TransparencyMode 1 means that it checks the alpha of the texture if it should discard the pixel or not
+            if (mapObjectMaterial.transparencyMode == 1)
+            {
+                material.alphaTestVal = 128.0f / 255.0f;
+            }
+
+            constexpr u32 maxTexturesPerMaterial = 3;
+            for (u32 j = 0; j < maxTexturesPerMaterial; j++)
+            {
+                if (mapObjectMaterial.textureNameID[j] < std::numeric_limits<u32>().max())
                 {
-                    failed = true;
-                    return;
-                }
+                    Renderer::TextureDesc textureDesc;
+                    textureDesc.path = textureSingleton.textureHashToPath[mapObjectMaterial.textureNameID[j]];
 
-                Material& material = materials.emplace_back();
-                material.materialType = mapObjectMaterial.materialType;
-                material.unlit = mapObjectMaterial.flags.unlit;
+                    u32 textureID;
+                    _renderer->LoadTextureIntoArray(textureDesc, _mapObjectTextures, textureID);
 
-                // TransparencyMode 1 means that it checks the alpha of the texture if it should discard the pixel or not
-                if (mapObjectMaterial.transparencyMode == 1)
-                {
-                    material.alphaTestVal = 128.0f / 255.0f;
-                }
-
-                constexpr u32 maxTexturesPerMaterial = 3;
-                for (u32 j = 0; j < maxTexturesPerMaterial; j++)
-                {
-                    if (mapObjectMaterial.textureNameID[j] < std::numeric_limits<u32>().max())
-                    {
-                        Renderer::TextureDesc textureDesc;
-                        textureDesc.path = textureSingleton.textureHashToPath[mapObjectMaterial.textureNameID[j]];
-
-                        u32 textureID;
-                        _renderer->LoadTextureIntoArray(textureDesc, _mapObjectTextures, textureID);
-
-                        material.textureIDs[j] = static_cast<u16>(textureID);
-                    }
+                    material.textureIDs[j] = static_cast<u16>(textureID);
                 }
             }
-        });
+        }
+    });
 
     if (failed)
         return false;
@@ -1317,7 +1312,6 @@ void MapObjectRenderer::CreateBuffers()
         _materialPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
     });
     
-    
     _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
     {
         // Create Indirect Argument buffer
@@ -1326,6 +1320,9 @@ void MapObjectRenderer::CreateBuffers()
         desc.size = sizeof(DrawCall) * drawCalls.size();
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
         _argumentBuffer = _renderer->CreateAndFillBuffer(_argumentBuffer, desc, drawCalls.data(), desc.size);
+
+        _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
+        _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
 
         // Create Culled Indirect Argument buffer
         desc.name = "MapObjectCulledIndirectArgs";

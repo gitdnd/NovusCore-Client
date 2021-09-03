@@ -123,9 +123,11 @@ namespace Renderer
                 usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
             }
 
+            u64 descSize = Math::Max(desc.size, 1ul);
+
             VkBufferCreateInfo bufferInfo = {};
             bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.size = desc.size;
+            bufferInfo.size = descSize;
             bufferInfo.usage = usage;
             bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
             
@@ -144,7 +146,7 @@ namespace Renderer
 
             const BufferID bufferID = AcquireNewBufferID();
             Buffer& buffer = data.buffers[(BufferID::type)bufferID];
-            buffer.size = desc.size;
+            buffer.size = descSize;
 
             if (vmaCreateBuffer(_device->_allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr) != VK_SUCCESS)
             {
