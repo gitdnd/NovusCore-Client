@@ -338,15 +338,16 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
                     u32 sourceByteOffset;
                     u32 targetByteOffset;
                     u32 threadGroupSize;
-                } constants;
-
-                constants.sourceByteOffset = 0;
-                constants.targetByteOffset = 0;
-                constants.threadGroupSize = 32;
+                };
+                
+                PushConstants* constants = graphResources.FrameNew<PushConstants>();
+                constants->sourceByteOffset = 0;
+                constants->targetByteOffset = 0;
+                constants->threadGroupSize = 32;
 
                 commandList.BeginPipeline(pipeline);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_DRAW, &_visibleInstanceArgumentDescriptorSet, frameIndex);
-                commandList.PushConstant(&constants, 0, sizeof(PushConstants));
+                commandList.PushConstant(constants, 0, sizeof(PushConstants));
                 commandList.Dispatch(1, 1, 1);
                 commandList.EndPipeline(pipeline);
 
@@ -390,7 +391,9 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
 
                 if (_animationBoneDeformMatrixBuffer != Renderer::BufferID::Invalid())
                 {
-                    _renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer);
+                    // TODO: This is baaaad, if we are running without immediate mode commandlists, this QueueDestroyBuffer could run before the copy
+                    // We should have a version of this that happens from the commandlist instead
+                    //_renderer->QueueDestroyBuffer(_animationBoneDeformMatrixBuffer); 
                     commandList.CopyBuffer(newBoneDeformMatrixBuffer, 0, _animationBoneDeformMatrixBuffer, 0, _previousAnimationBoneDeformMatrixBufferSize);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneDeformMatrixBuffer);
                 }
@@ -416,7 +419,9 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
 
                 if (_animationBoneInstancesBuffer != Renderer::BufferID::Invalid())
                 {
-                    _renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
+                    // TODO: This is baaaad, if we are running without immediate mode commandlists, this QueueDestroyBuffer could run before the copy
+                    // We should have a version of this that happens from the commandlist instead
+                    //_renderer->QueueDestroyBuffer(_animationBoneInstancesBuffer);
                     commandList.CopyBuffer(newBoneInstanceBuffer, 0, _animationBoneInstancesBuffer, 0, _previousAnimationBoneInstanceBufferSize);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, newBoneInstanceBuffer);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, newBoneInstanceBuffer);

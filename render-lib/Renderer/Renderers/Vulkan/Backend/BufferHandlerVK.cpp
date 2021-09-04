@@ -4,7 +4,8 @@
 
 #include <vector>
 #include <queue>
-#include "vulkan/vulkan.h"
+#include <Utils/SafeVector.h>
+#include <vulkan/vulkan.h>
 
 namespace Renderer
 {
@@ -25,7 +26,7 @@ namespace Renderer
 
         struct BufferHandlerVKData : IBufferHandlerVKData
         {
-            std::vector<Buffer> buffers;
+            SafeVector<Buffer> buffers;
             std::queue<BufferID> returnedBufferIDs;
 
             std::vector<TemporaryBuffer> temporaryBuffers;
@@ -63,7 +64,7 @@ namespace Renderer
             BufferHandlerVKData& data = static_cast<BufferHandlerVKData&>(*_data);
 
             assert(bufferID != BufferID::Invalid());
-            return data.buffers[static_cast<BufferID::type>(bufferID)].buffer;
+            return data.buffers.ReadGet(static_cast<BufferID::type>(bufferID)).buffer;
         }
 
         VkDeviceSize BufferHandlerVK::GetBufferSize(BufferID bufferID) const
@@ -71,7 +72,7 @@ namespace Renderer
             BufferHandlerVKData& data = static_cast<BufferHandlerVKData&>(*_data);
 
             assert(bufferID != BufferID::Invalid());
-            return data.buffers[static_cast<BufferID::type>(bufferID)].size;
+            return data.buffers.ReadGet(static_cast<BufferID::type>(bufferID)).size;
         }
 
         VmaAllocation BufferHandlerVK::GetBufferAllocation(BufferID bufferID) const
@@ -79,7 +80,7 @@ namespace Renderer
             BufferHandlerVKData& data = static_cast<BufferHandlerVKData&>(*_data);
 
             assert(bufferID != BufferID::Invalid());
-            return data.buffers[static_cast<BufferID::type>(bufferID)].allocation;
+            return data.buffers.ReadGet(static_cast<BufferID::type>(bufferID)).allocation;
         }
 
         BufferID BufferHandlerVK::CreateBuffer(BufferDesc& desc)
@@ -145,16 +146,27 @@ namespace Renderer
             allocInfo.usage = memoryUsage;
 
             const BufferID bufferID = AcquireNewBufferID();
-            Buffer& buffer = data.buffers[(BufferID::type)bufferID];
-            buffer.size = descSize;
 
-            if (vmaCreateBuffer(_device->_allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr) != VK_SUCCESS)
+            bool failed = false;
+            data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
+                {
+                    Buffer& buffer = buffers[(BufferID::type)bufferID];
+                    buffer.size = descSize;
+
+                    if (vmaCreateBuffer(_device->_allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr) != VK_SUCCESS)
+                    {
+                        failed = true;
+                        return;
+                    }
+
+                    DebugMarkerUtilVK::SetObjectName(_device->_device, (u64)buffer.buffer, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, desc.name.c_str());
+                });
+
+            if (failed)
             {
                 DebugHandler::PrintFatal("Failed to create buffer!");
                 return BufferID::Invalid();
             }
-
-            DebugMarkerUtilVK::SetObjectName(_device->_device, (u64)buffer.buffer, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, desc.name.c_str());
 
             return bufferID;
         }
@@ -174,9 +186,12 @@ namespace Renderer
         {
             BufferHandlerVKData& data = static_cast<BufferHandlerVKData&>(*_data);
 
-            Buffer& buffer = data.buffers[(BufferID::type)bufferID];
+            data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
+                {
+                    Buffer& buffer = buffers[(BufferID::type)bufferID];
 
-            vmaDestroyBuffer(_device->_allocator, buffer.buffer, buffer.allocation);
+                    vmaDestroyBuffer(_device->_allocator, buffer.buffer, buffer.allocation);
+                });
 
             ReturnBufferID(bufferID);
         }
@@ -196,8 +211,12 @@ namespace Renderer
             else
             {
                 // Else create a new one
-                bufferID = BufferID(static_cast<BufferID::type>(data.buffers.size()));
-                data.buffers.emplace_back();
+                data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
+                    {
+                        bufferID = BufferID(static_cast<BufferID::type>(buffers.size()));
+                        buffers.emplace_back();
+                    });
+                
             }
 
             return bufferID;
