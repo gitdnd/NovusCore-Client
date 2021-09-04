@@ -1537,6 +1537,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         // Add texture units
         size_t numTextureUnitsBeforeAdd = 0;
         size_t numTextureUnitsToAdd = 0;
+        size_t numUnlitTextureUnits = 0;
         _textureUnits.WriteLock([&](std::vector<TextureUnit>& textureUnits)
         {
             numTextureUnitsBeforeAdd = textureUnits.size();
@@ -1556,6 +1557,8 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
 
                 textureUnit.data = static_cast<u16>(isProjectedTexture) | materialFlag | blendingMode;
                 textureUnit.materialType = complexTextureUnit.shaderId;
+
+                numUnlitTextureUnits += materialFlag & 0x1;
 
                 // Load Textures into Texture Array
                 {
@@ -1588,6 +1591,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         drawCallDataTemplate.textureUnitOffset = static_cast<u16>(numTextureUnitsBeforeAdd);
         drawCallDataTemplate.numTextureUnits = static_cast<u16>(numTextureUnitsToAdd);
         drawCallDataTemplate.renderPriority = renderBatch.renderPriority;
+        drawCallDataTemplate.numUnlitTextureUnits = static_cast<u16>(numUnlitTextureUnits);
     }
 
     return true;
@@ -2142,6 +2146,7 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
                     drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
                     drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
                     drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                    drawCallData.numUnlitTextureUnits = drawCallDataTemplate.numUnlitTextureUnits;
 
                     // Fill in the data that shouldn't be templated
                     drawCall.firstInstance = static_cast<u32>(numOpaqueDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData
@@ -2182,6 +2187,7 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
                     drawCallData.textureUnitOffset = drawCallDataTemplate.textureUnitOffset;
                     drawCallData.numTextureUnits = drawCallDataTemplate.numTextureUnits;
                     drawCallData.renderPriority = drawCallDataTemplate.renderPriority;
+                    drawCallData.numUnlitTextureUnits = drawCallDataTemplate.numUnlitTextureUnits;
 
                     // Fill in the data that shouldn't be templated
                     drawCall.firstInstance = static_cast<u32>(numTransparentDrawCallsBeforeAdd + i); // This is used in the shader to retrieve the DrawCallData

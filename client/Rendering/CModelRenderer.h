@@ -64,7 +64,8 @@ public:
         u32 cullingDataID;
         u16 textureUnitOffset;
         u16 numTextureUnits;
-        u32 renderPriority;
+        u16 renderPriority;
+        u16 numUnlitTextureUnits;
     };
 
     struct LoadedComplexModel

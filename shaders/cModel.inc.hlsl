@@ -84,8 +84,8 @@ struct PackedCModelDrawCallData
 {
     uint instanceID;
     uint cullingDataID;
-    uint packed; // uint16_t textureUnitOffset, uint16_t numTextureUnits
-    uint renderPriority;
+    uint packed1; // uint16_t textureUnitOffset, uint16_t numTextureUnits
+    uint packed2;
 }; // 16 bytes
 
 struct CModelDrawCallData
@@ -95,6 +95,7 @@ struct CModelDrawCallData
     uint textureUnitOffset;
     uint numTextureUnits;
     uint renderPriority;
+    uint numUnlitTextureUnits;
 };
 
 [[vk::binding(0, CMODEL)]] StructuredBuffer<PackedCModelDrawCallData> _packedCModelDrawCallDatas;
@@ -107,10 +108,11 @@ CModelDrawCallData LoadCModelDrawCallData(uint drawCallID)
     drawCallData.instanceID = packedDrawCallData.instanceID;
     drawCallData.cullingDataID = packedDrawCallData.cullingDataID;
     
-    drawCallData.textureUnitOffset = packedDrawCallData.packed & 0xFFFF;
-    drawCallData.numTextureUnits = (packedDrawCallData.packed >> 16) && 0xFFFF;
-    
-    drawCallData.renderPriority = packedDrawCallData.renderPriority;
+    drawCallData.textureUnitOffset = packedDrawCallData.packed1 & 0xFFFF;
+    drawCallData.numTextureUnits = (packedDrawCallData.packed1 >> 16) && 0xFFFF;
+
+    drawCallData.renderPriority = packedDrawCallData.packed2 & 0xFFFF;
+    drawCallData.numUnlitTextureUnits = (packedDrawCallData.packed2 >> 16) && 0xFFFF;
     
     return drawCallData;
 }
