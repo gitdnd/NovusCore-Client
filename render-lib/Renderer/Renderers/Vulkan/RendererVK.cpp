@@ -125,11 +125,25 @@ namespace Renderer
 
     GraphicsPipelineID RendererVK::CreatePipeline(GraphicsPipelineDesc& desc)
     {
+#if _DEBUG
+        if (!_isExecutingCommandlist)
+        {
+            DebugHandler::PrintFatal("Please only create pipelines from inside a Commandlist");
+        }
+#endif // _DEBUG
+
         return _pipelineHandler->CreatePipeline(desc);
     }
 
     ComputePipelineID RendererVK::CreatePipeline(ComputePipelineDesc& desc)
     {
+#if _DEBUG
+        if (!_isExecutingCommandlist)
+        {
+            DebugHandler::PrintFatal("Please only create pipelines from inside a Commandlist");
+        }
+#endif // _DEBUG
+
         return _pipelineHandler->CreatePipeline(desc);
     }
 
@@ -782,7 +796,10 @@ namespace Renderer
     void RendererVK::RecreateSwapChain(Backend::SwapChainVK* swapChain)
     {
         _device->RecreateSwapChain(_imageHandler, _semaphoreHandler, swapChain);
-        _pipelineHandler->OnWindowResize();
+        
+        _pipelineHandler->DiscardPipelines();
+        CreateDummyPipeline();
+        
         _imageHandler->OnWindowResize();
     }
 

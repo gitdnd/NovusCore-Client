@@ -116,6 +116,8 @@ namespace Renderer
             commandList.AddWaitSemaphore(waitSemaphore);
         }
 
+        _renderer->BeginExecutingCommandlist();
+
         commandList.PushMarker("RenderGraph", Color::PastelBlue);
         for (u32 i = 0; i < data->passes.Count(); i++)
         {
@@ -133,10 +135,12 @@ namespace Renderer
             commandList.PopMarker();
         }
         commandList.PopMarker();
-        
+
         {
             ZoneScopedNC("CommandList::Execute", tracy::Color::Red2);
             commandList.Execute();
         }
+
+        _renderer->EndExecutingCommandlist();
     }
 }

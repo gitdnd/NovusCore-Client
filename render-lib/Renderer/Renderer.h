@@ -159,5 +159,12 @@ namespace Renderer
 
     protected:
         Renderer() {}; // Pure virtual class, disallow creation of it
+
+        void BeginExecutingCommandlist() { _isExecutingCommandlist = true; };
+        void EndExecutingCommandlist() { _isExecutingCommandlist = false; };
+
+        bool _isExecutingCommandlist = false;
+
+        friend class RenderGraph;
     };
 }

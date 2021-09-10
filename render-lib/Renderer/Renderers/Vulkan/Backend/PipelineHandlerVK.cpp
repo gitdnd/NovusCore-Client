@@ -123,16 +123,6 @@ NOVUS_NO_PADDING_END;
             data.computePipelines.clear();
         }
 
-        void PipelineHandlerVK::OnWindowResize()
-        {
-            PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);
-            for (auto& pipeline : data.graphicsPipelines)
-            {
-                vkDestroyFramebuffer(_device->_device, pipeline.framebuffer, nullptr);
-                CreateFramebuffer(pipeline);
-            }
-        }
-
         GraphicsPipelineID PipelineHandlerVK::CreatePipeline(const GraphicsPipelineDesc& desc)
         {
             PipelineHandlerVKData& data = static_cast<PipelineHandlerVKData&>(*_data);

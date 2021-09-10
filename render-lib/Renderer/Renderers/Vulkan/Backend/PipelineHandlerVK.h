@@ -32,8 +32,6 @@ namespace Renderer
             void Init(RenderDeviceVK* device, ShaderHandlerVK* shaderHandler, ImageHandlerVK* imageHandler);
             void DiscardPipelines();
 
-            void OnWindowResize();
-
             GraphicsPipelineID CreatePipeline(const GraphicsPipelineDesc& desc);
             ComputePipelineID CreatePipeline(const ComputePipelineDesc& desc);
 

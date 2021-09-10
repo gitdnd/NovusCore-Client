@@ -76,6 +76,9 @@ namespace Renderer
             // Recreate color images
             for (auto& image : data.images)
             {
+                if (image.isSwapchain)
+                    continue;
+
                 if (image.desc.dimensionType == ImageDimensionType::DIMENSION_SCALE)
                 {
                     // Destroy old image
