@@ -151,10 +151,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (!IsAABBInsideFrustum(_constants.frustumPlanes, aabb))
     {
         return;
-    } 
+    }
     if (_constants.occlusionCull)
     { 
-        if (!IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
+        float4x4 mvp = mul(_viewData.viewProjectionMatrix, m);
+        bool isIntersectingNearZ = IsIntersectingNearZ(aabb.min, aabb.max, mvp);
+
+        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
         { 
             return;
         }

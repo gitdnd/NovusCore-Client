@@ -103,7 +103,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
     if (_constants.occlusionCull) 
     {
-        if (!IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
+        bool isIntersectingNearZ = IsIntersectingNearZ(aabb.min, aabb.max, _viewData.viewProjectionMatrix);
+
+        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
         {
             return;
         }

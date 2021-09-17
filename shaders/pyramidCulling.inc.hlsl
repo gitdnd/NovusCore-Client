@@ -12,7 +12,7 @@ static float3 axis[8] =
     float3(1,1,1),
 };
 
-float3 transform_to_clip(float3 worldPos, float4x4 viewMat)
+float3 TransformToClip(float3 worldPos, float4x4 viewMat)
 {
     float4 worldPoint = float4(worldPos.x, worldPos.y, worldPos.z, 1.0);
     float4 clipPoint = mul(worldPoint, viewMat);
@@ -21,7 +21,7 @@ float3 transform_to_clip(float3 worldPos, float4x4 viewMat)
     return clipPoint.xyz;
 }
 
-bool IsVisible(float3 AABBMin, float3 AABBMax,float3 eye ,Texture2D<float> pyramid, SamplerState samplerState, float4x4 viewMat)
+bool IsVisible(float3 AABBMin, float3 AABBMax, float3 eye, Texture2D<float> pyramid, SamplerState samplerState, float4x4 viewMat)
 {
     if (eye.x < AABBMax.x && eye.x > AABBMin.x)
     {
@@ -34,11 +34,12 @@ bool IsVisible(float3 AABBMin, float3 AABBMax,float3 eye ,Texture2D<float> pyram
         }
     }
 
-    float3 center = transform_to_clip(lerp(AABBMin,AABBMax,0.5), viewMat);
+    float3 center = TransformToClip(lerp(AABBMin, AABBMax, 0.5), viewMat);
 
     float2 pmin = center.xy;
     float2 pmax = center.xy;
-    float2 depth = center.z;// x max, y min
+    // x max, y min
+    float2 depth = center.z;
 
     for (int i = 0; i < 8; i++)
     {
@@ -47,7 +48,7 @@ bool IsVisible(float3 AABBMin, float3 AABBMax,float3 eye ,Texture2D<float> pyram
         float pZ = lerp(AABBMin.z, AABBMax.z, axis[i].z);
 
         
-        float3 clipPoint = transform_to_clip(float3(pX,pY,pZ), viewMat);
+        float3 clipPoint = TransformToClip(float3(pX, pY, pZ), viewMat);
 
         pmin.x = min(clipPoint.x, pmin.x);
         pmin.y = min(clipPoint.y, pmin.y);
@@ -63,11 +64,11 @@ bool IsVisible(float3 AABBMin, float3 AABBMax,float3 eye ,Texture2D<float> pyram
     uint pyrHeight;
     pyramid.GetDimensions(pyrWidth, pyrHeight);
 
-    //convert max and min into UV space
+    // convert max and min into UV space
     pmin = pmin * float2(0.5f, -0.5f) + float2(0.5f,0.5f);
     pmax = pmax * float2(0.5f, -0.5f) + float2(0.5f,0.5f);
    
-    //calculate pixel widths/height
+    // calculate pixel widths/height
     float boxWidth = abs(pmax.x-pmin.x) * (float)pyrWidth;
     float boxHeight = abs(pmax.y-pmin.y) * (float)pyrHeight;
 
@@ -79,3 +80,25 @@ bool IsVisible(float3 AABBMin, float3 AABBMax,float3 eye ,Texture2D<float> pyram
 
     return sampleDepth <= depth.x;
 };
+
+// We don't want to run occlusion culling if the object intersects the near plane, thanks Eichenherz!
+bool IsIntersectingNearZ(float3 aabbMin, float3 aabbMax, float4x4 m)
+{
+    float3 aabbSize = aabbMax - aabbMin;
+    float4 clipCorners[] = {
+        mul(float4(aabbMin, 1), m),
+        mul(float4(aabbMin + float3(aabbSize.x, 0, 0), 1), m),
+        mul(float4(aabbMin + float3(0, aabbSize.y, 0), 1), m),
+        mul(float4(aabbMin + float3(0, 0, aabbSize.z), 1), m),
+        mul(float4(aabbMin + float3(aabbSize.xy, 0), 1), m),
+        mul(float4(aabbMin + float3(0, aabbSize.yz), 1), m),
+        mul(float4(aabbMin + float3(aabbSize.x, 0, aabbSize.z), 1), m),
+        mul(float4(aabbMin + aabbSize, 1), m)
+    };
+
+    float minW = min(
+        min(min(clipCorners[0].w, clipCorners[1].w), min(clipCorners[2].w, clipCorners[3].w)),
+        min(min(clipCorners[4].w, clipCorners[5].w), min(clipCorners[6].w, clipCorners[7].w)));
+
+    return minW <= 0.0f;
+}
