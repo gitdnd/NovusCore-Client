@@ -1,7 +1,6 @@
 #pragma once
 #include <NovusTypes.h>
-#include <angelscript.h>
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 
 namespace UIUtils
 {
@@ -10,13 +9,13 @@ namespace UIUtils
         if (!scriptingObject || !scriptFunction)
             return;
 
-        asIScriptContext* context = ScriptEngine::GetScriptContext();
-        {
-            context->Prepare(scriptFunction);
-            {
-                context->SetArgObject(0, scriptingObject);
-            }
-            context->Execute();
-        }
+        //asIScriptContext* context = ScriptEngine::GetScriptContext();
+        //{
+        //    context->Prepare(scriptFunction);
+        //    {
+        //        context->SetArgObject(0, scriptingObject);
+        //    }
+        //    context->Execute();
+        //}
     }
 };

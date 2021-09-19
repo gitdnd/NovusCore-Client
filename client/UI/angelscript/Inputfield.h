@@ -28,13 +28,13 @@ namespace UIScripting
 
         void SetWriteHeadPosition(size_t position);
 
-        void SetOnSubmitCallback(asIScriptFunction* callback);
+        //void SetOnSubmitCallback(asIScriptFunction* callback);
 
         // TransformEvents Functions
         const bool IsFocusable() const;
         void SetFocusable(bool focusable);
-        void SetOnFocusGainedCallback(asIScriptFunction* callback);
-        void SetOnFocusLostCallback(asIScriptFunction* callback);
+        //void SetOnFocusGainedCallback(asIScriptFunction* callback);
+        //void SetOnFocusLostCallback(asIScriptFunction* callback);
 
         //Label Functions
         const std::string GetText() const;

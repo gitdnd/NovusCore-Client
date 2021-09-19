@@ -1,6 +1,6 @@
 #include "Slider.h"
 #include "SliderHandle.h"
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 #include "../../Utils/ServiceLocator.h"
 
 #include "../ECS/Components/Transform.h"
@@ -36,30 +36,30 @@ namespace UIScripting
 
     void Slider::RegisterType()
     {
-        i32 r = ScriptEngine::RegisterScriptClass("Slider", 0, asOBJ_REF | asOBJ_NOCOUNT);
-        r = ScriptEngine::RegisterScriptInheritance<BaseElement, Slider>("BaseElement");
-        r = ScriptEngine::RegisterScriptFunction("Slider@ CreateSlider()", asFUNCTION(Slider::CreateSlider)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("void SetTexture(string texture)", asMETHOD(Slider, SetTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(Slider, SetColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetHandleTexture(string texture)", asMETHOD(Slider, SetHandleTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetHandleColor(Color color)", asMETHOD(Slider, SetHandleColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetHandleSize(vec2 size)", asMETHOD(Slider, SetHandleSize)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("float GetCurrentValue()", asMETHOD(Slider, GetCurrentValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCurrentValue(float current)", asMETHOD(Slider, SetCurrentValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("float GetMinValue()", asMETHOD(Slider, GetMinValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetMinValue(float min)", asMETHOD(Slider, SetMinValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("float GetMaxValue()", asMETHOD(Slider, GetMaxValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetMaxValue(float max)", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("float GetPercentValue()", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetPercentValue(float percent)", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("float GetStepSize()", asMETHOD(Slider, GetStepSize)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetStepSize(float stepSize)", asMETHOD(Slider, SetStepSize)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptFunctionDef("void SliderEventCallback(Slider@ slider)"); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnValueChange(SliderEventCallback@ cb)", asMETHOD(Slider, SetOnValueChangedCallback)); assert(r >= 0);
+        //i32 r = ScriptEngine::RegisterScriptClass("Slider", 0, asOBJ_REF | asOBJ_NOCOUNT);
+        //r = ScriptEngine::RegisterScriptInheritance<BaseElement, Slider>("BaseElement");
+        //r = ScriptEngine::RegisterScriptFunction("Slider@ CreateSlider()", asFUNCTION(Slider::CreateSlider)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetTexture(string texture)", asMETHOD(Slider, SetTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(Slider, SetColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetHandleTexture(string texture)", asMETHOD(Slider, SetHandleTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetHandleColor(Color color)", asMETHOD(Slider, SetHandleColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetHandleSize(vec2 size)", asMETHOD(Slider, SetHandleSize)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetCurrentValue()", asMETHOD(Slider, GetCurrentValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCurrentValue(float current)", asMETHOD(Slider, SetCurrentValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetMinValue()", asMETHOD(Slider, GetMinValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetMinValue(float min)", asMETHOD(Slider, SetMinValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetMaxValue()", asMETHOD(Slider, GetMaxValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetMaxValue(float max)", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetPercentValue()", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetPercentValue(float percent)", asMETHOD(Slider, SetMaxValue)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetStepSize()", asMETHOD(Slider, GetStepSize)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetStepSize(float stepSize)", asMETHOD(Slider, SetStepSize)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptFunctionDef("void SliderEventCallback(Slider@ slider)"); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnValueChange(SliderEventCallback@ cb)", asMETHOD(Slider, SetOnValueChangedCallback)); assert(r >= 0);
     }
 
     f32 Slider::GetMinValue() const
@@ -204,11 +204,11 @@ namespace UIScripting
         UIUtils::ExecuteEvent(this, slider->onValueChanged);
     }
 
-    void Slider::SetOnValueChangedCallback(asIScriptFunction* callback)
-    {
-        UIComponent::Slider* slider = &ServiceLocator::GetUIRegistry()->get<UIComponent::Slider>(_entityId);
-        slider->onValueChanged = callback;
-    }
+    //void Slider::SetOnValueChangedCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::Slider* slider = &ServiceLocator::GetUIRegistry()->get<UIComponent::Slider>(_entityId);
+    //    slider->onValueChanged = callback;
+    //}
 
     void Slider::UpdateHandlePosition()
     {

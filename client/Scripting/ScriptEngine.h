@@ -1,66 +1,36 @@
 #pragma once
 #include <NovusTypes.h>
-#include "angelscript.h"
-#include <assert.h>
+#include <Utils/ConcurrentQueue.h>
+#include <enkiTS/TaskScheduler.h>
 
+struct Compiler;
+struct Module;
+
+struct ScriptExecutionInfo
+{
+    ScriptExecutionInfo() { }
+    ScriptExecutionInfo(Module* inModule, u32 inFnHash) : module(inModule), fnHash(inFnHash) { }
+
+    Module* module = nullptr;
+    u32 fnHash = 0;
+};
+
+class Interpreter;
 class ScriptEngine
 {
 public:
-    static void Initialize();
+    bool Init(Compiler* cc);
+    void Execute();
 
-    // GetScriptEngine will initialize the thread local engine object if needed
-    static asIScriptEngine* GetScriptEngine();
-    static asIScriptContext* GetScriptContext();
-
-    static i32 SetNamespace(std::string name);
-    static i32 ResetNamespace();
-    static i32 RegisterScriptClass(std::string name, i32 byteSize, u32 flags);
-    static i32 RegisterScriptClassConstructor(std::string declaration, const asSFuncPtr& functionPointer);
-    static i32 RegisterScriptClassFunction(std::string declaration, const asSFuncPtr& functionPointer, asECallConvTypes callConvType = asECallConvTypes::asCALL_THISCALL, void* auxiliary = 0, i32 compositeOffset = 0, bool isCompositeIndirect = false);
-    static i32 RegisterScriptClassProperty(std::string declaration, i32 byteOffset, i32 compositeOffset = 0, bool isCompositeIndirect = false);
-    static i32 RegisterScriptFunction(std::string declaration, const asSFuncPtr& functionPointer, void* auxiliary = 0);
-    static i32 RegisterScriptFunctionDef(std::string declaration);
-    
-    template <class Base, class Derived>
-    static i32 RegisterScriptInheritance(std::string baseClass)
-    {
-        i32 r = 0;
-
-        std::string declarationB = _scriptCurrentObjectName + "@ opCast()";
-        std::string declarationD = baseClass + "@ opImplCast()";
-
-        r = _scriptEngine->RegisterObjectMethod(baseClass.c_str(), declarationB.c_str(), asFUNCTION((refCast<Base, Derived>)), asCALL_CDECL_OBJLAST); assert(r >= 0);
-        r = _scriptEngine->RegisterObjectMethod(_scriptCurrentObjectName.c_str(), declarationD.c_str(), asFUNCTION((refCast<Derived, Base>)), asCALL_CDECL_OBJLAST); assert(r >= 0);
-
-        // Also register the const overloads so the cast works also when the handle is read only 
-        declarationB = "const " + _scriptCurrentObjectName + "@ opCast() const";
-        declarationD = "const " + baseClass + "@ opImplCast() const";
-
-        r = _scriptEngine->RegisterObjectMethod(baseClass.c_str(), declarationB.c_str(), asFUNCTION((refCast<Base, Derived>)), asCALL_CDECL_OBJLAST); assert(r >= 0);
-        r = _scriptEngine->RegisterObjectMethod(_scriptCurrentObjectName.c_str(), declarationD.c_str(), asFUNCTION((refCast<Derived, Base>)), asCALL_CDECL_OBJLAST); assert(r >= 0);
-
-        Base::RegisterBase<Derived>();
-        return r;
-    }
-
-    template <class A, class B>
-    static B* refCast(A* a)
-    {
-        // If the handle already is a null handle, then just return the null handle
-        if (!a) return 0;
-
-        // Now try to dynamically cast the pointer to the wanted type
-        return dynamic_cast<B*>(a);
-    }
-
-     
-    static void RegisterFunctions();
-    static void MessageCallback(const asSMessageInfo* msg, void* param);
-    static void Print(std::string& message);
+    void AddExecution(const ScriptExecutionInfo& executionInfo);
 
 private:
-private:
-    static thread_local asIScriptEngine* _scriptEngine;
-    static thread_local asIScriptContext* _scriptContext;
-    static thread_local std::string _scriptCurrentObjectName;
+    bool _isInitialized = false;
+    bool _canExecute = false;
+    std::atomic<i32> _numTasks = 0;
+
+    enki::TaskScheduler _taskScheduler;
+    std::vector<Interpreter*> _interpreters;
+    std::vector<ScriptExecutionInfo> _executionInfosBulk;
+    moodycamel::ConcurrentQueue<ScriptExecutionInfo> _executionInfos;
 };

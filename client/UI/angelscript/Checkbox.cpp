@@ -1,6 +1,6 @@
 #include "Checkbox.h"
 #include "Panel.h"
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 #include "../../Utils/ServiceLocator.h"
 
 #include <GLFW/glfw3.h>
@@ -35,46 +35,46 @@ namespace UIScripting
 
     void Checkbox::RegisterType()
     {
-        i32 r = ScriptEngine::RegisterScriptClass("Checkbox", 0, asOBJ_REF | asOBJ_NOCOUNT);
-        r = ScriptEngine::RegisterScriptInheritance<BaseElement, Checkbox>("BaseElement");
-        r = ScriptEngine::RegisterScriptFunction("Checkbox@ CreateCheckbox()", asFUNCTION(Checkbox::CreateCheckbox)); assert(r >= 0);
-
-        // Checkbox Functions
-        r = ScriptEngine::RegisterScriptFunctionDef("void CheckboxEventCallback(Checkbox@ checkbox)"); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("bool IsChecked()", asMETHOD(Checkbox, IsChecked)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetChecked(bool checked)", asMETHOD(Checkbox, SetChecked)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnChecked(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnCheckedCallback)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnUnchecked(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnUncheckedCallback)); assert(r >= 0);
-
-        // TransformEvents Functions
-        r = ScriptEngine::RegisterScriptClassFunction("bool IsClickable()", asMETHOD(Checkbox, IsClickable)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("bool IsFocusable()", asMETHOD(Checkbox, IsFocusable)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnClick(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnClickCallback)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnFocusGained(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnFocusGainedCallback)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnFocusLost(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnFocusLostCallback)); assert(r >= 0);
-
-        // Rendering Functions
-        r = ScriptEngine::RegisterScriptClassFunction("string GetTexture()", asMETHOD(Checkbox, GetTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetTexture(string Texture)", asMETHOD(Checkbox, SetTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("Color GetColor()", asMETHOD(Checkbox, GetColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(Checkbox, SetColor)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("string GetBorder()", asMETHOD(Checkbox, GetBorder)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetBorder(string Texture)", asMETHOD(Checkbox, SetBorder)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetBorderSize(uint topSize, uint rightSize, uint bottomSize, uint leftSize)", asMETHOD(Checkbox, SetBorderSize)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetBorderInset(uint topBorderInset, uint rightBorderInset, uint bottomBorderInset, uint leftBorderInset)", asMETHOD(Checkbox, SetBorderInset)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetSlicing(uint topOffset, uint rightOffset, uint bottomOffset, uint leftOffset)", asMETHOD(Checkbox, SetSlicing)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("string GetCheckTexture()", asMETHOD(Checkbox, GetCheckTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckTexture(string Texture)", asMETHOD(Checkbox, SetCheckTexture)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("Color GetCheckColor()", asMETHOD(Checkbox, GetCheckColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckColor(Color color)", asMETHOD(Checkbox, SetCheckColor)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("string GetCheckBorder()", asMETHOD(Checkbox, GetCheckBorder)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorder(string Texture)", asMETHOD(Checkbox, SetCheckBorder)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorderSize(uint topSize, uint rightSize, uint bottomSize, uint leftSize)", asMETHOD(Checkbox, SetCheckBorderSize)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorderInset(uint topBorderInset, uint rightBorderInset, uint bottomBorderInset, uint leftBorderInset)", asMETHOD(Checkbox, SetCheckBorderInset)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetCheckSlicing(uint topOffset, uint rightOffset, uint bottomOffset, uint leftOffset)", asMETHOD(Checkbox, SetCheckSlicing)); assert(r >= 0);
+        //i32 r = ScriptEngine::RegisterScriptClass("Checkbox", 0, asOBJ_REF | asOBJ_NOCOUNT);
+        //r = ScriptEngine::RegisterScriptInheritance<BaseElement, Checkbox>("BaseElement");
+        //r = ScriptEngine::RegisterScriptFunction("Checkbox@ CreateCheckbox()", asFUNCTION(Checkbox::CreateCheckbox)); assert(r >= 0);
+        //
+        //// Checkbox Functions
+        //r = ScriptEngine::RegisterScriptFunctionDef("void CheckboxEventCallback(Checkbox@ checkbox)"); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("bool IsChecked()", asMETHOD(Checkbox, IsChecked)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetChecked(bool checked)", asMETHOD(Checkbox, SetChecked)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnChecked(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnCheckedCallback)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnUnchecked(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnUncheckedCallback)); assert(r >= 0);
+        //
+        //// TransformEvents Functions
+        //r = ScriptEngine::RegisterScriptClassFunction("bool IsClickable()", asMETHOD(Checkbox, IsClickable)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("bool IsFocusable()", asMETHOD(Checkbox, IsFocusable)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnClick(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnClickCallback)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnFocusGained(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnFocusGainedCallback)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnFocusLost(CheckboxEventCallback@ cb)", asMETHOD(Checkbox, SetOnFocusLostCallback)); assert(r >= 0);
+        //
+        //// Rendering Functions
+        //r = ScriptEngine::RegisterScriptClassFunction("string GetTexture()", asMETHOD(Checkbox, GetTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetTexture(string Texture)", asMETHOD(Checkbox, SetTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("Color GetColor()", asMETHOD(Checkbox, GetColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(Checkbox, SetColor)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("string GetBorder()", asMETHOD(Checkbox, GetBorder)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetBorder(string Texture)", asMETHOD(Checkbox, SetBorder)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetBorderSize(uint topSize, uint rightSize, uint bottomSize, uint leftSize)", asMETHOD(Checkbox, SetBorderSize)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetBorderInset(uint topBorderInset, uint rightBorderInset, uint bottomBorderInset, uint leftBorderInset)", asMETHOD(Checkbox, SetBorderInset)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetSlicing(uint topOffset, uint rightOffset, uint bottomOffset, uint leftOffset)", asMETHOD(Checkbox, SetSlicing)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("string GetCheckTexture()", asMETHOD(Checkbox, GetCheckTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckTexture(string Texture)", asMETHOD(Checkbox, SetCheckTexture)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("Color GetCheckColor()", asMETHOD(Checkbox, GetCheckColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckColor(Color color)", asMETHOD(Checkbox, SetCheckColor)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("string GetCheckBorder()", asMETHOD(Checkbox, GetCheckBorder)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorder(string Texture)", asMETHOD(Checkbox, SetCheckBorder)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorderSize(uint topSize, uint rightSize, uint bottomSize, uint leftSize)", asMETHOD(Checkbox, SetCheckBorderSize)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckBorderInset(uint topBorderInset, uint rightBorderInset, uint bottomBorderInset, uint leftBorderInset)", asMETHOD(Checkbox, SetCheckBorderInset)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetCheckSlicing(uint topOffset, uint rightOffset, uint bottomOffset, uint leftOffset)", asMETHOD(Checkbox, SetCheckSlicing)); assert(r >= 0);
     }
 
     const bool Checkbox::IsClickable() const
@@ -89,24 +89,24 @@ namespace UIScripting
         return events->IsFocusable();
     }
 
-    void Checkbox::SetOnClickCallback(asIScriptFunction* callback)
-    {
-        UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
-        events->onClickCallback = callback;
-        events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_CLICKABLE);
-    }
-    void Checkbox::SetOnFocusGainedCallback(asIScriptFunction* callback)
-    {
-        UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
-        events->onFocusGainedCallback = callback;
-        events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
-    }
-    void Checkbox::SetOnFocusLostCallback(asIScriptFunction* callback)
-    {
-        UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
-        events->onFocusLostCallback = callback;
-        events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
-    }
+    //void Checkbox::SetOnClickCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
+    //    events->onClickCallback = callback;
+    //    events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_CLICKABLE);
+    //}
+    //void Checkbox::SetOnFocusGainedCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
+    //    events->onFocusGainedCallback = callback;
+    //    events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
+    //}
+    //void Checkbox::SetOnFocusLostCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
+    //    events->onFocusLostCallback = callback;
+    //    events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
+    //}
 
     const std::string& Checkbox::GetTexture() const
     {
@@ -220,16 +220,16 @@ namespace UIScripting
         image->style.slicingOffset.left = leftOffset;
     }
 
-    void Checkbox::SetOnCheckedCallback(asIScriptFunction* callback)
-    {
-        UIComponent::Checkbox* checkBox = &ServiceLocator::GetUIRegistry()->get<UIComponent::Checkbox>(_entityId);
-        checkBox->onChecked = callback;
-    }
-    void Checkbox::SetOnUncheckedCallback(asIScriptFunction* callback)
-    {
-        UIComponent::Checkbox* checkBox = &ServiceLocator::GetUIRegistry()->get<UIComponent::Checkbox>(_entityId);
-        checkBox->onUnchecked = callback;
-    }
+    //void Checkbox::SetOnCheckedCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::Checkbox* checkBox = &ServiceLocator::GetUIRegistry()->get<UIComponent::Checkbox>(_entityId);
+    //    checkBox->onChecked = callback;
+    //}
+    //void Checkbox::SetOnUncheckedCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::Checkbox* checkBox = &ServiceLocator::GetUIRegistry()->get<UIComponent::Checkbox>(_entityId);
+    //    checkBox->onUnchecked = callback;
+    //}
 
     const bool Checkbox::IsChecked() const
     {

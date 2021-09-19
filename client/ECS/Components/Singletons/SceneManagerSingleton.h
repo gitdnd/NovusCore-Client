@@ -7,14 +7,14 @@
 
 struct asSceneCallback
 {
-    asSceneCallback(u32 inCallbackNameHashed, asIScriptFunction* inCallback)
+    asSceneCallback(u32 inCallbackNameHashed, const ScriptExecutionInfo& inCallback)
     {
         callbackNameHashed = inCallbackNameHashed;
         callback = inCallback;
     }
 
     u32 callbackNameHashed;
-    asIScriptFunction* callback;
+    ScriptExecutionInfo callback;
 };
 
 struct SceneManagerSingleton

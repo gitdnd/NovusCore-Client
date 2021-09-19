@@ -26,7 +26,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 	glfw ${GLFW_LIBRARIES}
 	Entt::Entt
 	taskflow::taskflow
-	angelscript::angelscript
+	scripting::scripting
 	imgui::imgui
 )
 

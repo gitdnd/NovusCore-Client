@@ -1,5 +1,5 @@
 #include "Inputfield.h"
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 #include "../../Utils/ServiceLocator.h"
 
 #include "../ECS/Components/Singletons/UIDataSingleton.h"
@@ -31,37 +31,37 @@ namespace UIScripting
 
     void InputField::RegisterType()
     {
-        i32 r = ScriptEngine::RegisterScriptClass("InputField", 0, asOBJ_REF | asOBJ_NOCOUNT);
-        r = ScriptEngine::RegisterScriptInheritance<BaseElement, InputField>("BaseElement");
-        r = ScriptEngine::RegisterScriptFunction("InputField@ CreateInputField()", asFUNCTION(InputField::CreateInputField)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptFunctionDef("void InputFieldEventCallback(InputField@ inputfield)"); assert(r >= 0);
-
-        // InputField Functions
-        r = ScriptEngine::RegisterScriptClassFunction("void OnSubmit(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnSubmitCallback)); assert(r >= 0);
-
-        // TransformEvents Functions
-        r = ScriptEngine::RegisterScriptClassFunction("bool IsFocusable()", asMETHOD(InputField, IsFocusable)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetFocusable(bool focusable)", asMETHOD(InputField, SetFocusable)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnFocusGained(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnFocusGainedCallback)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void OnFocusLost(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnFocusLostCallback)); assert(r >= 0);
-
-        //Text Functions
-        r = ScriptEngine::RegisterScriptClassFunction("string GetText()", asMETHOD(InputField, GetText)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetText(string text, bool updateWriteHead = true)", asMETHOD(InputField, SetText)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("Color GetColor()", asMETHOD(InputField, GetColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(InputField, SetColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("Color GetOutlineColor()", asMETHOD(InputField, GetOutlineColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetOutlineColor(Color color)", asMETHOD(InputField, SetOutlineColor)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("float GetOutlineWidth()", asMETHOD(InputField, GetOutlineWidth)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetOutlineWidth(float width)", asMETHOD(InputField, SetOutlineWidth)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetFont(string fontPath, float fontSize)", asMETHOD(InputField, SetFont)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("bool IsMultiline()", asMETHOD(InputField, IsMultiline)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetMultiline(bool multiline)", asMETHOD(InputField, SetMultiline)); assert(r >= 0);
-
-        r = ScriptEngine::RegisterScriptClassFunction("void SetHorizontalAlignment(uint8 alignment)", asMETHOD(InputField, SetHorizontalAlignment)); assert(r >= 0);
-        r = ScriptEngine::RegisterScriptClassFunction("void SetVerticalAlignment(uint8 alignment)", asMETHOD(InputField, SetVerticalAlignment)); assert(r >= 0);
+        //i32 r = ScriptEngine::RegisterScriptClass("InputField", 0, asOBJ_REF | asOBJ_NOCOUNT);
+        //r = ScriptEngine::RegisterScriptInheritance<BaseElement, InputField>("BaseElement");
+        //r = ScriptEngine::RegisterScriptFunction("InputField@ CreateInputField()", asFUNCTION(InputField::CreateInputField)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptFunctionDef("void InputFieldEventCallback(InputField@ inputfield)"); assert(r >= 0);
+        //
+        //// InputField Functions
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnSubmit(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnSubmitCallback)); assert(r >= 0);
+        //
+        //// TransformEvents Functions
+        //r = ScriptEngine::RegisterScriptClassFunction("bool IsFocusable()", asMETHOD(InputField, IsFocusable)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetFocusable(bool focusable)", asMETHOD(InputField, SetFocusable)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnFocusGained(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnFocusGainedCallback)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void OnFocusLost(InputFieldEventCallback@ cb)", asMETHOD(InputField, SetOnFocusLostCallback)); assert(r >= 0);
+        //
+        ////Text Functions
+        //r = ScriptEngine::RegisterScriptClassFunction("string GetText()", asMETHOD(InputField, GetText)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetText(string text, bool updateWriteHead = true)", asMETHOD(InputField, SetText)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("Color GetColor()", asMETHOD(InputField, GetColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetColor(Color color)", asMETHOD(InputField, SetColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("Color GetOutlineColor()", asMETHOD(InputField, GetOutlineColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetOutlineColor(Color color)", asMETHOD(InputField, SetOutlineColor)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("float GetOutlineWidth()", asMETHOD(InputField, GetOutlineWidth)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetOutlineWidth(float width)", asMETHOD(InputField, SetOutlineWidth)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetFont(string fontPath, float fontSize)", asMETHOD(InputField, SetFont)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("bool IsMultiline()", asMETHOD(InputField, IsMultiline)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetMultiline(bool multiline)", asMETHOD(InputField, SetMultiline)); assert(r >= 0);
+        //
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetHorizontalAlignment(uint8 alignment)", asMETHOD(InputField, SetHorizontalAlignment)); assert(r >= 0);
+        //r = ScriptEngine::RegisterScriptClassFunction("void SetVerticalAlignment(uint8 alignment)", asMETHOD(InputField, SetVerticalAlignment)); assert(r >= 0);
     }
 
     void InputField::HandleKeyInput(i32 key)
@@ -162,11 +162,11 @@ namespace UIScripting
         inputField->writeHeadIndex = Math::Min(position, text->text.length());
     }
 
-    void InputField::SetOnSubmitCallback(asIScriptFunction* callback)
-    {
-        UIComponent::InputField* inputField = &ServiceLocator::GetUIRegistry()->get<UIComponent::InputField>(_entityId);
-        inputField->onSubmitCallback = callback;
-    }
+    //void InputField::SetOnSubmitCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::InputField* inputField = &ServiceLocator::GetUIRegistry()->get<UIComponent::InputField>(_entityId);
+    //    inputField->onSubmitCallback = callback;
+    //}
 
     const bool InputField::IsFocusable() const
     {
@@ -183,18 +183,18 @@ namespace UIScripting
             events->UnsetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
     }
 
-    void InputField::SetOnFocusGainedCallback(asIScriptFunction* callback)
-    {
-        UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
-        events->onFocusGainedCallback = callback;
-        events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
-    }
-    void InputField::SetOnFocusLostCallback(asIScriptFunction* callback)
-    {
-        UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
-        events->onFocusLostCallback = callback;
-        events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
-    }
+    //void InputField::SetOnFocusGainedCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
+    //    events->onFocusGainedCallback = callback;
+    //    events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
+    //}
+    //void InputField::SetOnFocusLostCallback(asIScriptFunction* callback)
+    //{
+    //    UIComponent::TransformEvents* events = &ServiceLocator::GetUIRegistry()->get<UIComponent::TransformEvents>(_entityId);
+    //    events->onFocusLostCallback = callback;
+    //    events->SetFlag(UI::TransformEventsFlags::UIEVENTS_FLAG_FOCUSABLE);
+    //}
 
     const std::string InputField::GetText() const
     {

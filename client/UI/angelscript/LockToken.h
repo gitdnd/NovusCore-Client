@@ -3,7 +3,7 @@
 #include <entity/entity.hpp>
 #include <shared_mutex>
 
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 #include <Utils/DebugHandler.h>
 
 namespace UIScripting
@@ -38,11 +38,11 @@ namespace UIScripting
         // Used for Angelscript
         static void RegisterType()
         {
-            i32 r = ScriptEngine::RegisterScriptClass("LockToken", 0, asOBJ_REF | asOBJ_NOCOUNT);
-            assert(r >= 0);
-            {
-                r = ScriptEngine::RegisterScriptClassFunction("void Unlock()", asMETHOD(LockToken, Unlock)); assert(r >= 0);
-            }
+            //i32 r = ScriptEngine::RegisterScriptClass("LockToken", 0, asOBJ_REF | asOBJ_NOCOUNT);
+            //assert(r >= 0);
+            //{
+                //r = ScriptEngine::RegisterScriptClassFunction("void Unlock()", asMETHOD(LockToken, Unlock)); assert(r >= 0);
+            //}
         }
 
         void Unlock()

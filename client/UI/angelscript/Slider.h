@@ -42,7 +42,7 @@ namespace UIScripting
 
         void OnClicked(hvec2 mousePosition);
 
-        void SetOnValueChangedCallback(asIScriptFunction* callback);
+        //void SetOnValueChangedCallback(asIScriptFunction* callback);
 
         void UpdateHandlePosition();
 

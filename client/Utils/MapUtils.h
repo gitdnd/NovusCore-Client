@@ -238,6 +238,24 @@ namespace Terrain
             //    128   129   130   131   132   133   134   135
             // 136   137   138   139   140   141   142   143   144
 
+            /*
+                Triangle 1:
+                X = TL
+                Y = TR
+                Z = C
+
+                Triangle 2:
+                X = TL
+                Y = C
+                Z = BL
+
+                Triangle 3:
+                X = BL
+                Y = C
+                Z = C
+            
+            */
+
             // Using patchPos we need to build a square looking something like this depending on what cell we're on
             // TL     TR
             //     C

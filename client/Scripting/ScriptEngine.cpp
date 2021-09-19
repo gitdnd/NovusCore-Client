@@ -1,136 +1,124 @@
 #include "ScriptEngine.h"
-#include <Utils/DebugHandler.h>
+#include <Nai/Compiler/Module.h>
+#include <Nai/Compiler/Compiler.h>
+#include <Nai/Compiler/Backend/Bytecode/Interpreter.h>
 
-// Types to register
-#include "Addons/scriptarray/scriptarray.h"
-#include "Addons/scriptstdstring/scriptstdstring.h"
-#include "Classes/Math/Math.h"
-#include "Classes/Math/ColorUtil.h"
-#include "Classes/DataStorage/DataStorageUtils.h"
-#include "Classes/SceneManager/SceneManagerUtils.h"
-#include "Classes/Player.h"
+#include "CVar/CVarSystem.h"
 
-#include "../UI/angelscript/LockToken.h"
-#include "../UI/angelscript/UITypeRegister.h"
+#include <execution>
 
-#include <entity/entity.hpp>
+AutoCVar_Int CVAR_ScriptEngineExecutionThreads("scriptEngine.executionThreads", "number of threads used to execute scripts", 4);
+AutoCVar_Int CVAR_ScriptEngineExecutionThreadsMin("scriptEngine.executionThreadsMin", "number of minimum threads used to execute scripts", 1);
+AutoCVar_Int CVAR_ScriptEngineExecutionThreadsMax("scriptEngine.executionThreadsMax", "number of maximum threads used to execute scripts", 16);
+AutoCVar_Int CVAR_ScriptEngineStackSize("scriptEngine.stackSizeMB", "stack size for each thread when executing scripts", 1);
+AutoCVar_Int CVAR_ScriptEngineHeapSize("scriptEngine.heapSizeMB", "heap size for each thread when executing scripts", 4);
 
-
-thread_local asIScriptEngine* ScriptEngine::_scriptEngine = nullptr;
-thread_local asIScriptContext* ScriptEngine::_scriptContext = nullptr;
-thread_local std::string ScriptEngine::_scriptCurrentObjectName = "";
-
-void ScriptEngine::Initialize()
+bool ScriptEngine::Init(Compiler* cc)
 {
-    if (!_scriptEngine)
+    _isInitialized = false;
+
+    for (u32 i = 0; i < _interpreters.size(); i++)
     {
-        _scriptEngine = asCreateScriptEngine();
-        _scriptEngine->SetEngineProperty(asEP_DISALLOW_GLOBAL_VARS, true);
-        RegisterFunctions();
+        Interpreter* interpreter = _interpreters[i];
+        delete interpreter;
     }
 
-    if (!_scriptContext)
+    _interpreters.clear();
+
+    i32 numScriptThreads = CVAR_ScriptEngineExecutionThreads.Get();
+    i32 numMinScriptThreads = CVAR_ScriptEngineExecutionThreadsMin.Get();
+    i32 numMaxScriptThreads = CVAR_ScriptEngineExecutionThreadsMax.Get();
+
+    if (numScriptThreads < numMinScriptThreads)
     {
-        _scriptContext = _scriptEngine->CreateContext();
+        DebugHandler::PrintError("ScriptEngine : Failed to initialize, numInterpreters(%i) is less than the specified minimum %i", numScriptThreads, numMinScriptThreads);
+        _isInitialized = false;
+        return false;
     }
-}
-
-asIScriptEngine* ScriptEngine::GetScriptEngine()
-{
-    Initialize();
-    return _scriptEngine;
-}
-
-asIScriptContext* ScriptEngine::GetScriptContext()
-{
-    Initialize();
-    return _scriptContext;
-}
-
-i32 ScriptEngine::SetNamespace(std::string name)
-{
-    return _scriptEngine->SetDefaultNamespace(name.c_str());
-}
-
-i32 ScriptEngine::ResetNamespace()
-{
-    return _scriptEngine->SetDefaultNamespace("");
-}
-
-i32 ScriptEngine::RegisterScriptClass(std::string name, i32 byteSize, u32 flags)
-{
-    _scriptCurrentObjectName = name;
-    return _scriptEngine->RegisterObjectType(name.c_str(), byteSize, flags);
-}
-
-i32 ScriptEngine::RegisterScriptClassConstructor(std::string declaration, const asSFuncPtr& functionPointer)
-{
-    return _scriptEngine->RegisterObjectBehaviour(_scriptCurrentObjectName.c_str(), asBEHAVE_CONSTRUCT, declaration.c_str(), functionPointer, asCALL_CDECL_OBJLAST);
-}
-
-i32 ScriptEngine::RegisterScriptClassFunction(std::string declaration, const asSFuncPtr& functionPointer, asECallConvTypes callConvType, void* auxiliary, i32 compositeOffset, bool isCompositeIndirect)
-{
-    return _scriptEngine->RegisterObjectMethod(_scriptCurrentObjectName.c_str(), declaration.c_str(), functionPointer, callConvType, auxiliary, compositeOffset, isCompositeIndirect);
-}
-
-i32 ScriptEngine::RegisterScriptClassProperty(std::string declaration, i32 byteOffset, i32 compositeOffset, bool isCompositeIndirect)
-{
-    return _scriptEngine->RegisterObjectProperty(_scriptCurrentObjectName.c_str(), declaration.c_str(), byteOffset, compositeOffset, isCompositeIndirect);
-}
-
-i32 ScriptEngine::RegisterScriptFunction(std::string declaration, const asSFuncPtr& functionPointer, void* auxiliary)
-{
-    return _scriptEngine->RegisterGlobalFunction(declaration.c_str(), functionPointer, asCALL_CDECL, auxiliary);
-}
-
-i32 ScriptEngine::RegisterScriptFunctionDef(std::string declaration)
-{
-    return _scriptEngine->RegisterFuncdef(declaration.c_str());
-}
-
-void ScriptEngine::RegisterFunctions()
-{
-    // Defaults
-    int result;
-    result = _scriptEngine->SetMessageCallback(asFUNCTION(ScriptEngine::MessageCallback), 0, asCALL_CDECL);
-    assert(result >= 0);
-    RegisterScriptArray(_scriptEngine, true);
-    RegisterStdString(_scriptEngine);
-    RegisterStdStringUtils(_scriptEngine);
-
-    // Entity type
-    RegisterScriptClass("Entity", sizeof(entt::entity), asOBJ_VALUE | asOBJ_POD | asOBJ_APP_PRIMITIVE);
-
-    // NovusCore Types
-    ASMath::RegisterNamespace();
-    ColorUtil::RegisterType();
-    ASDataStorageUtils::RegisterNamespace();
-    ASSceneManagerUtils::RegisterNamespace();
-
-    Player::RegisterType();
-    UIScripting::LockToken::RegisterType();
-    UI::RegisterTypes();
-
-    ScriptEngine::RegisterScriptFunction("void Print(string msg)", asFUNCTION(ScriptEngine::Print));
-}
-
-void ScriptEngine::MessageCallback(const asSMessageInfo* msg, void* param)
-{
-    if (msg->type == asMSGTYPE_ERROR)
+    else if (numScriptThreads > numMaxScriptThreads)
     {
-        DebugHandler::PrintError("[Script]: %s (%d, %d) : %s\n", msg->section, msg->row, msg->col, msg->message);
+        DebugHandler::PrintError("ScriptEngine : Failed to initialize, numInterpreters(%i) is greater than the specified maximum %i", numScriptThreads, numMaxScriptThreads);
+        _isInitialized = false;
+        return false;
     }
-    else if (msg->type == asMSGTYPE_WARNING)
+
+    _interpreters.resize(numScriptThreads);
+    _taskScheduler.Initialize(numScriptThreads);
+
+    i32 stackSize = CVAR_ScriptEngineStackSize.Get() * 1024 * 1024;
+    i32 heapSize = CVAR_ScriptEngineHeapSize.Get() * 1024 * 1024;
+
+    if (stackSize <= 0)
     {
-        DebugHandler::PrintWarning("[Script]: %s (%d, %d) : %s\n", msg->section, msg->row, msg->col, msg->message);
+        DebugHandler::PrintError("ScriptEngine : Failed to initialize, stackSize(%i) is less than the minimum value 1 MB", stackSize);
+        _isInitialized = false;
+        return false;
     }
-    else if (msg->type == asMSGTYPE_INFORMATION)
+
+    if (heapSize <= 0)
     {
-        DebugHandler::Print("[Script]: %s (%d, %d) : %s\n", msg->section, msg->row, msg->col, msg->message);
+        DebugHandler::PrintError("ScriptEngine : Failed to initialize, heapSize(%i) is less than the minimum value 1 MB", heapSize);
+        _isInitialized = false;
+        return false;
+    }
+
+    for (i32 i = 0; i < numScriptThreads; i++)
+    {
+        // Setup Interpret
+        Interpreter* interpreter = new Interpreter();
+        interpreter->Init(cc, stackSize, heapSize);
+
+        _interpreters[i] = interpreter;
+    }
+
+    // Empty Previous ExecutionInfo Queue
+    {
+        _numTasks = 0;
+
+        ScriptExecutionInfo scriptExecutionInfo;
+        while (_executionInfos.try_dequeue(scriptExecutionInfo)) {}
+    }
+
+    _isInitialized = true;
+    return true;
+}
+
+void ScriptEngine::Execute()
+{
+    i32 numTasks = _numTasks;
+
+    if (numTasks)
+    {
+        _executionInfosBulk.resize(numTasks);
+        if (_executionInfos.try_dequeue_bulk(_executionInfosBulk.begin(), numTasks))
+        {
+            enki::TaskSet task(numTasks, [this](enki::TaskSetPartition range, uint32_t threadNum)
+            {
+                Interpreter* interpreter = _interpreters[threadNum];
+
+                for (u32 i = range.start; i < range.end; i++)
+                {
+                    ScriptExecutionInfo& scriptExecutionInfo = _executionInfosBulk[i];
+                    interpreter->Prepare();
+                    interpreter->Interpret(scriptExecutionInfo.module, scriptExecutionInfo.fnHash);
+                }
+            });
+
+            _taskScheduler.AddTaskSetToPipe(&task);
+            _taskScheduler.WaitforTask(&task);
+
+            _numTasks -= numTasks;
+
+            DebugHandler::PrintSuccess("ScriptEngine Ran %u Tasks", numTasks);
+        }
     }
 }
 
-void ScriptEngine::Print(std::string& message)
+void ScriptEngine::AddExecution(const ScriptExecutionInfo& executionInfo)
 {
-    DebugHandler::Print("[Script]: %s", message.c_str());
+    if (!_isInitialized)
+        return;
+
+    _executionInfos.enqueue(executionInfo);
+    _numTasks++;
 }

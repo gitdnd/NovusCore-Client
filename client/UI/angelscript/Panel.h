@@ -19,13 +19,13 @@ namespace UIScripting
         const bool IsFocusable() const;
         void SetFocusable(bool focusable);
         
-        void SetOnClickCallback(asIScriptFunction* callback);
+        //void SetOnClickCallback(asIScriptFunction* callback);
         
-        void SetOnDragStartedCallback(asIScriptFunction* callback);
-        void SetOnDragEndedCallback(asIScriptFunction* callback);
-
-        void SetOnFocusGainedCallback(asIScriptFunction* callback);
-        void SetOnFocusLostCallback(asIScriptFunction* callback);
+        //void SetOnDragStartedCallback(asIScriptFunction* callback);
+        //void SetOnDragEndedCallback(asIScriptFunction* callback);
+        
+        //void SetOnFocusGainedCallback(asIScriptFunction* callback);
+        //void SetOnFocusLostCallback(asIScriptFunction* callback);
 
         // Renderable Functions
         const std::string& GetTexture() const;

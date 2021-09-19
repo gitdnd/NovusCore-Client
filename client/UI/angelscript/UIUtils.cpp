@@ -1,7 +1,6 @@
 #include "UIUtils.h"
 
-#include <angelscript.h>
-#include "../../Scripting/ScriptEngine.h"
+//#include "../../Scripting/ScriptEngine.h"
 #include "../../Utils/ServiceLocator.h"
 
 #include <entity/registry.hpp>
@@ -12,16 +11,16 @@ namespace UIUtils
 {
     void RegisterNamespace()
     {
-        i32 r = ScriptEngine::SetNamespace("UI"); assert(r >= 0);
-        {
-            r = ScriptEngine::RegisterScriptFunction("LockToken@ GetLock(uint8 state)", asFUNCTION(GetLock)); assert(r >= 0);
-            r = ScriptEngine::RegisterScriptFunction("BaseElement@ GetElement(Entity entityId)", asFUNCTION(GetElement)); assert(r >= 0);
-
-            r = ScriptEngine::RegisterScriptFunction("vec2 GetResolution()", asFUNCTION(GetResolution)); assert(r >= 0);
-            r = ScriptEngine::RegisterScriptFunction("float GetWidth()", asFUNCTION(GetWidth)); assert(r >= 0);
-            r = ScriptEngine::RegisterScriptFunction("float GetHeight()", asFUNCTION(GetHeight)); assert(r >= 0);
-        }
-        r = ScriptEngine::ResetNamespace();
+        //i32 r = ScriptEngine::SetNamespace("UI"); assert(r >= 0);
+        //{
+        //    r = ScriptEngine::RegisterScriptFunction("LockToken@ GetLock(uint8 state)", asFUNCTION(GetLock)); assert(r >= 0);
+        //    r = ScriptEngine::RegisterScriptFunction("BaseElement@ GetElement(Entity entityId)", asFUNCTION(GetElement)); assert(r >= 0);
+        //
+        //    r = ScriptEngine::RegisterScriptFunction("vec2 GetResolution()", asFUNCTION(GetResolution)); assert(r >= 0);
+        //    r = ScriptEngine::RegisterScriptFunction("float GetWidth()", asFUNCTION(GetWidth)); assert(r >= 0);
+        //    r = ScriptEngine::RegisterScriptFunction("float GetHeight()", asFUNCTION(GetHeight)); assert(r >= 0);
+        //}
+        //r = ScriptEngine::ResetNamespace();
     }
 
     UIScripting::LockToken* GetLock(UIScripting::LockState state)

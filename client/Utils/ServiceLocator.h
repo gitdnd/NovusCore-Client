@@ -12,6 +12,10 @@ class Camera;
 class CameraFreeLook;
 class CameraOrbital;
 class SceneManager;
+class ScriptLoader;
+class ScriptEngine;
+class ScriptAPI;
+
 namespace Editor
 {
     class Editor;
@@ -102,6 +106,24 @@ public:
         return _editor;
     }
     static void SetEditor(Editor::Editor* editor);
+    static ScriptEngine* GetScriptEngine()
+    {
+        assert(_scriptEngine != nullptr);
+        return _scriptEngine;
+    }
+    static void SetScriptEngine(ScriptEngine* scriptEngine);
+    static ScriptLoader* GetScriptLoader()
+    {
+        assert(_scriptLoader != nullptr);
+        return _scriptLoader;
+    }
+    static void SetScriptLoader(ScriptLoader* scriptLoader);
+    static ScriptAPI* GetScriptAPI()
+    {
+        assert(_scriptAPI != nullptr);
+        return _scriptAPI;
+    }
+    static void SetScriptAPI(ScriptAPI* scriptAPI);
 
 private:
     ServiceLocator() { }
@@ -118,4 +140,7 @@ private:
     static Renderer::Renderer* _renderer;
     static SceneManager* _sceneManager;
     static Editor::Editor* _editor;
+    static ScriptEngine* _scriptEngine;
+    static ScriptLoader* _scriptLoader;
+    static ScriptAPI* _scriptAPI;
 };

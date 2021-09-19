@@ -15,7 +15,7 @@ namespace UIScripting
 
         //Button Functions.
         const bool IsClickable() const;
-        void SetOnClickCallback(asIScriptFunction* callback);
+        //void SetOnClickCallback(asIScriptFunction* callback);
 
         //Label Functions
         const std::string GetText() const;

@@ -16,6 +16,10 @@
 #include "Editor/Editor.h"
 #include "Window/Window.h"
 
+#include "Scripting/ScriptEngine.h"
+#include "Scripting/ScriptLoader.h"
+#include "Scripting/ScriptAPI.h"
+
 // Loaders
 #include "Loaders/LoaderSystem.h"
 
@@ -57,7 +61,6 @@
 #include "UI/Utils/ElementUtils.h"
 
 // Handlers
-#include "Scripting/ScriptHandler.h"
 #include "Network/Handlers/AuthSocket/AuthHandlers.h"
 #include "Network/Handlers/GameSocket/GameHandlers.h"
 
@@ -210,15 +213,28 @@ bool EngineLoop::Init()
     // Initialize Networking
     NetworkUtils::InitNetwork(&_updateFramework.gameRegistry, _asioService);
 
-    // Setup SceneManager (Must happen before ScriptHandler::Init)
+    // Setup SceneManager (Must happen before ScriptLoader::Init)
     SceneManager* sceneManager = new SceneManager();
     ServiceLocator::SetSceneManager(sceneManager);
     sceneManager->SetAvailableScenes({ "LoginScreen"_h, "CharacterSelection"_h, "CharacterCreation"_h });
 
-    // Initialize Script Handler
-    ScriptHandler::Init(_updateFramework.gameRegistry);
+    // Initialize Script Engine / Loader
+    {
+        ScriptEngine* scriptEngine = new ScriptEngine();
+        ServiceLocator::SetScriptEngine(scriptEngine);
 
-    // Invoke LoadScene (Must happen after ScriptHandler::Init)
+        ScriptLoader* scriptLoader = new ScriptLoader();
+        ServiceLocator::SetScriptLoader(scriptLoader);
+
+        ScriptAPI* scriptAPI = new ScriptAPI();
+        ServiceLocator::SetScriptAPI(scriptAPI);
+
+        scriptEngine->Init(scriptLoader->GetCompiler());
+        scriptAPI->Init();
+        scriptLoader->Init(_updateFramework.gameRegistry);
+    }
+    
+    // Invoke LoadScene (Must happen after ScriptLoader::Init)
     sceneManager->LoadScene("LoginScreen"_h);
 
     // Initialize DayNightSystem & AreaUpdateSystem
@@ -362,7 +378,7 @@ bool EngineLoop::Update(f32 deltaTime)
         {
             UIUtils::ClearAllElements();
 
-            ScriptHandler::ReloadScripts();
+            ServiceLocator::GetScriptLoader()->Reload();
 
             // Resend "LoadScene" to trigger UI events
             SceneManager* sceneManager = ServiceLocator::GetSceneManager();
@@ -440,7 +456,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("ConnectionUpdateSystem::Update", tracy::Color::Blue2);
         ConnectionUpdateSystem::Update(gameRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
 
     /* UI SYSTEMS */
@@ -449,7 +465,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("DeleteElementsSystem::Update", tracy::Color::Gainsboro);
         UISystem::DeleteElementsSystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
 
     // UpdateRenderingSystem
@@ -457,7 +473,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("UpdateRenderingSystem::Update", tracy::Color::Gainsboro);
         UISystem::UpdateRenderingSystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     uiUpdateRenderingSystem.gather(uiDeleteElementSystem);
 
@@ -466,7 +482,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("UpdateBoundsSystem::Update", tracy::Color::Gainsboro);
         UISystem::UpdateBoundsSystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     uiUpdateRenderingSystem.gather(uiDeleteElementSystem);
 
@@ -475,7 +491,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("UpdateCullingSystem::Update", tracy::Color::Gainsboro);
         UISystem::UpdateCullingSystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     uiUpdateRenderingSystem.gather(uiDeleteElementSystem);
     
@@ -484,7 +500,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("BuildSortKeySystem::Update", tracy::Color::Gainsboro);
         UISystem::BuildSortKeySystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     uiUpdateRenderingSystem.gather(uiDeleteElementSystem);
 
@@ -493,7 +509,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("UpdateRenderingSystem::Update", tracy::Color::Gainsboro);
         UISystem::FinalCleanUpSystem::Update(uiRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     uiFinalCleanUpSystemTask.gather(uiUpdateRenderingSystem);
     uiFinalCleanUpSystemTask.gather(uiUpdateCullingSystemTask);
@@ -505,7 +521,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("MovementSystem::Update", tracy::Color::Blue2);
         MovementSystem::Update(gameRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     movementSystemTask.gather(connectionUpdateSystemTask);
 
@@ -514,7 +530,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("DayNightSystem::Update", tracy::Color::Blue2);
         DayNightSystem::Update(gameRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     dayNightSystemTask.gather(movementSystemTask);
 
@@ -523,7 +539,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("AreaUpdateSystem::Update", tracy::Color::Blue2);
         AreaUpdateSystem::Update(gameRegistry);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     areaUpdateSystemTask.gather(dayNightSystemTask);
 
@@ -532,7 +548,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("SimulateDebugCubeSystem::Update", tracy::Color::Blue2);
         SimulateDebugCubeSystem::Update(gameRegistry, _clientRenderer->GetDebugRenderer());
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     simulateDebugCubeSystemTask.gather(areaUpdateSystemTask);
 
@@ -541,7 +557,7 @@ void EngineLoop::SetupUpdateFramework()
     {
         ZoneScopedNC("RenderModelSystem::Update", tracy::Color::Blue2);
         RenderModelSystem::Update(gameRegistry, _clientRenderer);
-        gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     renderModelSystemTask.gather(simulateDebugCubeSystemTask);
 
@@ -549,8 +565,10 @@ void EngineLoop::SetupUpdateFramework()
     tf::Task scriptSingletonTask = framework.emplace([&uiRegistry, &gameRegistry]()
     {
         ZoneScopedNC("ScriptSingletonTask::Update", tracy::Color::Blue2);
-        gameRegistry.ctx<ScriptSingleton>().ExecuteTransactions();
-        gameRegistry.ctx<ScriptSingleton>().ResetCompletedSystems();
+
+        ServiceLocator::GetScriptEngine()->Execute();
+        //gameRegistry.ctx<ScriptSingleton>().ExecuteTransactions();
+        //gameRegistry.ctx<ScriptSingleton>().ResetCompletedSystems();
     });
     //scriptSingletonTask.gather(uiFinalCleanUpSystemTask);
     scriptSingletonTask.gather(renderModelSystemTask);

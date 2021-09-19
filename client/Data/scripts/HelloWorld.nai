@@ -1,0 +1,6 @@
+import Debug;
+
+fn main()
+{
+    Debug::Print("Hello World this is Nai");
+}

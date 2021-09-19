@@ -280,12 +280,10 @@ AreaUpdateLightColorData AreaUpdateSystem::GetLightColorData(NDBCSingleton& ndbc
 vec3 AreaUpdateSystem::GetColorValueFromLightIntBand(NDBC::LightIntBand* lightIntBand, u32 timeInSeconds)
 {
     const u32 TotalSecondsInOneDay = 86400;
-    vec3 color = vec3(0.0f, 0.0f, 0.0f);
+    vec3 color = UnpackUIntBGRToColor(lightIntBand->colorValues[0]);
 
     if (lightIntBand->timeValues[0] < timeInSeconds)
     {
-        color = UnpackUIntBGRToColor(lightIntBand->colorValues[0]);
-
         if (lightIntBand->entries > 1)
         {
             u32 currentIndex = 0;

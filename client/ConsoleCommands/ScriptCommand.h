@@ -22,15 +22,8 @@
     SOFTWARE.
 */
 #pragma once
-#include <Utils/Message.h>
-#include "../Utils/ServiceLocator.h"
-#include "../Utils/MapUtils.h"
-
 #include "../EngineLoop.h"
-#include "../Scripting/ScriptHandler.h"
-#include "../Rendering/ClientRenderer.h"
-#include "../Rendering/TerrainRenderer.h"
-#include "../Rendering/CameraFreelook.h"
+#include <Utils/Message.h>
 #include <vector>
 
 void ReloadCommand(EngineLoop& engineLoop, std::vector<std::string> subCommands)

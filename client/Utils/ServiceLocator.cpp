@@ -14,6 +14,9 @@ CameraOrbital* ServiceLocator::_cameraOrbital = nullptr;
 Renderer::Renderer* ServiceLocator::_renderer = nullptr;
 SceneManager* ServiceLocator::_sceneManager = nullptr;
 Editor::Editor* ServiceLocator::_editor = nullptr;
+ScriptEngine* ServiceLocator::_scriptEngine = nullptr;
+ScriptLoader* ServiceLocator::_scriptLoader = nullptr;
+ScriptAPI* ServiceLocator::_scriptAPI = nullptr;
 
 moodycamel::ConcurrentQueue<Message>* ServiceLocator::_mainInputQueue = nullptr;
 
@@ -94,4 +97,22 @@ void ServiceLocator::SetEditor(Editor::Editor* editor)
 {
     assert(_editor == nullptr);
     _editor = editor;
+}
+
+void ServiceLocator::SetScriptEngine(ScriptEngine* scriptEngine)
+{
+    assert(_scriptEngine == nullptr);
+    _scriptEngine = scriptEngine;
+}
+
+void ServiceLocator::SetScriptLoader(ScriptLoader* scriptLoader)
+{
+    assert(_scriptLoader == nullptr);
+    _scriptLoader = scriptLoader;
+}
+
+void ServiceLocator::SetScriptAPI(ScriptAPI* scriptAPI)
+{
+    assert(_scriptAPI == nullptr);
+    _scriptAPI = scriptAPI;
 }
