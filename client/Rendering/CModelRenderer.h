@@ -15,6 +15,7 @@
 #include <Renderer/Descriptors/SamplerDesc.h>
 #include <Renderer/Descriptors/BufferDesc.h>
 #include <Renderer/Buffer.h>
+#include <Renderer/GPUVector.h>
 #include <Renderer/DescriptorSet.h>
 
 #include "../Gameplay/Map/Chunk.h"
@@ -398,73 +399,58 @@ private:
     SafeUnorderedMap<u32, u32> _opaqueDrawCallDataIndexToLoadedModelIndex;
     SafeUnorderedMap<u32, u32> _transparentDrawCallDataIndexToLoadedModelIndex;
 
-    SafeVector<CModel::ComplexVertex> _vertices;
-    SafeVector<u16> _indices;
-    SafeVector<TextureUnit> _textureUnits;
-    SafeVector<Instance> _instances;
     SafeVector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
     SafeVector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;
-    SafeVector<CModel::CullingData> _cullingDatas;
 
-    SafeVector<AnimationSequence> _animationSequence;
-    SafeVector<AnimationModelInfo> _animationModelInfo;
-    SafeVector<AnimationBoneInfo> _animationBoneInfo;
-    SafeVector<AnimationBoneInstance> _animationBoneInstances;
+    BufferRangeAllocator _animationBoneDeformRangeAllocator;
+    moodycamel::ConcurrentQueue<AnimationRequest> _animationRequests;
 
+    Renderer::GPUVector<CModel::ComplexVertex> _vertices;
+    Renderer::GPUVector<u16> _indices;
+    Renderer::GPUVector<TextureUnit> _textureUnits;
+    Renderer::GPUVector<Instance> _instances;
+    Renderer::GPUVector<CModel::CullingData> _cullingDatas;
+
+    Renderer::GPUVector<AnimationBoneInstance> _animationBoneInstances;
+    Renderer::GPUVector<AnimationSequence> _animationSequences;
+    Renderer::GPUVector<AnimationModelInfo> _animationModelInfo;
+    Renderer::GPUVector<AnimationBoneInfo> _animationBoneInfo;
+
+    // TODO: Make these into GPUVectors, they are currently backed by regular std::vectors so it requires a bit of work
     std::vector<AnimationTrackInfo> _animationTrackInfo;
     std::vector<u32> _animationTrackTimestamps;
     std::vector<vec4> _animationTrackValues;
     std::mutex _animationTrackMutex;
+    Renderer::BufferID _animationTrackInfoBuffer;
+    Renderer::BufferID _animationTrackTimestampBuffer;
+    Renderer::BufferID _animationTrackValueBuffer;
 
-    BufferRangeAllocator _animationBoneDeformRangeAllocator;
-    BufferRangeAllocator _animationBoneInstancesRangeAllocator;
-    moodycamel::ConcurrentQueue<AnimationRequest> _animationRequests;
+    Renderer::GPUVector<DrawCall> _opaqueDrawCalls;
+    Renderer::GPUVector<DrawCallData> _opaqueDrawCallDatas;
 
-    SafeVector<DrawCall> _opaqueDrawCalls;
-    SafeVector<DrawCallData> _opaqueDrawCallDatas;
+    Renderer::GPUVector<DrawCall> _transparentDrawCalls;
+    Renderer::GPUVector<DrawCallData> _transparentDrawCallDatas;
 
-    SafeVector<DrawCall> _transparentDrawCalls;
-    SafeVector<DrawCallData> _transparentDrawCallDatas;
-
-    Renderer::BufferID _vertexBuffer;
-    Renderer::BufferID _animatedVertexPositions;
-    Renderer::BufferID _indexBuffer;
-    Renderer::BufferID _textureUnitBuffer;
-    Renderer::BufferID _instanceBuffer;
-    Renderer::BufferID _cullingDataBuffer;
+    // GPU-only workbuffers
     Renderer::BufferID _visibleInstanceMaskBuffer;
     Renderer::BufferID _visibleInstanceCountBuffer;
     Renderer::BufferID _visibleInstanceIndexBuffer;
     Renderer::BufferID _visibleInstanceCountArgumentBuffer32;
 
-    Renderer::BufferID _animationSequenceBuffer;
-    Renderer::BufferID _animationModelInfoBuffer;
-    Renderer::BufferID _animationBoneInfoBuffer;
+    Renderer::BufferID _animatedVertexPositions;
     Renderer::BufferID _animationBoneDeformMatrixBuffer;
-    Renderer::BufferID _animationBoneInstancesBuffer;
-    Renderer::BufferID _animationTrackInfoBuffer;
-    Renderer::BufferID _animationTrackTimestampBuffer;
-    Renderer::BufferID _animationTrackValueBuffer;
 
-    Renderer::BufferID _opaqueDrawCallBuffer;
     Renderer::BufferID _opaqueCulledDrawCallBuffer;
-    Renderer::BufferID _opaqueDrawCallDataBuffer;
     Renderer::BufferID _opaqueDrawCountBuffer;
     Renderer::BufferID _opaqueDrawCountReadBackBuffer;
     Renderer::BufferID _opaqueTriangleCountBuffer;
     Renderer::BufferID _opaqueTriangleCountReadBackBuffer;
 
-    Renderer::BufferID _transparentDrawCallBuffer;
     Renderer::BufferID _transparentCulledDrawCallBuffer;
-    Renderer::BufferID _transparentSortedCulledDrawCallBuffer;
-    Renderer::BufferID _transparentDrawCallDataBuffer;
     Renderer::BufferID _transparentDrawCountBuffer;
     Renderer::BufferID _transparentDrawCountReadBackBuffer;
     Renderer::BufferID _transparentTriangleCountBuffer;
     Renderer::BufferID _transparentTriangleCountReadBackBuffer;
-
-    Renderer::BufferID _transparentSortKeys;
-    Renderer::BufferID _transparentSortValues;
 
     CullConstants _cullConstants;
 
@@ -482,10 +468,6 @@ private:
     std::atomic<bool> _hasToResizeAnimationBoneDeformMatrixBuffer = false;
     std::atomic<size_t> _newAnimationBoneDeformMatrixBufferSize = 0;
     size_t _previousAnimationBoneDeformMatrixBufferSize = 0;
-
-    std::atomic<bool> _hasToResizeAnimationBoneInstanceBuffer = false;
-    std::atomic<size_t> _newAnimationBoneInstanceBufferSize = 0;
-    size_t _previousAnimationBoneInstanceBufferSize = 0;
 
     DebugRenderer* _debugRenderer;
 };

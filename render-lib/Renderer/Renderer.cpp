@@ -107,4 +107,29 @@ namespace Renderer
 
         return bufferID;
     }
+
+    void Renderer::UploadToBuffer(BufferID dstBuffer, u64 dstOffset, void* srcData, u64 srcOffset, u64 srcSize)
+    {
+        // If the size is big enough to upload in one go
+        if (srcSize < Settings::STAGING_BUFFER_SIZE)
+        {
+            auto uploadBuffer = CreateUploadBuffer(dstBuffer, dstOffset, srcSize);
+            memcpy(uploadBuffer->mappedMemory, &static_cast<u8*>(srcData)[srcOffset], srcSize);
+        }
+        else // Else if we need to chunk it up
+        {
+            size_t dataUploaded = 0;
+            while (dataUploaded < srcSize)
+            {
+                size_t remainingData = srcSize - dataUploaded;
+                size_t dataChunkSize = Math::Min(remainingData, Settings::STAGING_BUFFER_SIZE);
+
+                auto uploadBuffer = CreateUploadBuffer(dstBuffer, dstOffset + dataUploaded, dataChunkSize);
+
+                memcpy(uploadBuffer->mappedMemory, &static_cast<u8*>(srcData)[srcOffset + dataUploaded], dataChunkSize);
+
+                dataUploaded += dataChunkSize;
+            }
+        }
+    }
 }

@@ -29,6 +29,7 @@
 #include "Commands/CopyBuffer.h"
 #include "Commands/FillBuffer.h"
 #include "Commands/UpdateBuffer.h"
+#include "Commands/QueueDestroyBuffer.h"
 #include "Commands/PipelineBarrier.h"
 #include "Commands/ImageBarrier.h"
 #include "Commands/DepthImageBarrier.h"
@@ -493,6 +494,17 @@ namespace Renderer
 
 #if COMMANDLIST_DEBUG_IMMEDIATE_MODE
         Commands::UpdateBuffer::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
+#endif
+    }
+
+    void CommandList::QueueDestroyBuffer(BufferID buffer)
+    {
+        assert(buffer != BufferID::Invalid());
+        Commands::QueueDestroyBuffer* command = AddCommand<Commands::QueueDestroyBuffer>();
+        command->buffer = buffer;
+
+#if COMMANDLIST_DEBUG_IMMEDIATE_MODE
+        Commands::QueueDestroyBuffer::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
 #endif
     }
 

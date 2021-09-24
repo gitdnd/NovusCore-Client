@@ -6,15 +6,11 @@ namespace Renderer
 {
     namespace Commands
     {
-        struct UpdateBuffer
+        struct QueueDestroyBuffer
         {
             static const BackendDispatchFunction DISPATCH_FUNCTION;
 
-            BufferID dstBuffer = BufferID::Invalid();
-            u64 dstBufferOffset = 0;
-            u64 size = 0;
-            u64 region = 0;
-            void* data = 0;
+            BufferID buffer = BufferID::Invalid();
         };
     }
 }

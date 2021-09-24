@@ -183,31 +183,7 @@ void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, Rende
                     _cullingConstantBuffer->Apply(frameIndex);
                 }
 
-                _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingDataBuffer);
                 _cullingDescriptorSet.Bind("_constants"_h, _cullingConstantBuffer->GetBuffer(frameIndex));
-                _cullingDescriptorSet.Bind("_draws"_h, _argumentBuffer);
-                _cullingDescriptorSet.Bind("_culledDraws"_h, _culledArgumentBuffer);
-                _cullingDescriptorSet.Bind("_drawCount"_h, _drawCountBuffer);
-                _cullingDescriptorSet.Bind("_triangleCount"_h, _triangleCountBuffer);
-                if (deterministicOrder)
-                {
-                    _cullingDescriptorSet.Bind("_sortKeys"_h, _sortKeysBuffer);
-                    _cullingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
-                }
-
-                Renderer::SamplerDesc samplerDesc;
-                samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
-
-                samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
-                samplerDesc.minLOD = 0.f;
-                samplerDesc.maxLOD = 16.f;
-                samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
-
-                Renderer::SamplerID occlusionSampler = _renderer->CreateSampler(samplerDesc);
-
-                _cullingDescriptorSet.Bind("_depthSampler"_h, occlusionSampler);
                 _cullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
 
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_cullingDescriptorSet, frameIndex);
@@ -228,7 +204,7 @@ void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, Rende
                 // First we sort our list of keys and values
                 {
                     // Barriers
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _culledArgumentBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _culledDrawCallsBuffer);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToComputeShaderRead, _drawCountBuffer);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortKeysBuffer);
                     commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _sortValuesBuffer);
@@ -260,10 +236,6 @@ void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, Rende
                     Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
                     commandList.BeginPipeline(pipeline);
 
-                    _sortingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
-                    _sortingDescriptorSet.Bind("_culledDrawCount"_h, _drawCountBuffer);
-                    _sortingDescriptorSet.Bind("_culledDrawCalls"_h, _culledArgumentBuffer);
-                    _sortingDescriptorSet.Bind("_sortedCulledDrawCalls"_h, _culledSortedArgumentBuffer);
                     commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_sortingDescriptorSet, frameIndex);
 
                     commandList.Dispatch((numDraws + 31) / 32, 1, 1);
@@ -307,11 +279,11 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
             {
                 if (deterministicOrder)
                 {
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledSortedArgumentBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledSortedDrawCallsBuffer);
                 }
                 else
                 {
-                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledArgumentBuffer);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledDrawCallsBuffer);
                 }
                 commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _drawCountBuffer);
             }
@@ -358,18 +330,18 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
 
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+            commandList.SetIndexBuffer(_indices.GetBuffer(), Renderer::IndexFormat::UInt16);
 
-            Renderer::BufferID argumentBuffer;
+            Renderer::BufferID drawCallBuffer;
             if (cullingEnabled)
             {
-                argumentBuffer = (deterministicOrder) ? _culledSortedArgumentBuffer : _culledArgumentBuffer;
+                drawCallBuffer = (deterministicOrder) ? _culledSortedDrawCallsBuffer : _culledDrawCallsBuffer;
             }
             else
             {
-                argumentBuffer = _argumentBuffer;
+                drawCallBuffer = _drawCalls.GetBuffer();
             }
-            commandList.DrawIndexedIndirectCount(argumentBuffer, 0, _drawCountBuffer, 0, drawCount);
+            commandList.DrawIndexedIndirectCount(drawCallBuffer, 0, _drawCountBuffer, 0, drawCount);
 
             commandList.EndPipeline(pipeline);
 
@@ -467,7 +439,7 @@ void MapObjectRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, Render
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
 
-            commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+            commandList.SetIndexBuffer(_indices.GetBuffer(), Renderer::IndexFormat::UInt16);
 
             struct ColorConstant
             {
@@ -729,6 +701,18 @@ void MapObjectRenderer::CreatePermanentResources()
     _sampler = _renderer->CreateSampler(samplerDesc);
     _geometryPassDescriptorSet.Bind("_sampler"_h, _sampler);
 
+    samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+
+    samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.minLOD = 0.f;
+    samplerDesc.maxLOD = 16.f;
+    samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+    _occlusionSampler = _renderer->CreateSampler(samplerDesc);
+    _cullingDescriptorSet.Bind("_depthSampler"_h, _occlusionSampler);
+
     _cullingConstantBuffer = new Renderer::Buffer<CullingConstants>(_renderer, "CullingConstantBuffer", Renderer::BufferUsage::UNIFORM_BUFFER, Renderer::BufferCPUAccess::WriteOnly);
 
     // Create draw count buffer
@@ -742,6 +726,9 @@ void MapObjectRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _drawCountReadBackBuffer = _renderer->CreateBuffer(_drawCountReadBackBuffer, desc);
+
+        _cullingDescriptorSet.Bind("_drawCount"_h, _drawCountBuffer);
+        _sortingDescriptorSet.Bind("_culledDrawCount"_h, _drawCountBuffer);
     }
     
     // Create triangle count buffer
@@ -755,6 +742,8 @@ void MapObjectRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _triangleCountReadBackBuffer = _renderer->CreateBuffer(_triangleCountReadBackBuffer, desc);
+
+        _cullingDescriptorSet.Bind("_triangleCount"_h, _triangleCountBuffer);
     }
 
     CreateBuffers();
@@ -1298,118 +1287,106 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
 
 void MapObjectRenderer::CreateBuffers()
 {
-    // Create Instance Lookup Buffer
-    _instanceLookupData.WriteLock([&](std::vector<InstanceLookupData>& instanceLookupData)
     {
-        Renderer::BufferDesc desc;
-        desc.name = "InstanceLookupDataBuffer";
-        desc.size = sizeof(InstanceLookupData) * instanceLookupData.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _instanceLookupBuffer = _renderer->CreateAndFillBuffer(_instanceLookupBuffer, desc, instanceLookupData.data(), desc.size);
+        // Sync DrawCalls buffer to GPU
+        _drawCalls.SetDebugName("MapObjectDrawCalls");
+        _drawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
+        _drawCalls.SyncToGPU(_renderer, nullptr);
 
-        _cullingDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
-        _geometryPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
-        _materialPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupBuffer);
-    });
-    
-    _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+        _cullingDescriptorSet.Bind("_draws"_h, _drawCalls.GetBuffer());
+        _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _drawCalls.GetBuffer());
+        _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _drawCalls.GetBuffer());
+
+        _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+        {
+            // Create Culled Indirect Argument buffer
+            Renderer::BufferDesc desc;
+            desc.name = "MapObjectCulledDrawCalls";
+            desc.size = sizeof(DrawCall) * drawCalls.size();
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
+
+            _culledDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledDrawCallsBuffer, desc, drawCalls.data(), desc.size);
+            _sortingDescriptorSet.Bind("_culledDrawCalls"_h, _culledDrawCallsBuffer);
+            _cullingDescriptorSet.Bind("_culledDraws"_h, _culledDrawCallsBuffer);
+
+            // Create Culled Sorted Indirect Argument Buffer
+            desc.name = "MapObjectCulledSortedDrawCalls";
+            _culledSortedDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledSortedDrawCallsBuffer, desc, drawCalls.data(), desc.size);
+
+            _sortingDescriptorSet.Bind("_sortedCulledDrawCalls"_h, _culledSortedDrawCallsBuffer);
+        });
+    }
+
+    // Sync Vertex buffer to GPU
     {
-        // Create Indirect Argument buffer
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectIndirectArgs";
-        desc.size = sizeof(DrawCall) * drawCalls.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
-        _argumentBuffer = _renderer->CreateAndFillBuffer(_argumentBuffer, desc, drawCalls.data(), desc.size);
+        _vertices.SetDebugName("MapObjectVertexBuffer");
+        _vertices.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _vertices.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
-        _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _argumentBuffer);
+        _geometryPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertices.GetBuffer());
+        _materialPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertices.GetBuffer());
+    }
 
-        // Create Culled Indirect Argument buffer
-        desc.name = "MapObjectCulledIndirectArgs";
-        _culledArgumentBuffer = _renderer->CreateAndFillBuffer(_culledArgumentBuffer, desc, drawCalls.data(), desc.size);
-
-        // Create Culled Sorted Indirect Argument Buffer
-        desc.name = "MapObjectCulledSortedIndirectArgs";
-        _culledSortedArgumentBuffer = _renderer->CreateAndFillBuffer(_culledSortedArgumentBuffer, desc, drawCalls.data(), desc.size);
-    });
-
-    // Create Vertex buffer
-    _vertices.WriteLock([&](std::vector<Terrain::MapObjectVertex>& vertices)
+    // Sync Index buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectVertexBuffer";
-        desc.size = sizeof(Terrain::MapObjectVertex) * vertices.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _vertexBuffer = _renderer->CreateAndFillBuffer(_vertexBuffer, desc, vertices.data(), desc.size);
+        _indices.SetDebugName("MapObjectIndexBuffer");
+        _indices.SetUsage(Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
+        _indices.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertexBuffer);
-        _materialPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertexBuffer);
-    });
+        _geometryPassDescriptorSet.Bind("_mapObjectIndices"_h, _indices.GetBuffer());
+        _materialPassDescriptorSet.Bind("_mapObjectIndices"_h, _indices.GetBuffer());
+    }
 
-    // Create Index buffer
-    _indices.WriteLock([&](std::vector<u16>& indices)
+    // Sync Instance buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectIndexBuffer";
-        desc.size = sizeof(u16) * indices.size();
-        desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _indexBuffer = _renderer->CreateAndFillBuffer(_indexBuffer, desc, indices.data(), desc.size);
+        _instances.SetDebugName("MapObjectInstanceBuffer");
+        _instances.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _instances.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_mapObjectIndices"_h, _indexBuffer);
-        _materialPassDescriptorSet.Bind("_mapObjectIndices"_h, _indexBuffer);
-    });
+        _geometryPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instances.GetBuffer());
+        _materialPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instances.GetBuffer());
+        _cullingDescriptorSet.Bind("_mapObjectInstanceData"_h, _instances.GetBuffer());
+    }
 
-    // Create Instance buffer
-    _instances.WriteLock([&](std::vector<InstanceData>& instances)
+    // Sync Instance Lookup buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectInstanceBuffer";
-        desc.size = sizeof(InstanceData) * instances.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _instanceBuffer = _renderer->CreateAndFillBuffer(_instanceBuffer, desc, instances.data(), desc.size);
+        _instanceLookupData.SetDebugName("MapObjectInstanceLookupDataBuffer");
+        _instanceLookupData.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _instanceLookupData.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
-        _materialPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
-        _cullingDescriptorSet.Bind("_mapObjectInstanceData"_h, _instanceBuffer);
-    });
+        _cullingDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupData.GetBuffer());
+        _geometryPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupData.GetBuffer());
+        _materialPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupData.GetBuffer());
+    }
 
-    // Create Material buffer
-    _materials.WriteLock([&](std::vector<Material>& materials)
+    // Sync Material buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectMaterialBuffer";
-        desc.size = sizeof(Material) * materials.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _materialBuffer = _renderer->CreateAndFillBuffer(_materialBuffer, desc, materials.data(), desc.size);
+        _materials.SetDebugName("MapObjectMaterialBuffer");
+        _materials.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _materials.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materialBuffer);
-        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materialBuffer);
-    });
+        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materials.GetBuffer());
+        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materials.GetBuffer());
+    }
 
-    // Create MaterialParam buffer
-    _materialParameters.WriteLock([&](std::vector<MaterialParameters>& materialParameters)
+    // Sync MaterialParam buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectMaterialParamBuffer";
-        desc.size = sizeof(MaterialParameters) * materialParameters.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _materialParametersBuffer = _renderer->CreateAndFillBuffer(_materialParametersBuffer, desc, materialParameters.data(), desc.size);
+        _materialParameters.SetDebugName("MapObjectMaterialParamBuffer");
+        _materialParameters.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _materialParameters.SyncToGPU(_renderer, nullptr);
 
-        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParametersBuffer);
-        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParametersBuffer);
-    });
+        _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParameters.GetBuffer());
+        _materialPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParameters.GetBuffer());
+    }
 
-    // Create CullingData buffer
-    _cullingData.WriteLock([&](std::vector<Terrain::CullingData>& cullingData)
+    // Sync CullingData buffer to GPU
     {
-        Renderer::BufferDesc desc;
-        desc.name = "MapObjectCullingDataBuffer";
-        desc.size = sizeof(Terrain::CullingData) * cullingData.size();
-        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _cullingDataBuffer = _renderer->CreateAndFillBuffer(_cullingDataBuffer, desc, cullingData.data(), desc.size);
+        _cullingData.SetDebugName("MapObjectCullingDataBuffer");
+        _cullingData.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _cullingData.SyncToGPU(_renderer, nullptr);
 
-        _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingDataBuffer);
-    });
+        _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingData.GetBuffer());
+    }
 
     // Create SortKeys and SortValues buffer
     {
@@ -1422,9 +1399,12 @@ void MapObjectRenderer::CreateBuffers()
         desc.size = keysSize;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
         _sortKeysBuffer = _renderer->CreateBuffer(_sortKeysBuffer, desc);
+        _cullingDescriptorSet.Bind("_sortKeys"_h, _sortKeysBuffer);
 
         desc.name = "MapObjectSortValues";
         desc.size = valuesSize;
         _sortValuesBuffer = _renderer->CreateBuffer(_sortValuesBuffer, desc);
+        _cullingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
+        _sortingDescriptorSet.Bind("_sortValues"_h, _sortValuesBuffer);
     }
 }

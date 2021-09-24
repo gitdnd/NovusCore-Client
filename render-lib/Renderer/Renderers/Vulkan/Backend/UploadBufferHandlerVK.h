@@ -11,6 +11,8 @@ typedef VkCommandBuffer_T* VkCommandBuffer;
 
 namespace Renderer
 {
+    class RendererVK;
+
     namespace Backend
     {
         class RenderDeviceVK;

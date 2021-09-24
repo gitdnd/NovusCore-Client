@@ -4,6 +4,7 @@
 #include "CommandListHandlerVK.h"
 #include "SemaphoreHandlerVK.h"
 #include "RenderDeviceVK.h"
+#include "../RendererVK.h"
 #include "../../../RenderSettings.h"
 
 #include <tracy/Tracy.hpp>
@@ -90,8 +91,8 @@ namespace Renderer
                 BufferDesc bufferDesc;
                 bufferDesc.name = "StagingBuffer" + std::to_string(i);
                 bufferDesc.size = Settings::STAGING_BUFFER_SIZE;
-                bufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-                bufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
+                bufferDesc.usage = BufferUsage::TRANSFER_SOURCE;
+                bufferDesc.cpuAccess = BufferCPUAccess::WriteOnly;
 
                 stagingBuffer.buffer = _bufferHandler->CreateBuffer(bufferDesc);
                 stagingBuffer.allocator.Init(Settings::STAGING_BUFFER_SIZE, "StagingBuffer", true, false);
@@ -101,7 +102,7 @@ namespace Renderer
                 VkResult result = vmaMapMemory(_device->_allocator, _bufferHandler->GetBufferAllocation(stagingBuffer.buffer), &mappedStagingMemory);
                 if (result != VK_SUCCESS)
                 {
-                    DebugHandler::PrintFatal("vmaMapMemory failed!\n");
+                    DebugHandler::PrintFatal("UploadBufferHandlerVK : vmaMapMemory failed!\n");
                 }
                 stagingBuffer.mappedMemory = mappedStagingMemory;
 
@@ -119,6 +120,8 @@ namespace Renderer
 
         void UploadBufferHandlerVK::ExecuteUploadTasks()
         {
+            // Debug if this is uploading the non-filled buffers correctly
+
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
 
             if (!data->isDirty)
@@ -143,6 +146,7 @@ namespace Renderer
                 if (stagingBuffer.bufferStatus == BufferStatus::READY && stagingBuffer.totalHandles > 0)
                 {
                     ExecuteStagingBuffer(commandBuffer, stagingBuffer);
+                    stagingBuffer.totalHandles = 0; // Not sure about this
                 }
             }
 
@@ -168,9 +172,14 @@ namespace Renderer
 
         std::shared_ptr<UploadBuffer> UploadBufferHandlerVK::CreateUploadBuffer(BufferID targetBuffer, size_t targetOffset, size_t size)
         {
+            if (targetBuffer == BufferID::Invalid())
+            {
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Tried to create an upload buffer pointing at an invalid buffer");
+            }
+
             if (size > Settings::STAGING_BUFFER_SIZE)
             {
-                DebugHandler::PrintFatal("Requested bigger staging memory than our staging buffer size!");
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Requested bigger staging memory than our staging buffer size!");
             }
 
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
@@ -217,9 +226,14 @@ namespace Renderer
 
         std::shared_ptr<UploadBuffer> UploadBufferHandlerVK::CreateUploadBuffer(TextureID targetTexture, size_t targetOffset, size_t size)
         {
+            if (targetTexture == TextureID::Invalid())
+            {
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Tried to create an upload buffer pointing at an invalid texture");
+            }
+
             if (size > Settings::STAGING_BUFFER_SIZE)
             {
-                DebugHandler::PrintFatal("Requested bigger staging memory than our staging buffer size!");
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Requested bigger staging memory than our staging buffer size!");
             }
 
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
@@ -335,7 +349,7 @@ namespace Renderer
                 return offset;
             }
             
-            DebugHandler::PrintFatal("Could not allocate in staging buffer after 5 tries and waiting");
+            DebugHandler::PrintFatal("UploadBufferHandlerVK : Could not allocate in staging buffer after 5 tries and waiting");
             return offset;
         }
 
@@ -355,6 +369,15 @@ namespace Renderer
                     copyRegion.srcOffset = task.stagingBufferOffset;
                     copyRegion.size = task.copySize;
                     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+                    // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+                    VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                    bufferBarrier.buffer = dstBuffer;
+                    bufferBarrier.size = VK_WHOLE_SIZE;
+                    bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+                    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
                 }
             }
 
@@ -400,7 +423,7 @@ namespace Renderer
 
             if (result == VK_TIMEOUT)
             {
-                DebugHandler::PrintFatal("Waiting for staging buffer fence took longer than 5 seconds, something is wrong!");
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Waiting for staging buffer fence took longer than 5 seconds, something is wrong!");
             }
 
             vkResetFences(_device->_device, 1, &stagingBuffer.fence);

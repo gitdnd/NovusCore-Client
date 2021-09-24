@@ -12,14 +12,14 @@ struct Constants
 [[vk::push_constant]] Constants _constants;
 [[vk::binding(4, CMODEL)]] ByteAddressBuffer _visibleInstanceCount;
 [[vk::binding(5, CMODEL)]] StructuredBuffer<uint> _visibleInstanceIndices;
-[[vk::binding(6, CMODEL)]] StructuredBuffer<AnimationSequence> _animationSequence;
-[[vk::binding(7, CMODEL)]] StructuredBuffer<AnimationModelInfo> _animationModelInfo;
-[[vk::binding(8, CMODEL)]] StructuredBuffer<AnimationBoneInfo> _animationBoneInfo;
-[[vk::binding(9, CMODEL)]] RWStructuredBuffer<float4x4> _animationBoneDeformMatrix;
+[[vk::binding(6, CMODEL)]] StructuredBuffer<AnimationSequence> _animationSequences;
+[[vk::binding(7, CMODEL)]] StructuredBuffer<AnimationModelInfo> _animationModelInfos;
+[[vk::binding(8, CMODEL)]] StructuredBuffer<AnimationBoneInfo> _animationBoneInfos;
+[[vk::binding(9, CMODEL)]] RWStructuredBuffer<float4x4> _animationBoneDeformMatrices;
 [[vk::binding(10, CMODEL)]] RWStructuredBuffer<AnimationBoneInstanceData> _animationBoneInstances;
-[[vk::binding(11, CMODEL)]] StructuredBuffer<AnimationTrackInfo> _animationTrackInfo;
-[[vk::binding(12, CMODEL)]] StructuredBuffer<uint> _animationTrackTimestamp;
-[[vk::binding(13, CMODEL)]] StructuredBuffer<float4> _animationTrackValue;
+[[vk::binding(11, CMODEL)]] StructuredBuffer<AnimationTrackInfo> _animationTrackInfos;
+[[vk::binding(12, CMODEL)]] StructuredBuffer<uint> _animationTrackTimestamps;
+[[vk::binding(13, CMODEL)]] StructuredBuffer<float4> _animationTrackValues;
 
 AnimationState GetAnimationState(AnimationBoneInstanceData boneInstanceData)
 {
@@ -41,7 +41,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint instanceID = _visibleInstanceIndices[dispatchThreadId.x];
 
     CModelInstanceData instanceData = _cModelInstances[instanceID];
-    const AnimationModelInfo modelInfo = _animationModelInfo[instanceData.modelId];
+    const AnimationModelInfo modelInfo = _animationModelInfos[instanceData.modelId];
 
     int numSequences = modelInfo.packedData0& 0xFFFF;
     int numBones = (modelInfo.packedData0 >> 16) & 0xFFFF;
@@ -53,7 +53,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         float4x4 parentBoneMatrix = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 
-        AnimationBoneInfo boneInfo = _animationBoneInfo[modelInfo.boneInfoOffset + i];
+        AnimationBoneInfo boneInfo = _animationBoneInfos[modelInfo.boneInfoOffset + i];
         AnimationBoneInstanceData boneInstance = _animationBoneInstances[instanceData.boneInstanceDataOffset + i];
         uint parentBoneId = (boneInfo.packedData1 >> 16) & 0xFFFF;
 
@@ -62,15 +62,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             // If we aren't animating, assume parentBoneMatrix or Identity
             if (parentBoneId != 65535)
             {
-                parentBoneMatrix = _animationBoneDeformMatrix[instanceData.boneDeformOffset + parentBoneId];
+                parentBoneMatrix = _animationBoneDeformMatrices[instanceData.boneDeformOffset + parentBoneId];
             }
 
-            _animationBoneDeformMatrix[instanceData.boneDeformOffset + i] = parentBoneMatrix;
+            _animationBoneDeformMatrices[instanceData.boneDeformOffset + i] = parentBoneMatrix;
             continue;
         }
 
         uint sequenceIndex = boneInstance.packedData0 & 0xFFFF;
-        AnimationSequence sequence = _animationSequence[modelInfo.sequenceOffset + sequenceIndex];
+        AnimationSequence sequence = _animationSequences[modelInfo.sequenceOffset + sequenceIndex];
         if (boneInstance.animationProgress > sequence.duration)
         {
             uint isLooping = boneInstance.animateState == 2;
@@ -90,9 +90,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         if (parentBoneId != 65535)
         {
-            parentBoneMatrix = _animationBoneDeformMatrix[instanceData.boneDeformOffset + parentBoneId];
+            parentBoneMatrix = _animationBoneDeformMatrices[instanceData.boneDeformOffset + parentBoneId];
 
-            AnimationBoneInfo parentBoneInfo = _animationBoneInfo[modelInfo.boneInfoOffset + parentBoneId];
+            AnimationBoneInfo parentBoneInfo = _animationBoneInfos[modelInfo.boneInfoOffset + parentBoneId];
             parentPivotPoint = float3(parentBoneInfo.pivotPointX, parentBoneInfo.pivotPointY, parentBoneInfo.pivotPointZ);
         }
 
@@ -100,9 +100,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             AnimationContext ctx;
             ctx.activeSequenceId = sequenceIndex;
-            ctx.animationTrackInfos = _animationTrackInfo;
-            ctx.trackTimestamps = _animationTrackTimestamp;
-            ctx.trackValues = _animationTrackValue;
+            ctx.animationTrackInfos = _animationTrackInfos;
+            ctx.trackTimestamps = _animationTrackTimestamps;
+            ctx.trackValues = _animationTrackValues;
             ctx.boneInfo = boneInfo;
             ctx.state = state;
 
@@ -110,11 +110,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             currBoneMatrix = mul(currBoneMatrix, parentBoneMatrix);
 
             //DebugRenderBone(instanceData, modelBoneInfo.offset + i, float3(boneInfo.pivotPointX, boneInfo.pivotPointY, boneInfo.pivotPointZ), currBoneMatrix, modelBoneInfo.offset + parentBoneId, parentPivotPoint, parentBoneMatrix, true);
-            _animationBoneDeformMatrix[instanceData.boneDeformOffset + i] = currBoneMatrix;
+            _animationBoneDeformMatrices[instanceData.boneDeformOffset + i] = currBoneMatrix;
         }
         else
         {
-            _animationBoneDeformMatrix[instanceData.boneDeformOffset + i] = parentBoneMatrix;
+            _animationBoneDeformMatrices[instanceData.boneDeformOffset + i] = parentBoneMatrix;
         }
     }
 }

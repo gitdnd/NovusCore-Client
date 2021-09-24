@@ -8,6 +8,7 @@
 #include <Containers/StringTable.h>
 
 #include <Renderer/Buffer.h>
+#include <Renderer/GPUVector.h>
 #include <Renderer/Descriptors/SamplerDesc.h>
 #include <Renderer/Descriptors/ImageDesc.h>
 #include <Renderer/Descriptors/DepthImageDesc.h>
@@ -267,6 +268,7 @@ private:
     DebugRenderer* _debugRenderer;
 
     Renderer::SamplerID _sampler;
+    Renderer::SamplerID _occlusionSampler;
     Renderer::DescriptorSet _cullingDescriptorSet;
     Renderer::DescriptorSet _geometryPassDescriptorSet;
     Renderer::DescriptorSet _materialPassDescriptorSet;
@@ -275,34 +277,28 @@ private:
     SafeVector<LoadedMapObject> _loadedMapObjects;
     SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
 
-    SafeVector<DrawCall> _drawCalls;
-    SafeVector<u16> _indices;
-    SafeVector<Terrain::MapObjectVertex> _vertices;
-    SafeVector<InstanceData> _instances;
-    SafeVector<InstanceLookupData> _instanceLookupData;
-    SafeVector<Material> _materials;
-    SafeVector<MaterialParameters> _materialParameters;
-    SafeVector<Terrain::CullingData> _cullingData;
-
     Renderer::Buffer<CullingConstants>* _cullingConstantBuffer;
 
-    Renderer::BufferID _argumentBuffer;
-    Renderer::BufferID _culledArgumentBuffer;
-    Renderer::BufferID _culledSortedArgumentBuffer;
+    Renderer::GPUVector<DrawCall> _drawCalls;
+
+    Renderer::GPUVector<Terrain::MapObjectVertex> _vertices;
+    Renderer::GPUVector<u16> _indices;
+    Renderer::GPUVector<InstanceData> _instances;
+    Renderer::GPUVector<InstanceLookupData> _instanceLookupData;
+    Renderer::GPUVector<Material> _materials;
+    Renderer::GPUVector<MaterialParameters> _materialParameters;
+    Renderer::GPUVector<Terrain::CullingData> _cullingData;
+
+    // GPU-only workbuffers
+    Renderer::BufferID _culledDrawCallsBuffer;
+    Renderer::BufferID _culledSortedDrawCallsBuffer;
+    Renderer::BufferID _sortKeysBuffer;
+    Renderer::BufferID _sortValuesBuffer;
+
     Renderer::BufferID _drawCountBuffer;
     Renderer::BufferID _drawCountReadBackBuffer;
     Renderer::BufferID _triangleCountBuffer;
     Renderer::BufferID _triangleCountReadBackBuffer;
-
-    Renderer::BufferID _vertexBuffer;
-    Renderer::BufferID _indexBuffer;
-    Renderer::BufferID _instanceBuffer;
-    Renderer::BufferID _instanceLookupBuffer;
-    Renderer::BufferID _materialBuffer;
-    Renderer::BufferID _materialParametersBuffer;
-    Renderer::BufferID _cullingDataBuffer;
-    Renderer::BufferID _sortKeysBuffer;
-    Renderer::BufferID _sortValuesBuffer;
 
     Renderer::TextureArrayID _mapObjectTextures;
 

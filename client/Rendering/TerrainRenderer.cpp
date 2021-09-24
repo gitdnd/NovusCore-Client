@@ -83,11 +83,6 @@ TerrainRenderer::~TerrainRenderer()
 
 void TerrainRenderer::Update(f32 deltaTime)
 {
-    //for (const Terrain::MapUtils::AABoundingBox& boundingBox : _cellBoundingBoxes)
-    //{
-    //    _debugRenderer->DrawAABB3D(boundingBox.min, boundingBox.max, 0xff00ff00);
-    //}
-
     Camera* camera = ServiceLocator::GetCamera();
 
     if (CVAR_HeightBoxEnable.Get())

@@ -92,6 +92,7 @@ namespace Renderer
         void CopyBuffer(BufferID dstBuffer, u64 dstBufferOffset, BufferID srcBuffer, u64 srcBufferOffset, u64 region);
         void FillBuffer(BufferID dstBuffer, u64 dstBufferOffset, u64 size, u32 data);
         void UpdateBuffer(BufferID dstBuffer, u64 dstBufferOffset, u64 size, void* data);
+        void QueueDestroyBuffer(BufferID buffer);
 
         void PipelineBarrier(PipelineBarrierType type, BufferID buffer);
         void ImageBarrier(ImageID image);
