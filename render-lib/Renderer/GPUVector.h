@@ -48,14 +48,17 @@ namespace Renderer
 
             size_t vectorByteSize = _vector.size() * sizeof(T);
 
-            if (vectorByteSize == 0) // Not sure about this
-                return false;
-
             if (!_initialized)
             {
                 _renderer = renderer;
                 _allocator.Init(0, 0);
                 _initialized = true;
+            }
+
+            if (vectorByteSize == 0) // Not sure about this
+            {
+                ResizeBuffer(renderer, commandList, 1, false);
+                return false;
             }
 
             size_t allocatedBytes = _allocator.AllocatedBytes();
