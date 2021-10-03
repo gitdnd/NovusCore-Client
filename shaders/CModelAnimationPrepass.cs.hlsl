@@ -40,8 +40,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     const uint instanceID = _visibleInstanceIndices[dispatchThreadId.x];
 
-    CModelInstanceData instanceData = _cModelInstances[instanceID];
-    const AnimationModelInfo modelInfo = _animationModelInfos[instanceData.modelId];
+    CModelInstanceData instanceData = _cModelInstanceDatas[instanceID];
+    const AnimationModelInfo modelInfo = _animationModelInfos[instanceData.modelID];
 
     int numSequences = modelInfo.packedData0 & 0xFFFF;
     int numBones = (modelInfo.packedData0 >> 16) & 0xFFFF;

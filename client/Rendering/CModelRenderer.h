@@ -56,17 +56,26 @@ public:
         u32 instanceCount;
         u32 firstIndex;
         u32 vertexOffset;
-        u32 firstInstance;
+        u32 drawID;
     };
 
     struct DrawCallData
     {
         u32 instanceID;
-        u32 cullingDataID;
-        u16 textureUnitOffset;
+        u32 textureUnitOffset;
         u16 numTextureUnits;
-        u16 renderPriority;
         u16 numUnlitTextureUnits;
+    };
+
+    struct ModelInstanceData
+    {
+        u32 modelID = 0;
+        u32 boneDeformOffset;
+        u32 boneInstanceDataOffset;
+        u16 editorSequenceId; // This is used by the editor to display the sequenceId we want to play.
+        u16 editorIsLoop; // This is used by the editor to display if the animation we want to play should looping.
+        u32 modelVertexOffset = 0;
+        u32 animatedVertexOffset = 0;
     };
 
     struct LoadedComplexModel
@@ -76,7 +85,7 @@ public:
         // We have to manually implement a copy constructor because std::mutex is not copyable
         LoadedComplexModel(const LoadedComplexModel& other)
         {
-            objectID = other.objectID;
+            modelID = other.modelID;
             debugName = other.debugName;
             cullingDataID = other.cullingDataID;
             numVertices = other.numVertices;
@@ -91,7 +100,7 @@ public:
             transparentDrawCallDataTemplates = other.transparentDrawCallDataTemplates;
         };
 
-        u32 objectID;
+        u32 modelID;
         std::string debugName = "";
         bool failedToLoad = false;
 
@@ -110,26 +119,6 @@ public:
         std::vector<DrawCallData> transparentDrawCallDataTemplates;
 
         std::mutex mutex;
-    };
-
-    struct Instance
-    {
-        mat4x4 instanceMatrix;
-        
-        u32 modelId = 0;
-        u32 boneDeformOffset;
-        u32 boneInstanceDataOffset;
-        u16 editorSequenceId; // This is used by the editor to display the sequenceId we want to play.
-        u16 editorIsLoop; // This is used by the editor to display if the animation we want to play should looping.
-        u32 vertexOffset = 0;
-        u32 animatedVertexOffset = 0;
-        u32 padding1;
-        u32 padding2;
-
-        /*u32 modelId = 0;
-        u32 activeSequenceId = 0;
-        f32 animProgress = 0.0f;
-        u32 boneDeformOffset = 0;*/
     };
 
     struct AnimationBoneInstance
@@ -181,8 +170,10 @@ public:
     SafeVector<DrawCallData>& GetOpaqueDrawCallData() { return _opaqueDrawCallDatas; }
     SafeVector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
     SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
-    SafeVector<Instance>& GetInstances() { return _instances; }
-    const Instance& GetInstance(size_t index) { return _instances.ReadGet(index); }
+    SafeVector<ModelInstanceData>& GetModelInstanceDatas() { return _modelInstanceDatas; }
+    const ModelInstanceData& GetModelInstanceData(size_t index) { return _modelInstanceDatas.ReadGet(index); }
+    const mat4x4& GetModelInstanceMatrix(size_t index) { return _modelInstanceMatrices.ReadGet(index); }
+
     const SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _complexModelPlacementDetails; }
     const SafeVector<CModel::CullingData>& GetCullingData() { return _cullingDatas; }
 
@@ -196,7 +187,7 @@ public:
     }
 
     u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.Size()); }
-    u32 GetNumCModelPlacements() { return static_cast<u32>(_instances.Size()); }
+    u32 GetNumCModelPlacements() { return static_cast<u32>(_modelInstanceDatas.Size()); }
     u32 GetModelIndexByDrawCallDataIndex(u32 index, bool isOpaque)
     {
         u32 modelIndex = std::numeric_limits<u32>().max();
@@ -414,7 +405,8 @@ private:
     Renderer::GPUVector<CModel::ComplexVertex> _vertices;
     Renderer::GPUVector<u16> _indices;
     Renderer::GPUVector<TextureUnit> _textureUnits;
-    Renderer::GPUVector<Instance> _instances;
+    Renderer::GPUVector<ModelInstanceData> _modelInstanceDatas;
+    Renderer::GPUVector<mat4x4> _modelInstanceMatrices;
     Renderer::GPUVector<CModel::CullingData> _cullingDatas;
 
     Renderer::GPUVector<AnimationBoneInstance> _animationBoneInstances;

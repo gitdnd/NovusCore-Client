@@ -174,7 +174,8 @@ float4 ShadeMapObject(const uint2 pixelPos, const VisibilityBuffer vBuffer)
 float4 ShadeCModel(const uint2 pixelPos, const VisibilityBuffer vBuffer)
 {
 	CModelDrawCallData drawCallData = LoadCModelDrawCallData(vBuffer.drawID);
-	CModelInstanceData instanceData = _cModelInstances[drawCallData.instanceID];
+	CModelInstanceData instanceData = _cModelInstanceDatas[drawCallData.instanceID];
+	float4x4 instanceMatrix = _cModelInstanceMatrices[drawCallData.instanceID];
 
 	// Get the VertexIDs of the triangle we're in
 	Draw draw = _cModelDraws[vBuffer.drawID];
@@ -197,7 +198,7 @@ float4 ShadeCModel(const uint2 pixelPos, const VisibilityBuffer vBuffer)
 		}
 
 		// Convert normals to world normals
-		vertices[i].normal = mul(vertices[i].normal, (float3x3)instanceData.instanceMatrix);
+		vertices[i].normal = mul(vertices[i].normal, (float3x3)instanceMatrix);
 	}
 
 	// Interpolate vertex attributes

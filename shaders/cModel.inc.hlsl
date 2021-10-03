@@ -4,21 +4,12 @@
 
 struct CModelInstanceData
 {
-    float4x4 instanceMatrix;
-
-    uint modelId;
+    uint modelID;
     uint boneDeformOffset;
     uint boneInstanceDataOffset;
-    uint padding0;
-    uint vertexOffset;
+    uint padding0; // Stores two u16 values we don't care about on the GPU, TODO remove?
+    uint modelVertexOffset;
     uint animatedVertexOffset;
-    uint padding1;
-    uint padding2;
-
-    /*uint modelId;
-    uint activeSequenceId;
-    float animProgress;
-    uint boneDeformOffset;*/
 };
 
 struct AnimationBoneInstanceData
@@ -83,18 +74,15 @@ struct AnimationTrackInfo
 struct PackedCModelDrawCallData
 {
     uint instanceID;
-    uint cullingDataID;
-    uint packed1; // uint16_t textureUnitOffset, uint16_t numTextureUnits
-    uint packed2;
-}; // 16 bytes
+    uint textureUnitOffset; 
+    uint packed1; // uint16_t numTextureUnits, uint16_t numUnlitTextureUnits
+}; // 12 bytes
 
 struct CModelDrawCallData
 {
     uint instanceID;
-    uint cullingDataID;
     uint textureUnitOffset;
     uint numTextureUnits;
-    uint renderPriority;
     uint numUnlitTextureUnits;
 };
 
@@ -106,13 +94,10 @@ CModelDrawCallData LoadCModelDrawCallData(uint drawCallID)
     CModelDrawCallData drawCallData;
     
     drawCallData.instanceID = packedDrawCallData.instanceID;
-    drawCallData.cullingDataID = packedDrawCallData.cullingDataID;
-    
-    drawCallData.textureUnitOffset = packedDrawCallData.packed1 & 0xFFFF;
-    drawCallData.numTextureUnits = (packedDrawCallData.packed1 >> 16) && 0xFFFF;
+    drawCallData.textureUnitOffset = packedDrawCallData.textureUnitOffset;
 
-    drawCallData.renderPriority = packedDrawCallData.packed2 & 0xFFFF;
-    drawCallData.numUnlitTextureUnits = (packedDrawCallData.packed2 >> 16) && 0xFFFF;
+    drawCallData.numTextureUnits = packedDrawCallData.packed1 & 0xFFFF;
+    drawCallData.numUnlitTextureUnits = (packedDrawCallData.packed1 >> 16) && 0xFFFF;
     
     return drawCallData;
 }
@@ -215,15 +200,16 @@ CModelVertex LoadCModelVertex(uint vertexID)
     return vertex;
 }
 
-[[vk::binding(2, CMODEL)]] StructuredBuffer<CModelInstanceData> _cModelInstances;
-[[vk::binding(3, CMODEL)]] StructuredBuffer<float4x4> _cModelAnimationBoneDeformMatrices;
+[[vk::binding(2, CMODEL)]] StructuredBuffer<CModelInstanceData> _cModelInstanceDatas;
+[[vk::binding(3, CMODEL)]] StructuredBuffer<float4x4> _cModelInstanceMatrices;
+[[vk::binding(4, CMODEL)]] StructuredBuffer<float4x4> _cModelAnimationBoneDeformMatrices;
 
 struct PackedAnimatedVertexPosition
 {
     uint packed0; // half2 position.xy
     uint packed1; // half position.z, padding
 };
-[[vk::binding(4, CMODEL)]] RWStructuredBuffer<PackedAnimatedVertexPosition> _animatedCModelVertexPositions;
+[[vk::binding(5, CMODEL)]] RWStructuredBuffer<PackedAnimatedVertexPosition> _animatedCModelVertexPositions;
 
 void StoreAnimatedVertexPosition(uint animatedVertexID, float3 position)
 {
@@ -264,8 +250,8 @@ float4x4 CalcBoneTransformMatrix(const CModelInstanceData instanceData, CModelVe
     return boneTransformMatrix;
 }
 
-[[vk::binding(5, CMODEL)]] StructuredBuffer<Draw> _cModelDraws;
-[[vk::binding(6, CMODEL)]] StructuredBuffer<uint> _cModelIndices;
+[[vk::binding(6, CMODEL)]] StructuredBuffer<Draw> _cModelDraws;
+[[vk::binding(7, CMODEL)]] StructuredBuffer<uint> _cModelIndices;
 
 struct CModelTextureUnit
 {
@@ -274,8 +260,8 @@ struct CModelTextureUnit
     uint padding;
 };
 
-[[vk::binding(7, CMODEL)]] StructuredBuffer<CModelTextureUnit> _cModelTextureUnits;
-[[vk::binding(10, CMODEL)]] Texture2D<float4> _cModelTextures[4096]; // We give this index 10 because it always needs to be last in this descriptor set
+[[vk::binding(8, CMODEL)]] StructuredBuffer<CModelTextureUnit> _cModelTextureUnits;
+[[vk::binding(20, CMODEL)]] Texture2D<float4> _cModelTextures[4096]; // We give this index 10 because it always needs to be last in this descriptor set
 
 enum CModelPixelShaderID
 {

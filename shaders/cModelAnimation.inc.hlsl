@@ -223,12 +223,12 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
     return boneMatrix;
 }
 
-void DebugRenderBone(CModelInstanceData instanceData, int boneIndex, float3 pivotPoint, float4x4 boneMatrix, int parentBoneIndex, float3 parentPivotPoint, float4x4 parentBoneMatrix, bool drawLineToParent)
+void DebugRenderBone(float4x4 instanceMatrix, int boneIndex, float3 pivotPoint, float4x4 boneMatrix, int parentBoneIndex, float3 parentPivotPoint, float4x4 parentBoneMatrix, bool drawLineToParent)
 {
     float4 position = mul(float4(pivotPoint, 1.0f), boneMatrix);
     position.xy = -position.xy;
 
-    float4 currPos = mul(position, instanceData.instanceMatrix);
+    float4 currPos = mul(position, instanceMatrix);
 
     float4 minPos = currPos;
     minPos.xyz -= 0.025f;
@@ -244,7 +244,7 @@ void DebugRenderBone(CModelInstanceData instanceData, int boneIndex, float3 pivo
         float4 parentPosition = mul(float4(parentPivotPoint, 1.0f), parentBoneMatrix);
         parentPosition.xy = -parentPosition.xy;
 
-        float4 parentPos = mul(parentPosition, instanceData.instanceMatrix);
+        float4 parentPos = mul(parentPosition, instanceMatrix);
 
         debugDrawLine3D((float3)currPos, (float3)parentPos, 0xffffff00);
     }

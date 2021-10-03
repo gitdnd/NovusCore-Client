@@ -236,10 +236,10 @@ namespace Editor
                             _selectedComplexModelData.drawCallDataID = pixelData.value;
                             _selectedComplexModelData.instanceID = drawCallData.instanceID;
 
-                            const CModelRenderer::Instance& instance = cModelRenderer->GetInstances().ReadGet(drawCallData.instanceID);
-                            const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(instance.modelId);
-                            const mat4x4& instanceMatrix = instance.instanceMatrix;
-                            const CModel::CullingData& cullingData = cModelRenderer->GetCullingData().ReadGet(drawCallData.cullingDataID);
+                            const CModelRenderer::ModelInstanceData& modelInstanceData = cModelRenderer->GetModelInstanceData(drawCallData.instanceID);
+                            const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(modelInstanceData.modelID);
+                            const mat4x4& modelInstanceMatrix = cModelRenderer->GetModelInstanceMatrix(drawCallData.instanceID);
+                            const CModel::CullingData& cullingData = cModelRenderer->GetCullingData().ReadGet(modelInstanceData.modelID);
                             vec3 minBoundingBox = cullingData.minBoundingBox;
                             vec3 maxBoundingBox = cullingData.maxBoundingBox;
 
@@ -247,10 +247,10 @@ namespace Editor
                             vec3 extents = maxBoundingBox - center;
 
                             // transform center
-                            vec3 transformedCenter = vec3(instanceMatrix * vec4(center, 1.0f));
+                            vec3 transformedCenter = vec3(modelInstanceMatrix * vec4(center, 1.0f));
 
                             // Transform extents (take maximum)
-                            glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(instanceMatrix[0])), glm::abs(vec3(instanceMatrix[1])), glm::abs(vec3(instanceMatrix[2])));
+                            glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(modelInstanceMatrix[0])), glm::abs(vec3(modelInstanceMatrix[1])), glm::abs(vec3(modelInstanceMatrix[2])));
                             vec3 transformedExtents = absMatrix * extents;
 
                             // Transform to min/max box representation
@@ -427,19 +427,19 @@ namespace Editor
         u32 loadedObjectIndex = cModelRenderer->GetModelIndexByDrawCallDataIndex(_selectedComplexModelData.drawCallDataID, _selectedComplexModelData.isOpaque);
         const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(loadedObjectIndex);
 
-        SafeVector<CModelRenderer::Instance>& cModelInstances = cModelRenderer->GetInstances();
+        SafeVector<CModelRenderer::ModelInstanceData>& cModelModelInstanceDatas = cModelRenderer->GetModelInstanceDatas();
 
-        cModelInstances.WriteLock([&](std::vector<CModelRenderer::Instance>& instances)
+        cModelModelInstanceDatas.WriteLock([&](std::vector<CModelRenderer::ModelInstanceData>& modelInstanceDatas)
         {
-            CModelRenderer::Instance& instance = instances[_selectedComplexModelData.instanceID];
-            const mat4x4& instanceMatrix = instance.instanceMatrix;
+            CModelRenderer::ModelInstanceData& modelInstanceData = modelInstanceDatas[_selectedComplexModelData.instanceID];
+            const mat4x4& modelInstanceMatrix = cModelRenderer->GetModelInstanceMatrix(_selectedComplexModelData.instanceID);
 
             glm::vec3 scale;
             glm::quat rotation;
             glm::vec3 translation;
             glm::vec3 skew;
             glm::vec4 perspective;
-            glm::decompose(instanceMatrix, scale, rotation, translation, skew, perspective);
+            glm::decompose(modelInstanceMatrix, scale, rotation, translation, skew, perspective);
 
             glm::vec3 euler = glm::eulerAngles(rotation);
             glm::vec3 eulerAsDeg = glm::degrees(euler);
@@ -459,8 +459,8 @@ namespace Editor
                     ImGui::Text("Sequence Id: ");
                     ImGui::SameLine();
 
-                    u32 numSequences = cModelRenderer->GetNumSequencesForModelId(instance.modelId);
-                    u32 sequenceId = instance.editorSequenceId;
+                    u32 numSequences = cModelRenderer->GetNumSequencesForModelId(modelInstanceData.modelID);
+                    u32 sequenceId = modelInstanceData.editorSequenceId;
                     if (ImGui::InputInt("", reinterpret_cast<i32*>(&sequenceId), 1, 1, ImGuiInputTextFlags_CharsNoBlank))
                     {
                         if (sequenceId < numSequences)
@@ -473,12 +473,12 @@ namespace Editor
                         else
                             sequenceId = 0;
 
-                        instance.editorSequenceId = sequenceId;
+                        modelInstanceData.editorSequenceId = sequenceId;
                     }
 
-                    bool isLooping = instance.editorIsLoop;
+                    bool isLooping = modelInstanceData.editorIsLoop;
                     if (ImGui::Checkbox("Loop", &isLooping))
-                        instance.editorIsLoop = isLooping;
+                        modelInstanceData.editorIsLoop = isLooping;
 
                     if (ImGui::Button("Play"))
                     {

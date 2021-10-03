@@ -27,7 +27,8 @@ VSOutput main(VSInput input)
     CModelVertex vertex = LoadCModelVertex(input.vertexID);
 
     CModelDrawCallData drawCallData = LoadCModelDrawCallData(drawCallID);
-    CModelInstanceData instanceData = _cModelInstances[drawCallData.instanceID];
+    CModelInstanceData instanceData = _cModelInstanceDatas[drawCallData.instanceID];
+    float4x4 instanceMatrix = _cModelInstanceMatrices[drawCallData.instanceID];
 
     // Skin this vertex
     float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertex);
@@ -37,13 +38,13 @@ VSOutput main(VSInput input)
     // Save the skinned vertex position (in model-space) if this vertex was animated
     if (instanceData.boneDeformOffset != 4294967295)
     {
-        uint localVertexID = input.vertexID - instanceData.vertexOffset; // This gets the local vertex ID relative to the model
+        uint localVertexID = input.vertexID - instanceData.modelVertexOffset; // This gets the local vertex ID relative to the model
         uint animatedVertexID = localVertexID + instanceData.animatedVertexOffset; // This makes it relative to the animated instance
 
         StoreAnimatedVertexPosition(animatedVertexID, position.xyz);
     }
 
-    position = mul(float4(-position.x, -position.y, position.z, 1.0f), instanceData.instanceMatrix);
+    position = mul(float4(-position.x, -position.y, position.z, 1.0f), instanceMatrix);
 
     // Pass data to pixelshader
     VSOutput output;

@@ -5,7 +5,7 @@
 #include "cModel.inc.hlsl"
 #include "visibilityBuffer.inc.hlsl"
 
-[[vk::binding(9, CMODEL)]] SamplerState _sampler;
+[[vk::binding(10, CMODEL)]] SamplerState _sampler;
 
 struct PSInput
 {
@@ -59,7 +59,8 @@ PSOutput main(PSInput input)
         }
     }
 
-    CModelInstanceData instanceData = _cModelInstances[drawCallData.instanceID];
+    CModelInstanceData instanceData = _cModelInstanceDatas[drawCallData.instanceID];
+    float4x4 instanceMatrix = _cModelInstanceMatrices[drawCallData.instanceID];
 
     // Get the VertexIDs of the triangle we're in
     Draw draw = _cModelDraws[input.drawID];
@@ -76,7 +77,7 @@ PSOutput main(PSInput input)
         // Load the skinned vertex position (in model-space) if this vertex was animated
         if (instanceData.boneDeformOffset != 4294967295)
         {
-            uint localVertexID = vertexIDs[i] - instanceData.vertexOffset; // This gets the local vertex ID relative to the model
+            uint localVertexID = vertexIDs[i] - instanceData.modelVertexOffset; // This gets the local vertex ID relative to the model
             uint animatedVertexID = localVertexID + instanceData.animatedVertexOffset; // This makes it relative to the animated instance
 
             vertices[i].position = LoadAnimatedVertexPosition(animatedVertexID);
@@ -86,7 +87,7 @@ PSOutput main(PSInput input)
         //float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertices[i]);
 
         //vertices[i].position = mul(float4(vertices[i].position, 1.0f), boneTransformMatrix).xyz;
-        vertices[i].position = mul(float4(-vertices[i].position.x, -vertices[i].position.y, vertices[i].position.z, 1.0f), instanceData.instanceMatrix).xyz;
+        vertices[i].position = mul(float4(-vertices[i].position.x, -vertices[i].position.y, vertices[i].position.z, 1.0f), instanceMatrix).xyz;
     }
 
     // Calculate Barycentrics

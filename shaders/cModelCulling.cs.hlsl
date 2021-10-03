@@ -111,11 +111,11 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
 }
 
 #define UINT_MAX 0xFFFFu
-uint64_t CalculateSortKey(Draw drawCall, CModelDrawCallData drawCallData, CModelInstanceData instance)
+uint64_t CalculateSortKey(Draw drawCall, CModelDrawCallData drawCallData, float4x4 instanceMatrix)
 {
     // Get the position to sort against
     const float3 refPos = _constants.cameraPosition;
-    const float3 position = float3(instance.instanceMatrix._41, instance.instanceMatrix._42, instance.instanceMatrix._43);
+    const float3 position = float3(instanceMatrix._41, instanceMatrix._42, instanceMatrix._43);
     const float distanceFromCamera = distance(refPos, position);
     const float distanceAccuracy = 0.01f;
     
@@ -132,13 +132,11 @@ uint64_t CalculateSortKey(Draw drawCall, CModelDrawCallData drawCallData, CModel
         };
     */
     
-    uint renderPriority = drawCallData.renderPriority;
     uint invDistanceFromCameraUint = UINT_MAX - (uint)(distanceFromCamera / distanceAccuracy);
     uint localInstanceID = drawCall.firstInstance % 65535;
     
     uint64_t sortKey = 0;
     
-    sortKey |= renderPriority << 56;
     // Padding here
     sortKey |= invDistanceFromCameraUint << 16;
     sortKey |= localInstanceID;
@@ -162,15 +160,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint drawCallID = drawCall.firstInstance;
     CModelDrawCallData drawCallData = LoadCModelDrawCallData(drawCallID);
     
-    const CullingData cullingData = LoadCullingData(drawCallData.cullingDataID);
-    const CModelInstanceData instance = _cModelInstances[drawCallData.instanceID];
+    const CModelInstanceData instance = _cModelInstanceDatas[drawCallData.instanceID];
+    const CullingData cullingData = LoadCullingData(instance.modelID);
+    
+    float4x4 instanceMatrix = _cModelInstanceMatrices[drawCallData.instanceID];
     
     // Get center and extents
     float3 center = (cullingData.boundingBox.min + cullingData.boundingBox.max) * 0.5f;
     float3 extents = cullingData.boundingBox.max - center;
     
     // Transform center
-    const float4x4 m = instance.instanceMatrix;
+    const float4x4 m = instanceMatrix;
     float3 transformedCenter = mul(float4(center, 1.0f), m).xyz;
     
     // Transform extents (take maximum)
@@ -218,7 +218,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // If we expect to sort afterwards, output the data needed for it
 #if PREPARE_SORT
-    _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instance);
+    _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instanceMatrix);
     _sortValues[outIndex] = outIndex;
 #endif
 }

@@ -4,7 +4,7 @@
 #include "cModel.inc.hlsl"
 #include "visibilityBuffer.inc.hlsl"
 
-[[vk::binding(9, CMODEL)]] SamplerState _sampler;
+[[vk::binding(10, CMODEL)]] SamplerState _sampler;
 
 struct PSInput
 {
