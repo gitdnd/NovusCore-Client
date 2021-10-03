@@ -408,46 +408,110 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
             {
                 commandList.PushMarker("Animation Request", Color::White);
 
-                AnimationRequest animationRequest;
-                while (_animationRequests.try_dequeue(animationRequest))
+                _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
                 {
-                    const Instance& instance = _instances.ReadGet(animationRequest.instanceId);
-
-                    const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(instance.modelId);
-                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(instance.modelId);
-
-                    u32 sequenceIndex = animationRequest.sequenceId;
-                    if (!complexModel.isAnimated)
-                        continue;
-
-                    _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
+                    _animationBoneInfo.ReadLock([&](const std::vector<AnimationBoneInfo>& animationBoneInfos)
                     {
-                        if (animationRequest.flags.isPlaying)
+                        AnimationRequest animationRequest;
+                        while (_animationRequests.try_dequeue(animationRequest))
                         {
+                            const Instance& instance = _instances.ReadGet(animationRequest.instanceId);
+
+                            const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(instance.modelId);
+                            const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(instance.modelId);
+                
+                            u32 sequenceIndex = animationRequest.sequenceId;
+                            if (!complexModel.isAnimated)
+                                continue;
+
                             for (u32 i = 0; i < modelInfo.numBones; i++)
                             {
-                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                bool animationIsLooping = animationRequest.flags.isLooping;
+                                const AnimationBoneInfo& animationBoneInfo = animationBoneInfos[modelInfo.boneInfoOffset + i];
 
-                                boneInstance.animationProgress = 0.f;
-                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                boneInstance.sequenceIndex = sequenceIndex;
+                                for (u32 j = 0; j < animationBoneInfo.numTranslationSequences; j++)
+                                {
+                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.translationSequenceOffset + j];
+
+                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                        continue;
+
+                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                    boneInstance.animationProgress = 0;
+
+                                    if (animationRequest.flags.isPlaying)
+                                    {
+                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isTranslationTrackGlobalSequence;
+
+                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                        boneInstance.sequenceIndex = sequenceIndex;
+                                    }
+                                    else
+                                    {
+                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                        boneInstance.sequenceIndex = 0;
+                                    }
+
+                                    _animationBoneInstances.SetDirtyElement(instance.boneInstanceDataOffset + i);
+                                    break;
+                                }
+
+                                for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
+                                {
+                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
+
+                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                        continue;
+
+                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                    boneInstance.animationProgress = 0;
+
+                                    if (animationRequest.flags.isPlaying)
+                                    {
+                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
+
+                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                        boneInstance.sequenceIndex = sequenceIndex;
+                                    }
+                                    else
+                                    {
+                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                        boneInstance.sequenceIndex = 0;
+                                    }
+
+                                    _animationBoneInstances.SetDirtyElement(instance.boneInstanceDataOffset + i);
+                                    break;
+                                }
+
+                                for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
+                                {
+                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
+
+                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                        continue;
+
+                                    AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
+                                    boneInstance.animationProgress = 0;
+
+                                    if (animationRequest.flags.isPlaying)
+                                    {
+                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
+
+                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                        boneInstance.sequenceIndex = sequenceIndex;
+                                    }
+                                    else
+                                    {
+                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                        boneInstance.sequenceIndex = 0;
+                                    }
+
+                                    _animationBoneInstances.SetDirtyElement(instance.boneInstanceDataOffset + i);
+                                    break;
+                                }
                             }
                         }
-                        else
-                        {
-                            for (u32 i = 0; i < modelInfo.numBones; i++)
-                            {
-                                AnimationBoneInstance& boneInstance = animationBoneInstances[instance.boneInstanceDataOffset + i];
-                                boneInstance.animationProgress = 0.f;
-                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                boneInstance.sequenceIndex = 0;
-                            }
-                        }
-
-                        _animationBoneInstances.SetDirtyElements(instance.boneInstanceDataOffset, modelInfo.numBones);
                     });
-                }
+                });
 
                 commandList.PopMarker();
 
@@ -1253,7 +1317,11 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                 sequence.animationSubId = cmodelSequence.subId;
                 sequence.nextSubAnimationId = cmodelSequence.nextVariationId;
                 sequence.nextAliasId = cmodelSequence.nextAliasId;
-                sequence.flags = cmodelSequence.flags.isAlwaysPlaying | cmodelSequence.flags.isAlias | cmodelSequence.flags.blendTransition;
+
+                sequence.flags.isAlwaysPlaying = cmodelSequence.flags.isAlwaysPlaying;
+                sequence.flags.isAlias = cmodelSequence.flags.isAlias;
+                sequence.flags.blendTransition = cmodelSequence.flags.blendTransition;
+
                 sequence.duration = static_cast<float>(cmodelSequence.duration) / 1000.f;
                 sequence.repeatMin = cmodelSequence.repetitionRange.x;
                 sequence.repeatMax = cmodelSequence.repetitionRange.y;
@@ -2046,15 +2114,28 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             animationBoneInstances.resize(numBoneInstances + numBones);
         });
 
-        AnimationRequest animationRequest;
-        {
-            animationRequest.instanceId = instanceIndex;
-            animationRequest.sequenceId = 0;
-            animationRequest.flags.isPlaying = true;
-            animationRequest.flags.isLooping = true;
-        }
+        const AnimationModelInfo& animationModelInfo = _animationModelInfo.ReadGet(complexModel.objectID);
 
-        _animationRequests.enqueue(animationRequest);
+        _animationSequences.ReadLock([&](const std::vector<AnimationSequence>& animationSequences)
+        {
+            for (u32 i = 0; i < animationModelInfo.numSequences; i++)
+            {
+                const AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
+
+                if (animationSequence.flags.isAlwaysPlaying)
+                {
+                    AnimationRequest animationRequest;
+                    {
+                        animationRequest.instanceId = instanceIndex;
+                        animationRequest.sequenceId = i;
+                        animationRequest.flags.isPlaying = true;
+                        animationRequest.flags.isLooping = true;
+                    }
+
+                    _animationRequests.enqueue(animationRequest);
+                }
+            }
+        });
     }
     else
     {

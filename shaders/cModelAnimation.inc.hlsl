@@ -104,121 +104,112 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
     const uint isRotationTrackGlobalSequence = (boneInfo.flags & 0x4) != 0;
     const uint isScaleTrackGlobalSequence = (boneInfo.flags & 0x8) != 0;
 
-    if (isScaleTrackGlobalSequence == false)
+    for (int i = 0; i < numScaleSequences; i++)
     {
-        for (int i = 0; i < numScaleSequences; i++)
+        AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.scaleTrackOffset + i];
+        if (trackInfo.sequenceIndex != ctx.activeSequenceId)
+            continue;
+
+        uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
+        uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
+
+        for (int j = 0; j < numTimestamps; j++)
         {
-            AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.scaleTrackOffset + i];
-            if (trackInfo.sequenceIndex != ctx.activeSequenceId)
-                continue;
-
-            uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
-            uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
-
-            for (int j = 0; j < numTimestamps; j++)
+            float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+            if (state.animationProgress < trackTimestamp)
             {
-                float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                if (state.animationProgress < trackTimestamp)
+                float defaultTimestamp = 0.f;
+                float4 defaultValue = float4(1.f, 1.f, 1.f, 0.f);
+
+                if (j > 0)
                 {
-                    float defaultTimestamp = 0.f;
-                    float4 defaultValue = float4(1.f, 1.f, 1.f, 0.f);
-
-                    if (j > 0)
-                    {
-                        defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
-                        defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
-                    }
-
-                    float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                    float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
-
-                    float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
-                    scaleValue = lerp(defaultValue, nextValue, time);
-
-                    break;
+                    defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
+                    defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
                 }
-            }
 
-            break;
+                float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+                float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
+
+                float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
+                scaleValue = lerp(defaultValue, nextValue, time);
+
+                break;
+            }
         }
+
+        break;
     }
 
-    if (isRotationTrackGlobalSequence == false)
+    for (int o = 0; o < numRotationSequences; o++)
     {
-        for (int o = 0; o < numRotationSequences; o++)
+        AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.rotationTrackOffset + o];
+        if (trackInfo.sequenceIndex != ctx.activeSequenceId)
+            continue;
+
+        uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
+        uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
+
+        for (int j = 0; j < numTimestamps; j++)
         {
-            AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.rotationTrackOffset + o];
-            if (trackInfo.sequenceIndex != ctx.activeSequenceId)
-                continue;
-
-            uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
-            uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
-
-            for (int j = 0; j < numTimestamps; j++)
+            float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+            if (state.animationProgress < trackTimestamp)
             {
-                float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                if (state.animationProgress < trackTimestamp)
+                float defaultTimestamp = 0.f;
+                float4 defaultValue = float4(0.f, 0.f, 0.f, 1.f);
+
+                if (j > 0)
                 {
-                    float defaultTimestamp = 0.f;
-                    float4 defaultValue = float4(0.f, 0.f, 0.f, 1.f);
-
-                    if (j > 0)
-                    {
-                        defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
-                        defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
-                    }
-
-                    float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                    float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
-
-                    float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
-                    rotationValue = slerp(defaultValue, nextValue, time);
-                    break;
+                    defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
+                    defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
                 }
-            }
 
-            break;
+                float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+                float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
+
+                float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
+                rotationValue = slerp(defaultValue, nextValue, time);
+                break;
+            }
         }
+
+        break;
     }
 
-    if (isTranslationTrackGlobalSequence == false)
+    for (int p = 0; p < numTranslationSequences; p++)
     {
-        for (int p = 0; p < numTranslationSequences; p++)
+        AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.translationTrackOffset + p];
+
+        if (trackInfo.sequenceIndex != ctx.activeSequenceId)
+            continue;
+
+        uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
+        uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
+
+        for (int j = 0; j < numTimestamps; j++)
         {
-            AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.translationTrackOffset + p];
-
-            if (trackInfo.sequenceIndex != ctx.activeSequenceId)
-                continue;
-
-            uint numTimestamps = trackInfo.packedData0 & 0xFFFF;
-            uint numValues = (trackInfo.packedData0 >> 16) & 0xFFFF;
-
-            for (int j = 0; j < numTimestamps; j++)
+            float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+            if (state.animationProgress < trackTimestamp)
             {
-                float trackTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                if (state.animationProgress < trackTimestamp)
+                float defaultTimestamp = 0.f;
+                float4 defaultValue = float4(0.f, 0.f, 0.f, 0.f);
+
+                if (j > 0)
                 {
-                    float defaultTimestamp = 0.f;
-                    float4 defaultValue = float4(0.f, 0.f, 0.f, 0.f);
-
-                    if (j > 0)
-                    {
-                        defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
-                        defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
-                    }
-
-                    float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
-                    float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
-
-                    float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
-                    translationValue = lerp(defaultValue, nextValue, time);
-
-                    break;
+                    defaultTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + (j - 1)] / 1000.f);
+                    defaultValue = ctx.trackValues[trackInfo.valueOffset + (j - 1)];
                 }
-            }
 
-            break;
+                float nextValueTimestamp = ((float)ctx.trackTimestamps[trackInfo.timestampOffset + j] / 1000.f);
+                float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
+
+                float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
+                translationValue = lerp(defaultValue, nextValue, time);
+
+                break;
+            }
         }
+
+        break;
     }
 
     boneMatrix = mul(MatrixTranslate(pivotPoint.xyz), boneMatrix);

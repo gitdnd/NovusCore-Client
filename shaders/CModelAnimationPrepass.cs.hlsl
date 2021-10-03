@@ -43,7 +43,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     CModelInstanceData instanceData = _cModelInstances[instanceID];
     const AnimationModelInfo modelInfo = _animationModelInfos[instanceData.modelId];
 
-    int numSequences = modelInfo.packedData0& 0xFFFF;
+    int numSequences = modelInfo.packedData0 & 0xFFFF;
     int numBones = (modelInfo.packedData0 >> 16) & 0xFFFF;
 
     if (numSequences == 0)

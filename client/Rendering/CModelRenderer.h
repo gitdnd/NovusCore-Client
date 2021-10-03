@@ -153,6 +153,7 @@ public:
             u32 isPlaying : 1;
             u32 isLooping : 1;
         };
+
         u32 instanceId = 0;
         u32 sequenceId = 0;
 
@@ -265,7 +266,12 @@ private:
         u16 nextSubAnimationId = 0;
         u16 nextAliasId = 0;
 
-        u32 flags = 0;
+        struct AnimationSequenceFlag
+        {
+            u32 isAlwaysPlaying : 1;
+            u32 isAlias : 1;
+            u32 blendTransition : 1; // (This applies if set on either side of the transition) If set we lerp between the end -> start states, but only if end != start (Compare Bone Values)
+        } flags;
 
         f32 duration = 0.f;
 
