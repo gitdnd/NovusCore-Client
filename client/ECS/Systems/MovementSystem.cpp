@@ -25,14 +25,6 @@ void MovementSystem::Init(entt::registry& registry)
     localplayerSingleton.movement.flags.canJump = true;
     localplayerSingleton.movement.flags.canChangeDirection = true;
 
-    // This allows us to move around in the world "offline" (The server will automatically override this when connecting
-    localplayerSingleton.entity = registry.create();
-
-    registry.emplace<DebugBox>(localplayerSingleton.entity);
-    Transform& transform = registry.emplace<Transform>(localplayerSingleton.entity);
-    transform.position = vec3(-9249.f, 87.f, 79.f);
-    transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
-
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Movement", 0);
     keybindGroup->SetActive(true);

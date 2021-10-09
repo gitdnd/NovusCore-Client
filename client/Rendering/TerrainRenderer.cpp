@@ -9,9 +9,13 @@
 #include "../Utils/MapUtils.h"
 #include "../Editor/Editor.h"
 
+#include "../ECS/Components/Transform.h"
+#include "../ECS/Components/Rendering/DebugBox.h"
+
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
 #include "../ECS/Components/Singletons/ConfigSingleton.h"
+#include "../ECS/Components/Singletons/LocalplayerSingleton.h"
 
 #include "CameraFreelook.h"
 
@@ -78,7 +82,7 @@ TerrainRenderer::TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* de
 
 TerrainRenderer::~TerrainRenderer()
 {
-    
+
 }
 
 void TerrainRenderer::Update(f32 deltaTime)
@@ -92,8 +96,42 @@ void TerrainRenderer::Update(f32 deltaTime)
         ServiceLocator::GetEditor()->ClearSelection();
         registry->clear();
         ServiceLocator::GetRenderer()->ClearUploadBuffers();
-        ServiceLocator::GetClientRenderer()->GetTerrainRenderer()->LoadMap(mapToBeLoaded);
+        LoadMap(mapToBeLoaded);
         mapSingleton.ResetMapToBeLoaded();
+
+        // This allows us to move around in the world "offline" (The server will automatically override this when connecting
+        {
+            LocalplayerSingleton& localplayerSingleton = registry->ctx_or_set<LocalplayerSingleton>();
+            localplayerSingleton.entity = registry->create();
+
+            registry->emplace<DebugBox>(localplayerSingleton.entity);
+            Transform& transform = registry->emplace<Transform>(localplayerSingleton.entity);
+            transform.position = vec3(-9249.f, 87.f, 79.f);
+            transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
+        }
+    }
+
+    // Check if we should load a default map specified by Config
+    {
+        const Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+
+        ConfigSingleton& configSingleton = registry->ctx<ConfigSingleton>();
+        const std::string& defaultMapString = configSingleton.uiConfig.GetDefaultMap();
+
+        if (currentMap.id == std::numeric_limits<u16>().max() &&
+            defaultMapString.length() != 0)
+        {
+            u32 defaultMapHash = StringUtils::fnv1a_32(defaultMapString.c_str(), defaultMapString.length());
+            const NDBC::Map* defaultMap = mapSingleton.GetMapByNameHash(defaultMapHash);
+
+            if (defaultMap != nullptr)
+            {
+                CameraFreeLook* cameraFreeLook = ServiceLocator::GetCameraFreeLook();
+                cameraFreeLook->LoadFromFile("freelook.cameradata");
+
+                mapSingleton.SetMapToBeLoaded(defaultMapHash);
+            }
+        }
     }
 
     Camera* camera = ServiceLocator::GetCamera();
@@ -617,25 +655,7 @@ void TerrainRenderer::CreatePermanentResources()
         }
     }
 
-    // Check if we should load a default map specified by Config
-    {
-        ConfigSingleton& configSingleton = registry->ctx<ConfigSingleton>();
-        const std::string& defaultMapString = configSingleton.uiConfig.GetDefaultMap();
-
-        u32 defaultMapHash = StringUtils::fnv1a_32(defaultMapString.c_str(), defaultMapString.length());
-        const NDBC::Map* defaultMap = mapSingleton.GetMapByNameHash(defaultMapHash);
-
-        if (defaultMap != nullptr)
-        {
-            CameraFreeLook* cameraFreeLook = ServiceLocator::GetCameraFreeLook();
-            cameraFreeLook->LoadFromFile("freelook.cameradata");
-            LoadMap(defaultMap);
-        }
-        else
-        {
-            ExecuteLoad(); // We have to ExecuteLoad to create buffers and bind descriptors, the buffers will be empty though
-        }
-    }
+    ExecuteLoad(); // We have to ExecuteLoad to create buffers and bind descriptors, the buffers will be empty though
 }
 
 void TerrainRenderer::RegisterChunksToBeLoaded(Terrain::Map& map, ivec2 middleChunk, u16 drawDistance)
