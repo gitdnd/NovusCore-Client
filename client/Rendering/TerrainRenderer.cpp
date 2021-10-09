@@ -83,6 +83,19 @@ TerrainRenderer::~TerrainRenderer()
 
 void TerrainRenderer::Update(f32 deltaTime)
 {
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+    NDBC::Map* mapToBeLoaded = mapSingleton.GetMapToBeLoaded();
+    if (mapToBeLoaded != nullptr)
+    {
+        ServiceLocator::GetEditor()->ClearSelection();
+        registry->clear();
+        ServiceLocator::GetRenderer()->ClearUploadBuffers();
+        ServiceLocator::GetClientRenderer()->GetTerrainRenderer()->LoadMap(mapToBeLoaded);
+        mapSingleton.ResetMapToBeLoaded();
+    }
+
     Camera* camera = ServiceLocator::GetCamera();
 
     if (CVAR_HeightBoxEnable.Get())

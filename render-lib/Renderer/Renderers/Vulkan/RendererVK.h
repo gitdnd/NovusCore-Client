@@ -34,11 +34,13 @@ namespace Renderer
         void Deinit() override;
 
         void ReloadShaders(bool forceRecompileAll) override;
+        void ClearUploadBuffers() override;
 
         // Creation
         [[nodiscard]] BufferID CreateBuffer(BufferDesc& desc) override;
         [[nodiscard]] BufferID CreateTemporaryBuffer(BufferDesc& desc, u32 framesLifetime) override;
         void QueueDestroyBuffer(BufferID buffer) override;
+        void DestroyBuffer(BufferID buffer) override;
 
         [[nodiscard]] ImageID CreateImage(ImageDesc& desc) override;
         [[nodiscard]] DepthImageID CreateDepthImage(DepthImageDesc& desc) override;

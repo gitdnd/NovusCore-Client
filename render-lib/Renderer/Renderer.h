@@ -43,6 +43,7 @@ namespace Renderer
         virtual void Deinit() = 0;
 
         virtual void ReloadShaders(bool forceRecompileAll) = 0;
+        virtual void ClearUploadBuffers() = 0;
 
         virtual ~Renderer();
 
@@ -52,6 +53,7 @@ namespace Renderer
         virtual [[nodiscard]] BufferID CreateBuffer(BufferDesc& desc) = 0;
         virtual [[nodiscard]] BufferID CreateTemporaryBuffer(BufferDesc& desc, u32 framesLifetime) = 0;
         virtual [[nodiscard]] void QueueDestroyBuffer(BufferID buffer) = 0;
+        virtual [[nodiscard]] void DestroyBuffer(BufferID buffer) = 0;
 
         virtual [[nodiscard]] ImageID CreateImage(ImageDesc& desc) = 0;
         virtual [[nodiscard]] DepthImageID CreateDepthImage(DepthImageDesc& desc) = 0;

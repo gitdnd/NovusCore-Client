@@ -1291,7 +1291,7 @@ void MapObjectRenderer::CreateBuffers()
         // Sync DrawCalls buffer to GPU
         _drawCalls.SetDebugName("MapObjectDrawCalls");
         _drawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
-        _drawCalls.SyncToGPU(_renderer, nullptr);
+        _drawCalls.SyncToGPU(_renderer);
 
         _cullingDescriptorSet.Bind("_draws"_h, _drawCalls.GetBuffer());
         _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _drawCalls.GetBuffer());
@@ -1321,7 +1321,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _vertices.SetDebugName("MapObjectVertexBuffer");
         _vertices.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _vertices.SyncToGPU(_renderer, nullptr);
+        _vertices.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertices.GetBuffer());
         _materialPassDescriptorSet.Bind("_packedMapObjectVertices"_h, _vertices.GetBuffer());
@@ -1331,7 +1331,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _indices.SetDebugName("MapObjectIndexBuffer");
         _indices.SetUsage(Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
-        _indices.SyncToGPU(_renderer, nullptr);
+        _indices.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_mapObjectIndices"_h, _indices.GetBuffer());
         _materialPassDescriptorSet.Bind("_mapObjectIndices"_h, _indices.GetBuffer());
@@ -1341,7 +1341,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _instances.SetDebugName("MapObjectInstanceBuffer");
         _instances.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _instances.SyncToGPU(_renderer, nullptr);
+        _instances.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instances.GetBuffer());
         _materialPassDescriptorSet.Bind("_mapObjectInstanceData"_h, _instances.GetBuffer());
@@ -1352,7 +1352,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _instanceLookupData.SetDebugName("MapObjectInstanceLookupDataBuffer");
         _instanceLookupData.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _instanceLookupData.SyncToGPU(_renderer, nullptr);
+        _instanceLookupData.SyncToGPU(_renderer);
 
         _cullingDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupData.GetBuffer());
         _geometryPassDescriptorSet.Bind("_packedInstanceLookup"_h, _instanceLookupData.GetBuffer());
@@ -1363,7 +1363,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _materials.SetDebugName("MapObjectMaterialBuffer");
         _materials.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _materials.SyncToGPU(_renderer, nullptr);
+        _materials.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materials.GetBuffer());
         _materialPassDescriptorSet.Bind("_packedMapObjectMaterialData"_h, _materials.GetBuffer());
@@ -1373,7 +1373,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _materialParameters.SetDebugName("MapObjectMaterialParamBuffer");
         _materialParameters.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _materialParameters.SyncToGPU(_renderer, nullptr);
+        _materialParameters.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParameters.GetBuffer());
         _materialPassDescriptorSet.Bind("_packedMapObjectMaterialParams"_h, _materialParameters.GetBuffer());
@@ -1383,7 +1383,7 @@ void MapObjectRenderer::CreateBuffers()
     {
         _cullingData.SetDebugName("MapObjectCullingDataBuffer");
         _cullingData.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _cullingData.SyncToGPU(_renderer, nullptr);
+        _cullingData.SyncToGPU(_renderer);
 
         _cullingDescriptorSet.Bind("_packedCullingData"_h, _cullingData.GetBuffer());
     }

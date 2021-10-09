@@ -38,9 +38,9 @@ namespace GameSocket
         packet->payload->Get(transform.position);
         packet->payload->Get(transform.GetRotation());
         packet->payload->Get(transform.scale);
-        transform.isDirty = true;
+        registry->emplace_or_replace<TransformIsDirty>(entity);
 
-        Model& model = EntityUtils::CreateModelComponent(*registry, entity, "Data/models/Cube.novusmodel");
+        //Model& model = EntityUtils::CreateModelComponent(*registry, entity, "Data/models/Cube.novusmodel");
         return true;
     }
     bool GameHandlers::HandleCreateEntity(std::shared_ptr<NetworkClient> networkClient, std::shared_ptr<NetworkPacket>& packet)
@@ -67,9 +67,9 @@ namespace GameSocket
         packet->payload->Get(transform.position);
         packet->payload->Get(transform.GetRotation());
         packet->payload->Get(transform.scale);
-        transform.isDirty = true;
+        registry->emplace_or_replace<TransformIsDirty>(entity);
 
-        Model& model = EntityUtils::CreateModelComponent(*registry, entity, "Data/models/Cube.novusmodel");
+        //Model& model = EntityUtils::CreateModelComponent(*registry, entity, "Data/models/Cube.novusmodel");
 
         return true;
     }
@@ -88,7 +88,7 @@ namespace GameSocket
         packet->payload->Get(transform.position);
         packet->payload->Get(transform.GetRotation());
         packet->payload->Get(transform.scale);
-        transform.isDirty = true;
+        registry->emplace_or_replace<TransformIsDirty>(entityId);
 
         return true;
     }

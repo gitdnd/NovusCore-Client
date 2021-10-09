@@ -39,7 +39,7 @@
 
 // Systems
 #include "ECS/Systems/Network/ConnectionSystems.h"
-#include "ECS/Systems/Rendering/RenderModelSystem.h"
+#include "ECS/Systems/Rendering/UpdateModelTransformSystem.h"
 #include "ECS/Systems/Physics/SimulateDebugCubeSystem.h"
 #include "ECS/Systems/MovementSystem.h"
 #include "ECS/Systems/AreaUpdateSystem.h"
@@ -555,8 +555,8 @@ void EngineLoop::SetupUpdateFramework()
     // RenderModelSystem
     tf::Task renderModelSystemTask = framework.emplace([this, &gameRegistry]()
     {
-        ZoneScopedNC("RenderModelSystem::Update", tracy::Color::Blue2);
-        RenderModelSystem::Update(gameRegistry, _clientRenderer);
+        ZoneScopedNC("UpdateModelTransformSystem::Update", tracy::Color::Blue2);
+        UpdateModelTransformSystem::Update(gameRegistry);
         //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
     renderModelSystemTask.gather(simulateDebugCubeSystemTask);
@@ -850,11 +850,8 @@ void EngineLoop::DrawMapStats()
 
         if (ImGui::Button("Load"))
         {
-            u32 mapNamehash = StringUtils::fnv1a_32(preview, strlen(preview));
-            const NDBC::Map* map = mapSingleton.GetMapByNameHash(mapNamehash);
-
-            ServiceLocator::GetEditor()->ClearSelection();
-            ServiceLocator::GetClientRenderer()->GetTerrainRenderer()->LoadMap(map);
+            u32 mapNameHash = StringUtils::fnv1a_32(preview, strlen(preview));
+            mapSingleton.SetMapToBeLoaded(mapNameHash);
         }
 
         ImGui::SameLine();

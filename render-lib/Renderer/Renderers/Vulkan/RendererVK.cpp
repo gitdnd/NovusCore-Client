@@ -49,7 +49,7 @@ namespace Renderer
         _commandListHandler->Init(_device);
         _samplerHandler->Init(_device);
         _semaphoreHandler->Init(_device);
-        _uploadBufferHandler->Init(_device, _bufferHandler, _textureHandler, _semaphoreHandler, _commandListHandler);
+        _uploadBufferHandler->Init(this, _device, _bufferHandler, _textureHandler, _semaphoreHandler, _commandListHandler);
 
         _textureHandler->InitDebugTexture();
 
@@ -87,6 +87,11 @@ namespace Renderer
         CreateDummyPipeline();
     }
 
+    void RendererVK::ClearUploadBuffers()
+    {
+        _uploadBufferHandler->Clear();
+    }
+
     BufferID RendererVK::CreateBuffer(BufferDesc& desc)
     {
         return _bufferHandler->CreateBuffer(desc);
@@ -98,6 +103,11 @@ namespace Renderer
     }
 
     void RendererVK::QueueDestroyBuffer(BufferID buffer)
+    {
+        _uploadBufferHandler->QueueDestroyBuffer(buffer);
+    }
+
+    void RendererVK::DestroyBuffer(BufferID buffer)
     {
         std::scoped_lock(_destroyListMutex);
         _destroyLists[_destroyListIndex].buffers.push_back(buffer);
@@ -982,16 +992,7 @@ namespace Renderer
 
     void RendererVK::CopyBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range)
     {
-        VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
-
-        VkBuffer vkDstBuffer = _bufferHandler->GetBuffer(dstBuffer);
-        VkBuffer vkSrcBuffer = _bufferHandler->GetBuffer(srcBuffer);
-
-        VkBufferCopy copyRegion = {};
-        copyRegion.srcOffset = srcOffset;
-        copyRegion.dstOffset = dstOffset;
-        copyRegion.size = range;
-        vkCmdCopyBuffer(commandBuffer, vkSrcBuffer, vkDstBuffer, 1, &copyRegion);
+        _uploadBufferHandler->CopyBufferToBuffer(dstBuffer, dstOffset, srcBuffer, srcOffset, range);
     }
 
     void RendererVK::PipelineBarrier(CommandListID commandListID, PipelineBarrierType type, BufferID buffer)
@@ -1408,9 +1409,6 @@ namespace Renderer
         VkBuffer vkDstBuffer = _bufferHandler->GetBuffer(dstBuffer);
         VkBuffer vkSrcBuffer = _bufferHandler->GetBuffer(srcBuffer);
         _device->CopyBuffer(vkDstBuffer, dstOffset, vkSrcBuffer, srcOffset, range);
-
-        //std::scoped_lock(_destroyListMutex);
-        //DestroyObjects(_destroyLists[_destroyListIndex]);
     }
 
     void RendererVK::FillBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, u64 size, u32 data)

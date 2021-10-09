@@ -28,11 +28,14 @@ namespace Renderer
         class UploadBufferHandlerVK
         {
         public:
-            void Init(RenderDeviceVK* device, BufferHandlerVK* bufferHandler, TextureHandlerVK* textureHandler, SemaphoreHandlerVK* semaphoreHandler, CommandListHandlerVK* commandListHandler);
+            void Init(RendererVK* renderer, RenderDeviceVK* device, BufferHandlerVK* bufferHandler, TextureHandlerVK* textureHandler, SemaphoreHandlerVK* semaphoreHandler, CommandListHandlerVK* commandListHandler);
             void ExecuteUploadTasks();
+            void Clear();
 
             [[nodiscard]] std::shared_ptr<UploadBuffer> CreateUploadBuffer(BufferID targetBuffer, size_t targetOffset, size_t size);
             [[nodiscard]] std::shared_ptr<UploadBuffer> CreateUploadBuffer(TextureID targetTexture, size_t targetOffset, size_t size);
+            void CopyBufferToBuffer(BufferID targetBuffer, size_t targetOffset, BufferID sourceBuffer, size_t sourceOffset, size_t size);
+            void QueueDestroyBuffer(BufferID buffer);
 
             SemaphoreID GetUploadFinishedSemaphore();
             bool ShouldWaitForUpload();
@@ -46,6 +49,7 @@ namespace Renderer
             void RunSubmitThread();
 
         private:
+            RendererVK* _renderer;
             RenderDeviceVK* _device;
             BufferHandlerVK* _bufferHandler;
             TextureHandlerVK* _textureHandler;

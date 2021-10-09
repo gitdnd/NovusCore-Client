@@ -15,6 +15,8 @@
 #include "../../Components/Transform.h"
 #include "../../Components/Physics/Rigidbody.h"
 #include "../../Components/Rendering/DebugBox.h"
+#include "../../Components/Rendering/ModelDisplayInfo.h"
+#include "../../Components/Rendering/VisibleModel.h"
 
 void SimulateDebugCubeSystem::Init(entt::registry& registry)
 {
@@ -24,19 +26,22 @@ void SimulateDebugCubeSystem::Init(entt::registry& registry)
     keybindGroup->AddKeyboardCallback("SpawnDebugBox", GLFW_KEY_B, KeybindAction::Press, KeybindModifier::Any, [&registry](i32 key, KeybindAction action, KeybindModifier modifier)
     {
         Camera* camera = ServiceLocator::GetCamera();
-    
+
         // Create ENTT entity
         entt::entity entity = registry.create();
-    
+
         Transform& transform = registry.emplace<Transform>(entity);
         transform.position = camera->GetPosition();
-        transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
-        transform.isDirty = true;
-    
+
+        //transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
+        transform.UpdateRotationMatrix(false);
+
+        registry.emplace<TransformIsDirty>(entity);
         registry.emplace<Rigidbody>(entity);
-        registry.emplace<DebugBox>(entity);
-    
-        DebugHandler::Print("Spawned debug cube!");
+        //registry.emplace<DebugBox>(entity);
+
+        registry.emplace<VisibleModel>(entity);
+        ModelDisplayInfo& modelDisplayInfo = registry.emplace<ModelDisplayInfo>(entity, ModelType::Creature, 3019); // 65 horse
     
         return true;
     });
@@ -65,13 +70,15 @@ void SimulateDebugCubeSystem::Update(entt::registry& registry, DebugRenderer* de
         vec3 distToCollision;
         if (Terrain::MapUtils::Intersect_AABB_TERRAIN_SWEEP(box, triangle, vec3(0, 0, -1), height, dist, distToCollision))
         {
-            transform.position += distToCollision;
+            transform.position.z += distToCollision.z;
             registry.remove<Rigidbody>(entity);
         }
         else
         {
             transform.position.z -= dist;
         }
+
+        registry.emplace_or_replace<TransformIsDirty>(entity);
     });
 
     auto debugCubeView = registry.view<Transform, DebugBox>();

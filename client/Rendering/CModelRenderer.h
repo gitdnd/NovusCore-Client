@@ -1,6 +1,7 @@
 #pragma once
 #include <NovusTypes.h>
 #include <mutex>
+#include <queue>
 
 #include <Utils/StringUtils.h>
 #include <Utils/ConcurrentQueue.h>
@@ -78,6 +79,14 @@ public:
         u32 animatedVertexOffset = 0;
     };
 
+    struct InstanceDisplayInfo
+    {
+        u32 opaqueDrawCallOffset = 0;
+        u32 opaqueDrawCallCount = 0;
+        u32 transparentDrawCallOffset = 0;
+        u32 transparentDrawCallCount = 0;
+    };
+
     struct LoadedComplexModel
     {
         LoadedComplexModel() {}
@@ -153,6 +162,11 @@ public:
     CModelRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer);
     ~CModelRenderer();
 
+    void OnModelCreated(entt::registry& registry, entt::entity entity);
+    void OnModelDestroyed(entt::registry& registry, entt::entity entity);
+    void OnModelVisible(entt::registry& registry, entt::entity entity);
+    void OnModelInvisible(entt::registry& registry, entt::entity entity);
+
     void Update(f32 deltaTime);
 
     void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
@@ -172,6 +186,8 @@ public:
     SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
     SafeVector<ModelInstanceData>& GetModelInstanceDatas() { return _modelInstanceDatas; }
     const ModelInstanceData& GetModelInstanceData(size_t index) { return _modelInstanceDatas.ReadGet(index); }
+
+    Renderer::GPUVector<mat4x4>& GetModelInstanceMatrices() { return _modelInstanceMatrices; }
     const mat4x4& GetModelInstanceMatrix(size_t index) { return _modelInstanceMatrices.ReadGet(index); }
 
     const SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _complexModelPlacementDetails; }
@@ -368,9 +384,10 @@ private:
     void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, u32& instanceIndex);
 
     void CreateBuffers();
-
+    void SyncBuffers();
 private:
     Renderer::Renderer* _renderer;
+    bool _loadingIsDirty = false;
 
     Renderer::SamplerID _sampler;
     Renderer::SamplerID _occlusionSampler;
@@ -392,9 +409,15 @@ private:
 
     SafeVector<ComplexModelToBeLoaded> _complexModelsToBeLoaded;
     SafeVector<LoadedComplexModel> _loadedComplexModels;
+
     SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
+    SafeUnorderedMap<u32, NDBC::CreatureDisplayInfo*> _nameHashToCreatureDisplayInfo;
+    SafeUnorderedMap<u32, NDBC::CreatureModelData*> _nameHashToCreatureModelData;
+
     SafeUnorderedMap<u32, u32> _opaqueDrawCallDataIndexToLoadedModelIndex;
     SafeUnorderedMap<u32, u32> _transparentDrawCallDataIndexToLoadedModelIndex;
+
+    SafeUnorderedMap<u32, std::queue<u32>> _freedModelIDInstances; // Key is ModelID, value is queue of InstanceID
 
     SafeVector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
     SafeVector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;
@@ -406,6 +429,8 @@ private:
     Renderer::GPUVector<u16> _indices;
     Renderer::GPUVector<TextureUnit> _textureUnits;
     Renderer::GPUVector<ModelInstanceData> _modelInstanceDatas;
+    SafeVector<InstanceDisplayInfo> _instanceDisplayInfos;
+
     Renderer::GPUVector<mat4x4> _modelInstanceMatrices;
     Renderer::GPUVector<CModel::CullingData> _cullingDatas;
 

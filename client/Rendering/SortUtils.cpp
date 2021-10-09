@@ -37,7 +37,7 @@ void SortUtils::Sort(Renderer::Renderer* renderer, Renderer::RenderGraphResource
         *numKeys = params.numKeys;
         renderer->UnmapBuffer(staging);
 
-        renderer->CopyBuffer(buffers.numKeysBuffer, 0, staging, 0, desc.size);
+        commandList.CopyBuffer(buffers.numKeysBuffer, 0, staging, 0, desc.size);
     }
     
     // Then we copy the keys and payload into the first buffer

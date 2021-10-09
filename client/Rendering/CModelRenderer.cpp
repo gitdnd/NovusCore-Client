@@ -28,6 +28,8 @@
 #include "../ECS/Components/Singletons/TimeSingleton.h"
 #include "../ECS/Components/Singletons/NDBCSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
+#include "../ECS/Components/Rendering/ModelDisplayInfo.h"
+#include "../ECS/Components/Rendering/VisibleModel.h"
 
 #include "Camera.h"
 #include "../Gameplay/Map/Map.h"
@@ -48,6 +50,19 @@ CModelRenderer::CModelRenderer(Renderer::Renderer* renderer, DebugRenderer* debu
     , _debugRenderer(debugRenderer)
 {
     CreatePermanentResources();
+
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    auto constructModelDisplayInfoSink = registry->on_construct<ModelDisplayInfo>();
+    constructModelDisplayInfoSink.connect<&CModelRenderer::OnModelCreated>(this);
+
+    auto destroyModelDisplayInfoSink = registry->on_destroy<ModelDisplayInfo>();
+    destroyModelDisplayInfoSink.connect<&CModelRenderer::OnModelDestroyed>(this);
+
+    auto visibleModelSink = registry->on_construct<VisibleModel>();
+    visibleModelSink.connect<&CModelRenderer::OnModelVisible>(this);
+    
+    auto invisibleModelSink = registry->on_destroy<VisibleModel>();
+    invisibleModelSink.connect<&CModelRenderer::OnModelInvisible>(this);
 }
 
 CModelRenderer::~CModelRenderer()
@@ -55,8 +70,222 @@ CModelRenderer::~CModelRenderer()
 
 }
 
+void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entity)
+{
+    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
+
+    NDBCSingleton& ndbcSingleton = registry.ctx<NDBCSingleton>();
+    NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
+    NDBC::CreatureDisplayInfo* creatureDisplayInfo = creatureDisplayInfoFile->GetRowById<NDBC::CreatureDisplayInfo>(modelDisplayInfo.displayID);
+
+    u32 creatureModelID = creatureDisplayInfo->modelId;
+    NDBC::File* creatureModelDataFile = ndbcSingleton.GetNDBCFile("CreatureModelData");
+    NDBC::CreatureModelData* creatureModelData = creatureModelDataFile->GetRowById<NDBC::CreatureModelData>(creatureModelID);
+
+    u32 modelPathStringID = creatureModelData->modelPath;
+    StringTable*& stringTable = creatureModelDataFile->GetStringTable();
+
+    const std::string& modelPath = stringTable->GetString(modelPathStringID);
+    StringUtils::StringHash modelPathHash = stringTable->GetStringHash(modelPathStringID);
+
+    LoadedComplexModel* complexModel;
+    u32 modelID = 0;
+
+    bool shouldLoad = false;
+    _nameHashToIndexMap.WriteLock([&](robin_hood::unordered_map<u32, u32>& nameHashToIndexMap)
+    {
+        // See if anything has already loaded this one
+        auto it = nameHashToIndexMap.find(modelPathHash);
+        if (it == nameHashToIndexMap.end())
+        {
+            // If it hasn't, we should load it
+            shouldLoad = true;
+
+            _loadedComplexModels.WriteLock([&](std::vector<LoadedComplexModel>& loadedComplexModels)
+            {
+                modelID = static_cast<u32>(loadedComplexModels.size());
+                complexModel = &loadedComplexModels.emplace_back();
+
+                // Create the CullingData
+                _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
+                {
+                    cullingDatas.push_back(CModel::CullingData());
+                });
+            });
+
+            nameHashToIndexMap[modelPathHash] = modelID;
+        }
+        else
+        {
+            _loadedComplexModels.WriteLock([&](std::vector<LoadedComplexModel>& loadedComplexModels)
+            {
+                modelID = it->second;
+                complexModel = &loadedComplexModels[it->second];
+            });
+        }
+    });
+
+    std::scoped_lock lock(complexModel->mutex);
+
+    static Terrain::Placement* defaultPlacement = new Terrain::Placement();
+    defaultPlacement->position = vec3(0, 0, 0);
+    defaultPlacement->rotation = quaternion(0, 0, 0, 1);
+    defaultPlacement->scale = static_cast<u16>(1024);
+
+    ComplexModelToBeLoaded modelToBeLoaded;
+    modelToBeLoaded.placement = defaultPlacement;
+    modelToBeLoaded.name = &modelPath;
+    modelToBeLoaded.nameHash = modelPathHash;
+
+    if (shouldLoad)
+    {
+        _nameHashToCreatureDisplayInfo.Add(modelPathHash, creatureDisplayInfo);
+        _nameHashToCreatureModelData.Add(modelPathHash, creatureModelData);
+
+        complexModel->modelID = modelID;
+        if (!LoadComplexModel(modelToBeLoaded, *complexModel))
+        {
+            complexModel->failedToLoad = true;
+            DebugHandler::PrintError("Failed to load Complex Model: %s", complexModel->debugName.c_str());
+        }
+    }
+
+    // Add Placement Details (This is used to go from a placement to LoadedComplexModel or InstanceData
+    Terrain::PlacementDetails& placementDetails = _complexModelPlacementDetails.EmplaceBack();
+    placementDetails.loadedIndex = modelID;
+
+    // Check if we have a freed instance we can reuse
+    bool reusedInstance = false;
+    _freedModelIDInstances.WriteLock([&](robin_hood::unordered_map<u32, std::queue<u32>>& freedModelIDInstances)
+    {
+        if (freedModelIDInstances[modelID].size() > 0)
+        {
+            modelDisplayInfo.instanceID = freedModelIDInstances[modelID].front();
+            placementDetails.instanceIndex = modelDisplayInfo.instanceID;
+
+            freedModelIDInstances[modelID].pop();
+            reusedInstance = true;
+        }
+    });
+
+    if (!reusedInstance)
+    {
+        // Add placement as an instance
+        AddInstance(*complexModel, *modelToBeLoaded.placement, placementDetails.instanceIndex);
+        modelDisplayInfo.instanceID = placementDetails.instanceIndex;
+    }
+
+    if (registry.has<VisibleModel>(entity))
+    {
+        OnModelVisible(registry, entity);
+    }
+    else
+    {
+        OnModelInvisible(registry, entity);
+    }
+
+    _loadingIsDirty = true;
+}
+
+void CModelRenderer::OnModelDestroyed(entt::registry& registry, entt::entity entity)
+{
+    OnModelInvisible(registry, entity);
+
+    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
+    u32 instanceID = modelDisplayInfo.instanceID;
+
+    const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(instanceID);
+
+    _freedModelIDInstances.WriteLock([&](robin_hood::unordered_map<u32, std::queue<u32>>& freedModelIDInstances)
+    {
+        freedModelIDInstances[modelInstanceData.modelID].push(instanceID);
+    });
+}
+
+void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entity)
+{
+    if (!registry.has<ModelDisplayInfo>(entity))
+        return;
+
+    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
+    u32 instanceID = modelDisplayInfo.instanceID;
+
+    _instanceDisplayInfos.ReadLock([&](const std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
+    {
+        const InstanceDisplayInfo& instanceDisplayInfo = instanceDisplayInfos[instanceID];
+
+        if (instanceDisplayInfo.opaqueDrawCallCount > 0)
+        {
+            _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+            {
+                for (u32 i = 0; i < instanceDisplayInfo.opaqueDrawCallCount; i++)
+                {
+                    u32 drawCallID = instanceDisplayInfo.opaqueDrawCallOffset + i;
+                    drawCalls[drawCallID].instanceCount = 1;
+                }
+            });
+            _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+        }
+        
+        if (instanceDisplayInfo.transparentDrawCallCount > 0)
+        {
+            _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+            {
+                for (u32 i = 0; i < instanceDisplayInfo.transparentDrawCallCount; i++)
+                {
+                    u32 drawCallID = instanceDisplayInfo.transparentDrawCallOffset + i;
+                    drawCalls[drawCallID].instanceCount = 1;
+                }
+            });
+            _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+        }
+    });
+}
+
+void CModelRenderer::OnModelInvisible(entt::registry& registry, entt::entity entity)
+{
+    if (!registry.has<ModelDisplayInfo>(entity))
+        return;
+
+    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
+    u32 instanceID = modelDisplayInfo.instanceID;
+
+    _instanceDisplayInfos.ReadLock([&](const std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
+    {
+        const InstanceDisplayInfo& instanceDisplayInfo = instanceDisplayInfos[instanceID];
+
+        if (instanceDisplayInfo.opaqueDrawCallCount > 0)
+        {
+            _opaqueDrawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+            {
+                for (u32 i = 0; i < instanceDisplayInfo.opaqueDrawCallCount; i++)
+                {
+                    u32 drawCallID = instanceDisplayInfo.opaqueDrawCallOffset + i;
+                    drawCalls[drawCallID].instanceCount = 0;
+                }
+            });
+            _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+        }
+
+        if (instanceDisplayInfo.transparentDrawCallCount > 0)
+        {
+            _transparentDrawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
+            {
+                for (u32 i = 0; i < instanceDisplayInfo.transparentDrawCallCount; i++)
+                {
+                    u32 drawCallID = instanceDisplayInfo.transparentDrawCallOffset + i;
+                    drawCalls[drawCallID].instanceCount = 0;
+                }
+            });
+            _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+        }
+    });
+}
+
 void CModelRenderer::Update(f32 deltaTime)
 {
+    SyncBuffers();
+
     bool drawBoundingBoxes = CVAR_ComplexModelDrawBoundingBoxes.Get() == 1;
     if (drawBoundingBoxes)
     {
@@ -92,6 +321,115 @@ void CModelRenderer::Update(f32 deltaTime)
 
                 _debugRenderer->DrawAABB3D(transformedMin, transformedMax, 0xff00ffff);
             }
+        });
+    }
+
+    // Handle animation requests
+    if (_animationRequests.size_approx() > 0)
+    {
+        _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
+        {
+            _animationBoneInfo.ReadLock([&](const std::vector<AnimationBoneInfo>& animationBoneInfos)
+            {
+                AnimationRequest animationRequest;
+                while (_animationRequests.try_dequeue(animationRequest))
+                {
+                    const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(animationRequest.instanceId);
+
+                    const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(modelInstanceData.modelID);
+                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(modelInstanceData.modelID);
+
+                    u32 sequenceIndex = animationRequest.sequenceId;
+                    if (!complexModel.isAnimated)
+                        continue;
+
+                    for (u32 i = 0; i < modelInfo.numBones; i++)
+                    {
+                        const AnimationBoneInfo& animationBoneInfo = animationBoneInfos[modelInfo.boneInfoOffset + i];
+
+                        for (u32 j = 0; j < animationBoneInfo.numTranslationSequences; j++)
+                        {
+                            const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.translationSequenceOffset + j];
+
+                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                continue;
+
+                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
+                            boneInstance.animationProgress = 0;
+
+                            if (animationRequest.flags.isPlaying)
+                            {
+                                bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isTranslationTrackGlobalSequence;
+
+                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                boneInstance.sequenceIndex = sequenceIndex;
+                            }
+                            else
+                            {
+                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                boneInstance.sequenceIndex = 0;
+                            }
+
+                            _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
+                            break;
+                        }
+
+                        for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
+                        {
+                            const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
+
+                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                continue;
+
+                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
+                            boneInstance.animationProgress = 0;
+
+                            if (animationRequest.flags.isPlaying)
+                            {
+                                bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
+
+                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                boneInstance.sequenceIndex = sequenceIndex;
+                            }
+                            else
+                            {
+                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                boneInstance.sequenceIndex = 0;
+                            }
+
+                            _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
+                            break;
+                        }
+
+                        for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
+                        {
+                            const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
+
+                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                                continue;
+
+                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
+                            boneInstance.animationProgress = 0;
+
+                            if (animationRequest.flags.isPlaying)
+                            {
+                                bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
+
+                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                boneInstance.sequenceIndex = sequenceIndex;
+                            }
+                            else
+                            {
+                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                boneInstance.sequenceIndex = 0;
+                            }
+
+                            _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
+                            break;
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -401,130 +739,6 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
                 _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
                 _materialPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
                 _transparencyPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
-            }
-
-            if (_animationRequests.size_approx() > 0)
-            {
-                commandList.PushMarker("Animation Request", Color::White);
-
-                _animationBoneInstances.WriteLock([&](std::vector<AnimationBoneInstance>& animationBoneInstances)
-                {
-                    _animationBoneInfo.ReadLock([&](const std::vector<AnimationBoneInfo>& animationBoneInfos)
-                    {
-                        AnimationRequest animationRequest;
-                        while (_animationRequests.try_dequeue(animationRequest))
-                        {
-                            const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(animationRequest.instanceId);
-
-                            const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(modelInstanceData.modelID);
-                            const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(modelInstanceData.modelID);
-                
-                            u32 sequenceIndex = animationRequest.sequenceId;
-                            if (!complexModel.isAnimated)
-                                continue;
-
-                            for (u32 i = 0; i < modelInfo.numBones; i++)
-                            {
-                                const AnimationBoneInfo& animationBoneInfo = animationBoneInfos[modelInfo.boneInfoOffset + i];
-
-                                for (u32 j = 0; j < animationBoneInfo.numTranslationSequences; j++)
-                                {
-                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.translationSequenceOffset + j];
-
-                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
-                                        continue;
-
-                                    AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
-                                    boneInstance.animationProgress = 0;
-
-                                    if (animationRequest.flags.isPlaying)
-                                    {
-                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isTranslationTrackGlobalSequence;
-
-                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                        boneInstance.sequenceIndex = sequenceIndex;
-                                    }
-                                    else
-                                    {
-                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                        boneInstance.sequenceIndex = 0;
-                                    }
-
-                                    _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                                    break;
-                                }
-
-                                for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
-                                {
-                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
-
-                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
-                                        continue;
-
-                                    AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
-                                    boneInstance.animationProgress = 0;
-
-                                    if (animationRequest.flags.isPlaying)
-                                    {
-                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
-
-                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                        boneInstance.sequenceIndex = sequenceIndex;
-                                    }
-                                    else
-                                    {
-                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                        boneInstance.sequenceIndex = 0;
-                                    }
-
-                                    _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                                    break;
-                                }
-
-                                for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
-                                {
-                                    const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
-
-                                    if (animationTrackInfo.sequenceIndex != sequenceIndex)
-                                        continue;
-
-                                    AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
-                                    boneInstance.animationProgress = 0;
-
-                                    if (animationRequest.flags.isPlaying)
-                                    {
-                                        bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
-
-                                        boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                        boneInstance.sequenceIndex = sequenceIndex;
-                                    }
-                                    else
-                                    {
-                                        boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                        boneInstance.sequenceIndex = 0;
-                                    }
-
-                                    _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                                    break;
-                                }
-                            }
-                        }
-                    });
-                });
-
-                commandList.PopMarker();
-
-                bool didResize = _animationBoneInstances.SyncToGPU(_renderer, &commandList);
-                if (didResize)
-                {
-                    _animationPrepassDescriptorSet.Bind("_animationBoneInstances"_h, _animationBoneInstances.GetBuffer());
-                }
-            }
-
-            // Add pipeline barriers for the animationBoneInstances buffer
-            {
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferDest, _animationBoneInstances.GetBuffer());
-                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _animationBoneInstances.GetBuffer());
             }
 
             const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
@@ -997,6 +1211,11 @@ void CModelRenderer::ExecuteLoad()
             modelInstanceDatas.reserve(numComplexModelsToBeLoaded);
         });
 
+        _instanceDisplayInfos.WriteLock([&](std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
+        {
+            instanceDisplayInfos.reserve(numComplexModelsToBeLoaded);
+        });
+
         _modelInstanceMatrices.WriteLock([&](std::vector<mat4x4>& modelInstanceMatrices)
         {
             modelInstanceMatrices.reserve(numComplexModelsToBeLoaded);
@@ -1147,8 +1366,10 @@ void CModelRenderer::Clear()
     _indices.Clear();
     _textureUnits.Clear();
     _modelInstanceDatas.Clear();
+    _instanceDisplayInfos.Clear();
     _modelInstanceMatrices.Clear();
     _cullingDatas.Clear();
+    _freedModelIDInstances.Clear();
 
     _animationSequences.Clear();
     _animationModelInfo.Clear();
@@ -1284,6 +1505,7 @@ void CModelRenderer::CreatePermanentResources()
 
     _animationBoneInstances.SetDebugName("animationBoneInstances");
     _animationBoneInstances.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+    _animationBoneInstances.SyncToGPU(_renderer);
 
     CreateBuffers();
 }
@@ -1298,7 +1520,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
 
     CModel::ComplexModel cModel;
     cModel.name = complexModel.debugName.data();
-    fs::path modelTexturePath = "Data/extracted/Textures/" + modelPath;
+
     if (!LoadFile(modelPath, cModel))
         return false;
 
@@ -1531,6 +1753,15 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         cullingData = cModel.cullingData;
     });
 
+    NDBCSingleton& ndbcSingleton = registry->ctx<NDBCSingleton>();
+    NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
+    StringTable*& creatureDisplayInfoStringTable = creatureDisplayInfoFile->GetStringTable();
+
+    fs::path modelTexturePath = "Data/extracted/Textures/" + modelPath;
+
+    NDBC::CreatureDisplayInfo* creatureDisplayInfo = nullptr;
+    _nameHashToCreatureDisplayInfo.TryGetUnsafe(toBeLoaded.nameHash, creatureDisplayInfo);
+
     // Handle this models renderbatches
     size_t numRenderBatches = static_cast<u32>(cModel.modelData.renderBatches.size());
     for (size_t i = 0; i < numRenderBatches; i++)
@@ -1612,14 +1843,43 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                             textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
                             _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
                         }
-                        /*else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
+                        else if (creatureDisplayInfo != nullptr)
                         {
-                            Renderer::TextureDesc textureDesc;
-                            //textureDesc.path = modelTexturePath.replace_filename("SahauginskinBlue.dds").string();
-                            //textureDesc.path = modelTexturePath.replace_filename("SnakeSkinBlack.dds").string();
-                            textureDesc.path = modelTexturePath.replace_filename("druidcatskinpurple.dds").string();
-                            _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                        }*/
+                            if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
+                            {
+                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture1);
+
+                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                Renderer::TextureDesc textureDesc;
+                                textureDesc.path = modelTexturePath.string();
+                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                            }
+                            else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_2)
+                            {
+                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture2);
+
+                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                Renderer::TextureDesc textureDesc;
+                                textureDesc.path = modelTexturePath.string();
+                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                            }
+                            else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_3)
+                            {
+                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture3);
+
+                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                Renderer::TextureDesc textureDesc;
+                                textureDesc.path = modelTexturePath.string();
+                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                            }
+                            else
+                            {
+                                // TODO: Add support for more complex texture types, like playermodels
+                            }
+                        }
                     }
                 }
             }
@@ -2063,6 +2323,8 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
 {
     ModelInstanceData* modelInstanceData = nullptr;
     mat4x4* modelInstanceMatrix = nullptr;
+    InstanceDisplayInfo* instanceDisplayInfo = nullptr;
+
     _modelInstanceDatas.WriteLock([&](std::vector<ModelInstanceData>& modelInstanceDatas)
     {
         instanceIndex = static_cast<u32>(modelInstanceDatas.size());
@@ -2071,6 +2333,11 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
         _modelInstanceMatrices.WriteLock([&](std::vector<mat4x4>& modelInstanceMatrices)
         {
             modelInstanceMatrix = &modelInstanceMatrices.emplace_back();
+        });
+        
+        _instanceDisplayInfos.WriteLock([&](std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
+        {
+            instanceDisplayInfo = &instanceDisplayInfos.emplace_back();
         });
     });
 
@@ -2160,6 +2427,9 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             _opaqueDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& opaqueDrawCallDatas)
             {
                 size_t numOpaqueDrawCallsBeforeAdd = opaqueDrawCalls.size();
+                instanceDisplayInfo->opaqueDrawCallOffset = static_cast<u32>(numOpaqueDrawCallsBeforeAdd);
+                instanceDisplayInfo->opaqueDrawCallCount = complexModel.numOpaqueDrawCalls;
+
                 for (u32 i = 0; i < complexModel.numOpaqueDrawCalls; i++)
                 {
                     const DrawCall& drawCallTemplate = complexModel.opaqueDrawCallTemplates[i];
@@ -2199,6 +2469,9 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             _transparentDrawCallDatas.WriteLock([&](std::vector<DrawCallData>& transparentDrawCallDatas)
             {
                 size_t numTransparentDrawCallsBeforeAdd = transparentDrawCalls.size();
+                instanceDisplayInfo->transparentDrawCallOffset = static_cast<u32>(numTransparentDrawCallsBeforeAdd);
+                instanceDisplayInfo->transparentDrawCallCount = complexModel.numTransparentDrawCalls;
+
                 for (u32 i = 0; i < complexModel.numTransparentDrawCalls; i++)
                 {
                     const DrawCall& drawCallTemplate = complexModel.transparentDrawCallTemplates[i];
@@ -2237,7 +2510,7 @@ void CModelRenderer::CreateBuffers()
     {
         _vertices.SetDebugName("CModelVertexBuffer");
         _vertices.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _vertices.SyncToGPU(_renderer, nullptr);
+        _vertices.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertices.GetBuffer());
         _materialPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertices.GetBuffer());
@@ -2248,7 +2521,7 @@ void CModelRenderer::CreateBuffers()
     {
         _indices.SetDebugName("CModelIndexBuffer");
         _indices.SetUsage(Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
-        _indices.SyncToGPU(_renderer, nullptr);
+        _indices.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_cModelIndices"_h, _indices.GetBuffer());
         _materialPassDescriptorSet.Bind("_cModelIndices"_h, _indices.GetBuffer());
@@ -2259,7 +2532,7 @@ void CModelRenderer::CreateBuffers()
     {
         _textureUnits.SetDebugName("CModelTextureUnitBuffer");
         _textureUnits.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _textureUnits.SyncToGPU(_renderer, nullptr);
+        _textureUnits.SyncToGPU(_renderer);
 
         _geometryPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnits.GetBuffer());
         _materialPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnits.GetBuffer());
@@ -2270,7 +2543,7 @@ void CModelRenderer::CreateBuffers()
     {
         _modelInstanceDatas.SetDebugName("CModelInstanceDatas");
         _modelInstanceDatas.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _modelInstanceDatas.SyncToGPU(_renderer, nullptr);
+        _modelInstanceDatas.SyncToGPU(_renderer);
 
         _opaqueCullingDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
         _transparentCullingDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
@@ -2284,7 +2557,7 @@ void CModelRenderer::CreateBuffers()
     {
         _modelInstanceMatrices.SetDebugName("CModelInstanceMatrices");
         _modelInstanceMatrices.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _modelInstanceMatrices.SyncToGPU(_renderer, nullptr);
+        _modelInstanceMatrices.SyncToGPU(_renderer);
 
         _opaqueCullingDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
         _transparentCullingDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
@@ -2298,7 +2571,7 @@ void CModelRenderer::CreateBuffers()
     {
         _cullingDatas.SetDebugName("CModelCullDataBuffer");
         _cullingDatas.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _cullingDatas.SyncToGPU(_renderer, nullptr);
+        _cullingDatas.SyncToGPU(_renderer);
 
         _opaqueCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDatas.GetBuffer());
         _transparentCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDatas.GetBuffer());
@@ -2308,7 +2581,7 @@ void CModelRenderer::CreateBuffers()
     {
         _animationSequences.SetDebugName("AnimationSequenceBuffer");
         _animationSequences.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _animationSequences.SyncToGPU(_renderer, nullptr);
+        _animationSequences.SyncToGPU(_renderer);
 
         _animationPrepassDescriptorSet.Bind("_animationSequences"_h, _animationSequences.GetBuffer());
     }    
@@ -2317,7 +2590,7 @@ void CModelRenderer::CreateBuffers()
     {
         _animationModelInfo.SetDebugName("AnimationModelInfoBuffer");
         _animationModelInfo.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _animationModelInfo.SyncToGPU(_renderer, nullptr);
+        _animationModelInfo.SyncToGPU(_renderer);
 
         _animationPrepassDescriptorSet.Bind("_animationModelInfos"_h, _animationModelInfo.GetBuffer());
     }    
@@ -2326,7 +2599,7 @@ void CModelRenderer::CreateBuffers()
     {
         _animationBoneInfo.SetDebugName("AnimationBoneInfoBuffer");
         _animationBoneInfo.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-        _animationBoneInfo.SyncToGPU(_renderer, nullptr);
+        _animationBoneInfo.SyncToGPU(_renderer);
 
         _animationPrepassDescriptorSet.Bind("_animationBoneInfos"_h, _animationBoneInfo.GetBuffer());
     }
@@ -2372,7 +2645,7 @@ void CModelRenderer::CreateBuffers()
         {
             _opaqueDrawCalls.SetDebugName("CModelOpaqueDrawCallBuffer");
             _opaqueDrawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
-            _opaqueDrawCalls.SyncToGPU(_renderer, nullptr);
+            _opaqueDrawCalls.SyncToGPU(_renderer);
             
             _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCalls.GetBuffer());
             _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
@@ -2391,7 +2664,7 @@ void CModelRenderer::CreateBuffers()
         {
             _opaqueDrawCallDatas.SetDebugName("CModelOpaqueDrawCallDataBuffer");
             _opaqueDrawCallDatas.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-            _opaqueDrawCallDatas.SyncToGPU(_renderer, nullptr);
+            _opaqueDrawCallDatas.SyncToGPU(_renderer);
             
             _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
             _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
@@ -2404,7 +2677,7 @@ void CModelRenderer::CreateBuffers()
         {
             _transparentDrawCalls.SetDebugName("CModelAlphaDrawCalls");
             _transparentDrawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
-            _transparentDrawCalls.SyncToGPU(_renderer, nullptr);
+            _transparentDrawCalls.SyncToGPU(_renderer);
 
             _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCalls.GetBuffer());
             _transparencyPassDescriptorSet.Bind("_cModelDraws"_h, _transparentDrawCalls.GetBuffer());
@@ -2423,7 +2696,7 @@ void CModelRenderer::CreateBuffers()
         {
             _transparentDrawCallDatas.SetDebugName("CModelAlphaDrawCallDataBuffer");
             _transparentDrawCallDatas.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
-            _transparentDrawCallDatas.SyncToGPU(_renderer, nullptr);
+            _transparentDrawCallDatas.SyncToGPU(_renderer);
 
             _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDatas.GetBuffer());
             _transparencyPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDatas.GetBuffer());
@@ -2465,7 +2738,7 @@ void CModelRenderer::CreateBuffers()
     }
     {
         Renderer::BufferDesc desc;
-        desc.name = "CModelVisibleInstanceIndexBuffer";
+        desc.name = "CModelVisibleInstanceCountArgumentBuffer";
         desc.size = sizeof(VkDispatchIndirectCommand);
         desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER;
         _visibleInstanceCountArgumentBuffer32 = _renderer->CreateBuffer(_visibleInstanceCountArgumentBuffer32, desc);
@@ -2474,7 +2747,237 @@ void CModelRenderer::CreateBuffers()
     }
     {
         Renderer::BufferDesc desc;
-        desc.name = "CModelVertexBuffer";
+        desc.name = "CModelAnimatedVertexBuffer";
+        desc.size = sizeof(PackedAnimatedVertexPositions) * _numTotalAnimatedVertices;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+        _animatedVertexPositions = _renderer->CreateBuffer(_animatedVertexPositions, desc);
+
+        _geometryPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
+        _materialPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
+        _transparencyPassDescriptorSet.Bind("_animatedCModelVertexPositions"_h, _animatedVertexPositions);
+    }
+}
+
+void CModelRenderer::SyncBuffers()
+{
+    // Sync InstanceMatrices buffer to GPU
+    if (_modelInstanceMatrices.SyncToGPU(_renderer))
+    {
+        _opaqueCullingDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+        _transparentCullingDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+        _animationPrepassDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+        _geometryPassDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+        _materialPassDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+        _transparencyPassDescriptorSet.Bind("_cModelInstanceMatrices"_h, _modelInstanceMatrices.GetBuffer());
+    }
+
+    if (_opaqueDrawCalls.SyncToGPU(_renderer))
+    {
+        _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCalls.GetBuffer());
+        _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
+        _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
+    }
+
+    if (_transparentDrawCalls.SyncToGPU(_renderer))
+    {
+        _transparentCullingDescriptorSet.Bind("_drawCalls"_h, _transparentDrawCalls.GetBuffer());
+        _transparencyPassDescriptorSet.Bind("_cModelDraws"_h, _transparentDrawCalls.GetBuffer());
+    }
+
+    if (_animationBoneInstances.SyncToGPU(_renderer))
+    {
+        _animationPrepassDescriptorSet.Bind("_animationBoneInstances"_h, _animationBoneInstances.GetBuffer());
+    }
+
+    if (!_loadingIsDirty)
+        return;
+
+    _loadingIsDirty = false;
+
+    // Sync Vertex buffer to GPU
+    {
+        if (_vertices.SyncToGPU(_renderer))
+        {
+            _geometryPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertices.GetBuffer());
+            _materialPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertices.GetBuffer());
+            _transparencyPassDescriptorSet.Bind("_packedCModelVertices"_h, _vertices.GetBuffer());
+        }
+    }
+
+    // Sync Index buffer to GPU
+    {
+        if (_indices.SyncToGPU(_renderer))
+        {
+            _geometryPassDescriptorSet.Bind("_cModelIndices"_h, _indices.GetBuffer());
+            _materialPassDescriptorSet.Bind("_cModelIndices"_h, _indices.GetBuffer());
+            _transparencyPassDescriptorSet.Bind("_cModelIndices"_h, _indices.GetBuffer());
+        }
+    }
+
+    // Sync TextureUnit buffer to GPU
+    {
+        if (_textureUnits.SyncToGPU(_renderer))
+        {
+            _geometryPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnits.GetBuffer());
+            _materialPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnits.GetBuffer());
+            _transparencyPassDescriptorSet.Bind("_cModelTextureUnits"_h, _textureUnits.GetBuffer());
+        }
+    }
+
+    // Sync ModelInstanceDatas buffer to GPU
+    {
+        if (_modelInstanceDatas.SyncToGPU(_renderer))
+        {
+            _opaqueCullingDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+            _transparentCullingDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+            _animationPrepassDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+            _geometryPassDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+            _materialPassDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+            _transparencyPassDescriptorSet.Bind("_cModelInstanceDatas"_h, _modelInstanceDatas.GetBuffer());
+        }
+    }
+
+    // Sync CullingData buffer to GPU
+    {
+        if (_cullingDatas.SyncToGPU(_renderer))
+        {
+            _opaqueCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDatas.GetBuffer());
+            _transparentCullingDescriptorSet.Bind("_cullingDatas"_h, _cullingDatas.GetBuffer());
+        }
+    }
+
+    // Sync AnimationSequence buffer to GPU
+    {
+        if (_animationSequences.SyncToGPU(_renderer))
+        {
+            _animationPrepassDescriptorSet.Bind("_animationSequences"_h, _animationSequences.GetBuffer());
+        }
+    }
+
+    // Sync AnimationModelInfo buffer to GPU
+    {
+        if (_animationModelInfo.SyncToGPU(_renderer))
+        {
+            _animationPrepassDescriptorSet.Bind("_animationModelInfos"_h, _animationModelInfo.GetBuffer());
+        }
+    }
+
+    // Sync AnimationBoneInfo buffer to GPU
+    {
+        if (_animationBoneInfo.SyncToGPU(_renderer))
+        {
+            _animationPrepassDescriptorSet.Bind("_animationBoneInfos"_h, _animationBoneInfo.GetBuffer());
+        }
+    }
+
+    // Create AnimationSequence buffer
+    {
+        size_t numSequenceInfo = _animationTrackInfo.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackInfoBuffer";
+        desc.size = sizeof(AnimationTrackInfo) * numSequenceInfo;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+        _animationTrackInfoBuffer = _renderer->CreateAndFillBuffer(_animationTrackInfoBuffer, desc, _animationTrackInfo.data(), desc.size);
+        _animationPrepassDescriptorSet.Bind("_animationTrackInfos"_h, _animationTrackInfoBuffer);
+    }
+
+    // Create AnimationTimestamp buffer
+    {
+        size_t numTrackTimestamps = _animationTrackTimestamps.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackTimestampBuffer";
+        desc.size = sizeof(u32) * numTrackTimestamps;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+        _animationTrackTimestampBuffer = _renderer->CreateAndFillBuffer(_animationTrackTimestampBuffer, desc, _animationTrackTimestamps.data(), desc.size);
+        _animationPrepassDescriptorSet.Bind("_animationTrackTimestamps"_h, _animationTrackTimestampBuffer);
+    }
+
+    // Create AnimationValueVec buffer
+    {
+        size_t numTrackValues = _animationTrackValues.size();
+        Renderer::BufferDesc desc;
+        desc.name = "AnimationTrackValueBuffer";
+        desc.size = sizeof(vec4) * numTrackValues;
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+        _animationTrackValueBuffer = _renderer->CreateAndFillBuffer(_animationTrackValueBuffer, desc, _animationTrackValues.data(), desc.size);
+        _animationPrepassDescriptorSet.Bind("_animationTrackValues"_h, _animationTrackValueBuffer);
+    }
+
+    {
+        // Sync OpaqueCulledDrawCall buffer
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelOpaqueCullDrawCallBuffer";
+            desc.size = sizeof(DrawCall) * _opaqueDrawCalls.Size();
+            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+            _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
+
+            _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
+        }
+
+        {
+            if (_opaqueDrawCallDatas.SyncToGPU(_renderer))
+            {
+                _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
+                _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
+                _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
+            }
+        }
+    }
+
+    {
+        // Sync TransparentCulledDrawCall and TransparentSortedCulledDrawCall buffer
+        {
+            u32 size = sizeof(DrawCall) * static_cast<u32>(_transparentDrawCalls.Size());
+
+            Renderer::BufferDesc desc;
+            desc.name = "CModelAlphaCullDrawCalls";
+            desc.size = size;
+            desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+            _transparentCulledDrawCallBuffer = _renderer->CreateBuffer(_transparentCulledDrawCallBuffer, desc);
+            _transparentCullingDescriptorSet.Bind("_culledDrawCalls"_h, _transparentCulledDrawCallBuffer);
+        }
+
+        // Create TransparentDrawCallData buffer
+        {
+            if (_transparentDrawCallDatas.SyncToGPU(_renderer))
+            {
+                _transparentCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDatas.GetBuffer());
+                _transparencyPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _transparentDrawCallDatas.GetBuffer());
+            }
+        }
+    }
+
+    // Create GPU-only workbuffers
+    {
+        Renderer::BufferDesc desc;
+        desc.name = "CModelVisibleInstanceMaskBuffer";
+        desc.size = sizeof(u32) * ((_modelInstanceDatas.Size() + 31) / 32);
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+        _visibleInstanceMaskBuffer = _renderer->CreateBuffer(_visibleInstanceMaskBuffer, desc);
+
+        _compactDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
+        _opaqueCullingDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
+        _transparentCullingDescriptorSet.Bind("_visibleInstanceMask"_h, _visibleInstanceMaskBuffer);
+    }
+    {
+        Renderer::BufferDesc desc;
+        desc.name = "CModelVisibleInstanceIndexBuffer";
+        desc.size = sizeof(u32) * _modelInstanceDatas.Size();
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER;
+        _visibleInstanceIndexBuffer = _renderer->CreateBuffer(_visibleInstanceIndexBuffer, desc);
+
+        _compactDescriptorSet.Bind("_visibleInstanceIDs"_h, _visibleInstanceIndexBuffer);
+        _animationPrepassDescriptorSet.Bind("_visibleInstanceIndices"_h, _visibleInstanceIndexBuffer);
+    }
+    {
+        Renderer::BufferDesc desc;
+        desc.name = "CModelAnimatedVertexBuffer";
         desc.size = sizeof(PackedAnimatedVertexPositions) * _numTotalAnimatedVertices;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 

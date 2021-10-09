@@ -41,8 +41,8 @@ namespace Renderer
             SetDirtyRegion(startIndex * sizeof(T), count * sizeof(T));
         }
 
-        // Returns true if we had to resize the buffer, only pass nullptr to commandList if you KNOW the buffer hasn't been initialized before
-        bool SyncToGPU(Renderer* renderer, CommandList* commandList = nullptr)
+        // Returns true if we had to resize the buffer
+        bool SyncToGPU(Renderer* renderer)
         {
             std::unique_lock lock(_mutex);
 
@@ -57,7 +57,7 @@ namespace Renderer
 
             if (vectorByteSize == 0) // Not sure about this
             {
-                ResizeBuffer(renderer, commandList, 1, false);
+                ResizeBuffer(renderer, 1, false);
                 return false;
             }
 
@@ -73,7 +73,7 @@ namespace Renderer
             bool didResize = false;
             if (vectorByteSize > bufferByteSize)
             {
-                ResizeBuffer(renderer, commandList, vectorByteSize, true); // This copies everything that was allocated in the old buffer to the new buffer
+                ResizeBuffer(renderer, vectorByteSize, true); // This copies everything that was allocated in the old buffer to the new buffer
                 bufferByteSize = _allocator.Size();
                 didResize = true;
             }
@@ -98,8 +98,8 @@ namespace Renderer
             return didResize;
         }
 
-        // Returns true if we had to resize the buffer, only pass nullptr to commandList if you KNOW the buffer hasn't been initialized before
-        bool ForceSyncToGPU(Renderer* renderer, CommandList* commandList = nullptr)
+        // Returns true if we had to resize the buffer
+        bool ForceSyncToGPU(Renderer* renderer)
         {
             std::unique_lock lock(_mutex);
 
@@ -121,7 +121,7 @@ namespace Renderer
             bool didResize = false;
             if (vectorByteSize > bufferByteSize)
             {
-                ResizeBuffer(renderer, commandList, vectorByteSize, false);
+                ResizeBuffer(renderer, vectorByteSize, false);
                 bufferByteSize = _allocator.Size();
                 didResize = true;
             }
@@ -164,15 +164,17 @@ namespace Renderer
 
             if (_renderer != nullptr && _buffer != BufferID::Invalid())
             {
-                //_renderer->QueueDestroyBuffer(_buffer);
+                _renderer->QueueDestroyBuffer(_buffer);
                 _buffer = BufferID::Invalid();
             }
+
+            _dirtyRegions.Clear();
         }
 
         BufferID GetBuffer() { return _buffer; }
 
     private:
-        void ResizeBuffer(Renderer* renderer, CommandList* commandList, size_t newSize, bool copyOld)
+        void ResizeBuffer(Renderer* renderer, size_t newSize, bool copyOld)
         {
             BufferDesc desc;
             desc.name = _debugName;
@@ -183,13 +185,11 @@ namespace Renderer
 
             if (copyOld && _buffer != BufferID::Invalid())
             {
-                if (commandList == nullptr)
-                {
-                    DebugHandler::PrintFatal("GPUVector : Tried to resize an already existing buffer without a commandlist, GPUVector %s", _debugName.c_str());
-                }
-
                 size_t oldSize = _allocator.AllocatedBytes();
-                commandList->CopyBuffer(newBuffer, 0, _buffer, 0, oldSize);
+                if (oldSize > 0)
+                {
+                    renderer->CopyBuffer(newBuffer, 0, _buffer, 0, oldSize);
+                }
             }
 
             _allocator.Grow(newSize);

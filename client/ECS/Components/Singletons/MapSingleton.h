@@ -114,6 +114,10 @@ public:
 		_mapIdToLightDBC[light->mapId].push_back(light);
 	}
 
+	NDBC::Map* GetMapToBeLoaded() { return _mapToBeLoaded; }
+	void SetMapToBeLoaded(u32 nameHash) { _mapToBeLoaded = GetMapByNameHash(nameHash); }
+	void ResetMapToBeLoaded() { _mapToBeLoaded = nullptr; }
+
 private:
 	Terrain::Map _currentMap;
 
@@ -125,4 +129,6 @@ private:
 	robin_hood::unordered_map<u32, NDBC::Map*> _mapInternalNameHashToDBC;
 	robin_hood::unordered_map<u32, NDBC::AreaTable*> _areaNameHashToDBC;
 	robin_hood::unordered_map<u32, std::vector<NDBC::Light*>> _mapIdToLightDBC;
+
+	NDBC::Map* _mapToBeLoaded = nullptr;
 };

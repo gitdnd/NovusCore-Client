@@ -34,15 +34,13 @@ struct Transform
 
     // Rotation
     mat4x4 rotationMatrix;
-    f32 yaw;
-    f32 pitch;
+    f32 yaw = 0.0f;
+    f32 pitch = 0.0f;
 
     // Direction vectors
     vec3 front = vec3(0.f, 0.f, 0.f);
     vec3 up = vec3(0.f, 0.f, 0.f);
     vec3 left = vec3(0.f, 0.f, 0.f);
-
-    bool isDirty = true;
 
     vec3 GetRotation() const { return vec3(0, yaw, pitch); }
     mat4x4 GetMatrix()
@@ -60,12 +58,20 @@ struct Transform
         return matrix;
     }
 
-    void UpdateRotationMatrix()
+    void UpdateRotationMatrix(bool useOffsets = true)
     {
-        mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
-        mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);
+        if (useOffsets)
+        {
+            mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
+            mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);
 
-        rotationMatrix = offsetPitchMatrix * offsetYawMatrix * glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
+            rotationMatrix = offsetPitchMatrix * offsetYawMatrix * glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
+        }
+        else
+        {
+            rotationMatrix = glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
+        }
+        
         UpdateVectors();
     }
 
@@ -76,3 +82,8 @@ struct Transform
         front = -rotationMatrix[2];
     }
 };
+
+struct TransformIsDirty 
+{
+    TransformIsDirty() {}
+}; // Empty struct

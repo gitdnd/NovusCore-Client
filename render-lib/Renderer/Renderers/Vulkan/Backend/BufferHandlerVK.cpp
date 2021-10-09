@@ -187,11 +187,11 @@ namespace Renderer
             BufferHandlerVKData& data = static_cast<BufferHandlerVKData&>(*_data);
 
             data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
-                {
-                    Buffer& buffer = buffers[(BufferID::type)bufferID];
+            {
+                Buffer& buffer = buffers[(BufferID::type)bufferID];
 
-                    vmaDestroyBuffer(_device->_allocator, buffer.buffer, buffer.allocation);
-                });
+                vmaDestroyBuffer(_device->_allocator, buffer.buffer, buffer.allocation);
+            });
 
             ReturnBufferID(bufferID);
         }
