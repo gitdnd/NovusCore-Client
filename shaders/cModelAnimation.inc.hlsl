@@ -100,10 +100,6 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
     float4 rotationValue = float4(0.f, 0.f, 0.f, 1.f);
     float4 scaleValue = float4(1.f, 1.f, 1.f, 0.f);
 
-    const uint isTranslationTrackGlobalSequence = (boneInfo.flags & 0x2) != 0;
-    const uint isRotationTrackGlobalSequence = (boneInfo.flags & 0x4) != 0;
-    const uint isScaleTrackGlobalSequence = (boneInfo.flags & 0x8) != 0;
-
     for (int i = 0; i < numScaleSequences; i++)
     {
         AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.scaleTrackOffset + i];
@@ -136,7 +132,6 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
                 break;
             }
         }
-
         break;
     }
 
@@ -171,7 +166,6 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
                 break;
             }
         }
-
         break;
     }
 

@@ -12,11 +12,14 @@
 #include "../../../Rendering/Camera.h"
 
 #include "../../Components/Singletons/TimeSingleton.h"
+#include "../../Components/Singletons/NDBCSingleton.h"
 #include "../../Components/Transform.h"
 #include "../../Components/Physics/Rigidbody.h"
 #include "../../Components/Rendering/DebugBox.h"
 #include "../../Components/Rendering/ModelDisplayInfo.h"
 #include "../../Components/Rendering/VisibleModel.h"
+
+#include <random>
 
 void SimulateDebugCubeSystem::Init(entt::registry& registry)
 {
@@ -27,22 +30,68 @@ void SimulateDebugCubeSystem::Init(entt::registry& registry)
     {
         Camera* camera = ServiceLocator::GetCamera();
 
-        // Create ENTT entity
-        entt::entity entity = registry.create();
+        NDBCSingleton& ndbcSingleton = registry.ctx<NDBCSingleton>();
+        NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
+        NDBC::File* creatureModelDataFile = ndbcSingleton.GetNDBCFile("CreatureModelData");
 
-        Transform& transform = registry.emplace<Transform>(entity);
-        transform.position = camera->GetPosition();
+        // Seed with a real random value, if available
+        std::random_device r;
+        std::mt19937 mt(r());
+        std::uniform_int_distribution<int> uniform_dist(75, 30000);
 
-        //transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
-        transform.UpdateRotationMatrix(false);
+        for (u32 i = 0; i < 100; i++)
+        {
+            // Create ENTT entity
+            entt::entity entity = registry.create();
 
-        registry.emplace<TransformIsDirty>(entity);
-        registry.emplace<Rigidbody>(entity);
-        //registry.emplace<DebugBox>(entity);
+            Transform& transform = registry.emplace<Transform>(entity);
+            transform.position = camera->GetPosition();
+            transform.position += vec3((i % 10) * 10.0f, (i / 10) * 10.0f, 0);
 
-        registry.emplace<VisibleModel>(entity);
-        ModelDisplayInfo& modelDisplayInfo = registry.emplace<ModelDisplayInfo>(entity, ModelType::Creature, 3019); // 65 horse
-    
+            //transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
+            transform.UpdateRotationMatrix();
+
+            registry.emplace<TransformIsDirty>(entity);
+            registry.emplace<Rigidbody>(entity);
+            //registry.emplace<DebugBox>(entity);
+
+            registry.emplace<VisibleModel>(entity);
+
+            u32 displayID = 0;
+            while (true)
+            {
+                displayID = uniform_dist(mt);
+
+                NDBC::CreatureDisplayInfo* creatureDisplayInfo = creatureDisplayInfoFile->GetRowById<NDBC::CreatureDisplayInfo>(displayID);
+                if (creatureDisplayInfo == nullptr)
+                {
+                    continue;
+                }
+
+                NDBC::CreatureModelData* creatureModelData = creatureModelDataFile->GetRowById<NDBC::CreatureModelData>(creatureDisplayInfo->modelId);
+                if (creatureDisplayInfo == nullptr)
+                {
+                    continue;
+                }
+
+                u32 modelPathStringID = creatureModelData->modelPath;
+                StringTable*& stringTable = creatureModelDataFile->GetStringTable();
+
+                std::string modelPath = stringTable->GetString(modelPathStringID);
+                std::string modelPathToLower = "";
+                modelPathToLower.resize(modelPath.length());
+
+                std::transform(modelPath.begin(), modelPath.end(), modelPathToLower.begin(), [](char c) { return std::tolower((int)c); });
+
+                if (!StringUtils::BeginsWith(modelPathToLower, "character"))
+                {
+                    break;
+                }
+            }
+
+            ModelDisplayInfo& modelDisplayInfo = registry.emplace<ModelDisplayInfo>(entity, ModelType::Creature, displayID); // 65 horse
+        }
+
         return true;
     });
 }

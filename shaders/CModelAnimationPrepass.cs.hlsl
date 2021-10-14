@@ -51,40 +51,38 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     for (int i = 0; i < numBones; i++)
     {
-        float4x4 parentBoneMatrix = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-
-        AnimationBoneInfo boneInfo = _animationBoneInfos[modelInfo.boneInfoOffset + i];
         AnimationBoneInstanceData boneInstance = _animationBoneInstances[instanceData.boneInstanceDataOffset + i];
+        AnimationBoneInfo boneInfo = _animationBoneInfos[modelInfo.boneInfoOffset + i];
         uint parentBoneId = (boneInfo.packedData1 >> 16) & 0xFFFF;
-
-        if (boneInstance.animateState == 0)
-        {
-            // If we aren't animating, assume parentBoneMatrix or Identity
-            if (parentBoneId != 65535)
-            {
-                parentBoneMatrix = _animationBoneDeformMatrices[instanceData.boneDeformOffset + parentBoneId];
-            }
-
-            _animationBoneDeformMatrices[instanceData.boneDeformOffset + i] = parentBoneMatrix;
-            continue;
-        }
 
         uint sequenceIndex = boneInstance.packedData0 & 0xFFFF;
         AnimationSequence sequence = _animationSequences[modelInfo.sequenceOffset + sequenceIndex];
-        if (boneInstance.animationProgress > sequence.duration)
-        {
-            uint isLooping = boneInstance.animateState == 2;
-            boneInstance.animateState = 2 * isLooping;
-            boneInstance.animationProgress = 0;
-        }
-        else
+
+        if (boneInstance.animateState != 0)
         {
             boneInstance.animationProgress += 1.f * _constants.deltaTime;
+
+            if (boneInstance.animationProgress >= sequence.duration)
+            {
+                uint isLooping = boneInstance.animateState == 2;
+
+                if (isLooping)
+                {
+                    boneInstance.animateState = 2;
+                    boneInstance.animationProgress -= sequence.duration;
+                }
+                else
+                {
+                    boneInstance.animateState = 0;
+                    boneInstance.animationProgress = sequence.duration - 0.01f;
+                }
+            }
+
+            _animationBoneInstances[instanceData.boneInstanceDataOffset + i] = boneInstance;
         }
 
-        _animationBoneInstances[instanceData.boneInstanceDataOffset + i] = boneInstance;
-
         const AnimationState state = GetAnimationState(boneInstance);
+        float4x4 parentBoneMatrix = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
         float4x4 currBoneMatrix = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
         float3 parentPivotPoint = float3(0.f, 0.f, 0.f);
 

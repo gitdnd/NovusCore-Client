@@ -8,6 +8,8 @@
 #include "../../Utils/ServiceLocator.h"
 #include "../../Utils/MapUtils.h"
 #include "../../Rendering/CameraOrbital.h"
+#include "../../Rendering/ClientRenderer.h"
+#include "../../Rendering/DebugRenderer.h"
 #include "../Components/Singletons/TimeSingleton.h"
 #include "../Components/Singletons/LocalplayerSingleton.h"
 #include "../Components/Network/ConnectionSingleton.h"
@@ -87,6 +89,10 @@ void MovementSystem::Update(entt::registry& registry)
     Transform::MovementFlags originalFlags = transform.movementFlags;
     movementFlags.value = 0;
 
+    vec3 originalPosition = transform.position;
+    f32 originalPitch = transform.pitch;
+    f32 originalYaw = transform.yaw;
+
     Geometry::Triangle triangle;
     f32 terrainHeight = 0.f;
     Terrain::MapUtils::GetTriangleFromWorldPosition(transform.position, triangle, terrainHeight);
@@ -96,7 +102,7 @@ void MovementSystem::Update(entt::registry& registry)
     if (isRightClickDown)
     {
         transform.yaw = camera->GetYaw();
-        
+
         // Only set Pitch if we are flying
         //transform.pitch = camera->GetPitch();
     }
@@ -251,6 +257,18 @@ void MovementSystem::Update(entt::registry& registry)
             transform.position = newPosition;
         }
     }
-    
-    camera->SetPosition(transform.position);
+
+    vec3 cameraTransformPos = transform.position + vec3(0.0f, 0.0f, 1.3f);
+    camera->SetPosition(cameraTransformPos);
+
+    mat4x4 transformMatrix = transform.GetMatrix();
+    DebugRenderer* debugRenderer = ServiceLocator::GetClientRenderer()->GetDebugRenderer();
+    debugRenderer->DrawMatrix(transformMatrix, 1.0f);
+
+    if (transform.position != originalPosition || 
+        transform.pitch    != originalPitch    ||
+        transform.yaw      != originalYaw)
+    {
+        registry.emplace_or_replace<TransformIsDirty>(localplayerSingleton.entity);
+    }
 }

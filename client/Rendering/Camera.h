@@ -98,7 +98,7 @@ protected:
     virtual void Disabled() = 0;
 
     void UpdateCameraVectors();
-    void UpdateFrustumPlanes(const mat4x4& m);
+    void UpdateFrustumPlanes();
 
 protected:
     Window* _window = nullptr;

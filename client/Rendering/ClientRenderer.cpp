@@ -152,10 +152,18 @@ void ClientRenderer::Render()
     // Get lastAO and set it in resources so we can use it later
     _resources.ambientObscurance = _postProcessRenderer->GetAOImage(_frameIndex);
 
+    // Flip Y & Z + Negate new Y
+    mat4x4 axisFlipMatrix = mat4x4(1, 0, 0, 0,
+                                   0, 0, -1, 0,
+                                   0, 1, 0, 0,
+                                   0, 0, 0, 1);
+
+    axisFlipMatrix = glm::rotate(axisFlipMatrix, glm::radians(90.0f), glm::vec3(0, 0, 1));
+
     // Update the view matrix to match the new camera position
     _resources.viewConstantBuffer->resource.lastViewProjectionMatrix = _resources.viewConstantBuffer->resource.viewProjectionMatrix;
-    _resources.viewConstantBuffer->resource.viewProjectionMatrix = camera->GetViewProjectionMatrix();
-    _resources.viewConstantBuffer->resource.viewMatrix = camera->GetViewMatrix();
+    _resources.viewConstantBuffer->resource.viewProjectionMatrix = camera->GetProjectionMatrix() * (axisFlipMatrix * camera->GetViewMatrix());
+    _resources.viewConstantBuffer->resource.viewMatrix = axisFlipMatrix * camera->GetViewMatrix();
     _resources.viewConstantBuffer->resource.eyePosition = vec4(camera->GetPosition(), 0.0f);
     _resources.viewConstantBuffer->resource.eyeRotation = vec4(camera->GetRotation(), 0.0f);
     _resources.viewConstantBuffer->Apply(_frameIndex);

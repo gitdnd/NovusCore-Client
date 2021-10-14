@@ -724,6 +724,8 @@ void CModelRenderer::AddAnimationPass(Renderer::RenderGraph* renderGraph, Render
 
                 Renderer::BufferID newBoneDeformMatrixBuffer = _renderer->CreateBuffer(desc);
 
+                static mat4x4 identityMatrix = mat4x4(1);
+
                 if (_animationBoneDeformMatrixBuffer != Renderer::BufferID::Invalid())
                 {
                     commandList.QueueDestroyBuffer(_animationBoneDeformMatrixBuffer); 
@@ -843,7 +845,7 @@ void CModelRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderR
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
 
             // Render targets
             pipelineDesc.renderTargets[0] = data.visibilityBuffer;
@@ -969,7 +971,7 @@ void CModelRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderRes
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
             pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
             // Render targets
             pipelineDesc.renderTargets[0] = data.color;
@@ -1081,7 +1083,7 @@ void CModelRenderer::AddTransparencyPass(Renderer::RenderGraph* renderGraph, Ren
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
 
             // Blend state
             pipelineDesc.states.blendState.independentBlendEnable = true;
@@ -1486,14 +1488,22 @@ void CModelRenderer::CreatePermanentResources()
 
     // Create AnimationBoneDeformMatrixBuffer
     {
-        size_t boneDeformMatrixBufferSize = (sizeof(mat4x4) * 255) * 1000;
+        size_t numDeformMatrices = 255 * 1000;
+        size_t boneDeformMatrixBufferSize = sizeof(mat4x4) * numDeformMatrices;
         _previousAnimationBoneDeformMatrixBufferSize = boneDeformMatrixBufferSize;
+
+        std::vector<mat4x4> identityMatrixArray(numDeformMatrices);
+        for (u32 i = 0; i < numDeformMatrices; i++)
+        {
+            mat4x4& m = identityMatrixArray[i];
+            m = mat4x4(1);
+        }
 
         Renderer::BufferDesc desc;
         desc.name = "AnimationBoneDeformMatrixBuffer";
         desc.size = boneDeformMatrixBufferSize;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_SOURCE | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        _animationBoneDeformMatrixBuffer = _renderer->CreateBuffer(_animationBoneDeformMatrixBuffer, desc);
+        _animationBoneDeformMatrixBuffer = _renderer->CreateAndFillBuffer(_animationBoneDeformMatrixBuffer, desc, identityMatrixArray.data(), boneDeformMatrixBufferSize);
 
         _animationPrepassDescriptorSet.Bind("_animationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
         _geometryPassDescriptorSet.Bind("_cModelAnimationBoneDeformMatrices"_h, _animationBoneDeformMatrixBuffer);
@@ -1637,7 +1647,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                 boneInfo.rotationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
                 for (u32 j = 0; j < boneInfo.numRotationSequences; j++)
                 {
-                    CModel::ComplexAnimationTrack<vec4>& track = bone.rotation.tracks[j];
+                    CModel::ComplexAnimationTrack<quaternion>& track = bone.rotation.tracks[j];
                     AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
 
                     trackInfo.sequenceIndex = track.sequenceId;
@@ -1663,7 +1673,7 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                         size_t numValuesToAdd = track.values.size();
 
                         _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
-                        memcpy(&_animationTrackValues[numValuesBefore], track.values.data(), numValuesToAdd * sizeof(vec4));
+                        memcpy(&_animationTrackValues[numValuesBefore], track.values.data(), numValuesToAdd * sizeof(quaternion));
                     }
 
                     numTracksWithValues += trackInfo.numValues;
@@ -1847,6 +1857,9 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                         {
                             if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
                             {
+                                if (creatureDisplayInfo->texture1 == std::numeric_limits<u32>().max())
+                                    continue;
+
                                 std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture1);
 
                                 modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
@@ -1857,6 +1870,9 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                             }
                             else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_2)
                             {
+                                if (creatureDisplayInfo->texture2 == std::numeric_limits<u32>().max())
+                                    continue;
+
                                 std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture2);
 
                                 modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
@@ -1867,6 +1883,9 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                             }
                             else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_3)
                             {
+                                if (creatureDisplayInfo->texture3 == std::numeric_limits<u32>().max())
+                                    continue;
+
                                 std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture3);
 
                                 modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");

@@ -42,7 +42,7 @@ struct Transform
     vec3 up = vec3(0.f, 0.f, 0.f);
     vec3 left = vec3(0.f, 0.f, 0.f);
 
-    vec3 GetRotation() const { return vec3(0, yaw, pitch); }
+    vec3 GetRotation() const { return vec3(pitch, 0.0f, yaw); }
     mat4x4 GetMatrix()
     {
         // When we pass 1 into the constructor, it will construct an identity matrix
@@ -58,28 +58,18 @@ struct Transform
         return matrix;
     }
 
-    void UpdateRotationMatrix(bool useOffsets = true)
+    void UpdateRotationMatrix()
     {
-        if (useOffsets)
-        {
-            mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
-            mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);
-
-            rotationMatrix = offsetPitchMatrix * offsetYawMatrix * glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
-        }
-        else
-        {
-            rotationMatrix = glm::yawPitchRoll(glm::radians(yaw), glm::radians(pitch), 0.0f);
-        }
-        
+        glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(pitch), glm::radians(yaw)));
+        rotationMatrix = glm::mat4_cast(rotQuat);
         UpdateVectors();
     }
 
     void UpdateVectors()
     {
-        left = -rotationMatrix[0];
-        up = rotationMatrix[1];
-        front = -rotationMatrix[2];
+        left = rotationMatrix[1];
+        up = rotationMatrix[2];
+        front = rotationMatrix[0];
     }
 };
 

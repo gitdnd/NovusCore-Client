@@ -90,7 +90,7 @@ void CameraFreeLook::Init()
                 else if (_yaw < 0)
                     _yaw += 360;
     
-                _pitch = Math::Clamp(_pitch + (deltaPosition.y * _mouseSensitivity), -89.0f, 89.0f);
+                _pitch = Math::Clamp(_pitch - (deltaPosition.y * _mouseSensitivity), -89.0f, 89.0f);
             }
             else
                 _captureMouseHasMoved = true;
@@ -216,10 +216,9 @@ void CameraFreeLook::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)
     }
 
     // Compute matrices
-    mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
-    mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);
+    glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(_pitch), glm::radians(_yaw)));
+    _rotationMatrix = glm::mat4_cast(rotQuat);
 
-    _rotationMatrix = offsetPitchMatrix * offsetYawMatrix * glm::yawPitchRoll(glm::radians(_yaw), glm::radians(_pitch), 0.0f);
     const mat4x4 cameraMatrix = glm::translate(mat4x4(1.0f), _position) * _rotationMatrix;
     _viewMatrix = glm::inverse(cameraMatrix);
 
@@ -227,5 +226,5 @@ void CameraFreeLook::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)
     _viewProjectionMatrix = _projectionMatrix * _viewMatrix;
 
     UpdateCameraVectors();
-    UpdateFrustumPlanes(glm::transpose(_viewProjectionMatrix));
+    UpdateFrustumPlanes();
 }

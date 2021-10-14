@@ -225,7 +225,7 @@ namespace CModel
         u16 submeshId = 0;
 
         ComplexAnimationData<vec3> translation;
-        ComplexAnimationData<vec4> rotation;
+        ComplexAnimationData<quaternion> rotation;
         ComplexAnimationData<vec3> scale;
 
         vec3 pivot;

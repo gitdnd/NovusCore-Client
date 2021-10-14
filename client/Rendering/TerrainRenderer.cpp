@@ -11,6 +11,8 @@
 
 #include "../ECS/Components/Transform.h"
 #include "../ECS/Components/Rendering/DebugBox.h"
+#include "../ECS/Components/Rendering/VisibleModel.h"
+#include "../ECS/Components/Rendering/ModelDisplayInfo.h"
 
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
@@ -107,7 +109,13 @@ void TerrainRenderer::Update(f32 deltaTime)
             registry->emplace<DebugBox>(localplayerSingleton.entity);
             Transform& transform = registry->emplace<Transform>(localplayerSingleton.entity);
             transform.position = vec3(-9249.f, 87.f, 79.f);
-            transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
+            transform.scale = vec3(1.0f, 1.0f, 1.0f);
+            transform.UpdateRotationMatrix();
+
+            registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
+
+            registry->emplace<VisibleModel>(localplayerSingleton.entity);
+            ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 797);
         }
     }
 
@@ -338,7 +346,7 @@ void TerrainRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Render
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
 
             // Render targets
             pipelineDesc.renderTargets[0] = data.visibilityBuffer;
@@ -461,7 +469,7 @@ void TerrainRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, RenderRe
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
             pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
 
             // Render targets

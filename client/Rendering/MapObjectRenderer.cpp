@@ -316,7 +316,7 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
 
             // Render targets
             pipelineDesc.renderTargets[0] = data.visibilityBuffer;
@@ -424,7 +424,7 @@ void MapObjectRenderer::AddEditorPass(Renderer::RenderGraph* renderGraph, Render
 
             // Rasterizer state
             pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
             pipelineDesc.states.rasterizerState.fillMode = Renderer::FillMode::WIREFRAME;
 
             // Render targets

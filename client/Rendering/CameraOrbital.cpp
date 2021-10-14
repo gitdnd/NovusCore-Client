@@ -46,7 +46,7 @@ void CameraOrbital::Init()
                 else if (_yaw < 0)
                     _yaw += 360;
     
-                _pitch = Math::Clamp(_pitch + (deltaPosition.y * _mouseSensitivity), -89.0f, 89.0f);
+                _pitch = Math::Clamp(_pitch - (deltaPosition.y * _mouseSensitivity), -89.0f, 89.0f);
     
                 /* TODO: Add proper collision for the camera so we don't go through the ground
                          the below code will do a quick test for the pitch but not the yaw.
@@ -168,22 +168,20 @@ void CameraOrbital::Disabled()
 
 void CameraOrbital::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)
 {
+    if (!IsActive())
+        return;
+
     _fovInDegrees = fovInDegrees;
     _aspectRatio = aspectRatioWH;
 
     // Compute matrices
-    mat4x4 offsetPitchMatrix = glm::yawPitchRoll(0.0f, glm::radians(90.0f), 0.0f);
-    mat4x4 offsetYawMatrix = glm::yawPitchRoll(glm::radians(-90.0f), 0.0f, 0.0f);
+    glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(_pitch), glm::radians(_yaw)));
+    _rotationMatrix = glm::mat4_cast(rotQuat);
 
-    _rotationMatrix = offsetPitchMatrix * offsetYawMatrix * glm::yawPitchRoll(glm::radians(_yaw), glm::radians(_pitch), 0.0f);
-
-    vec3 t = vec3(_rotationMatrix * vec4(vec3(0, 0, _distance), 0.0f));
-    vec3 position = _position + t;
-
-    _viewMatrix = glm::lookAt(position, _position, worldUp);
+    _viewMatrix = glm::inverse(glm::translate(_position) * _rotationMatrix * glm::translate(vec3(-_distance, 0.0f, 0.0f)));
     _projectionMatrix = glm::perspective(glm::radians(fovInDegrees), aspectRatioWH, GetFarClip(), GetNearClip());
     _viewProjectionMatrix = _projectionMatrix * _viewMatrix;
 
     UpdateCameraVectors();
-    UpdateFrustumPlanes(glm::transpose(_viewProjectionMatrix));
+    UpdateFrustumPlanes();
 }

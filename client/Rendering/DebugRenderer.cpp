@@ -501,3 +501,12 @@ void DebugRenderer::DrawFrustum(const mat4x4& viewProjectionMatrix, uint32_t col
 	DrawLine3D(near2, far2, color);
 	DrawLine3D(near3, far3, color);
 }
+
+void DebugRenderer::DrawMatrix(const mat4x4& matrix, f32 scale)
+{
+	const vec3 origin = vec3(matrix[3].x, matrix[3].y, matrix[3].z);
+
+	DrawLine3D(origin, origin + (vec3(matrix[0].x, matrix[0].y, matrix[0].z) * scale), 0xff0000ff);
+	DrawLine3D(origin, origin + (vec3(matrix[1].x, matrix[1].y, matrix[1].z) * scale), 0x0000ff00);
+	DrawLine3D(origin, origin + (vec3(matrix[2].x, matrix[2].y, matrix[2].z) * scale), 0x00ff0000);
+}

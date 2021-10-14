@@ -30,7 +30,7 @@ PSOutput main(VertexOutput input) : SV_Target
     float halfFovY = fovY / 2.0f;
 
     float uvRotationOffset = ((1.0f - input.uv.y) * fovY) - halfFovY;
-    float val = (rotation.y + uvRotationOffset + 89.0f) / 178.0f;
+    float val = (-rotation.y + uvRotationOffset + 89.0f) / 178.0f;
     val = clamp(val, 0.0f, 1.0f);
 
     float4 color = float4(0, 0, 0, 0);

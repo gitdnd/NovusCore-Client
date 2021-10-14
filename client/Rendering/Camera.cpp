@@ -68,13 +68,22 @@ bool Camera::SaveToFile(std::string filename)
 
 void Camera::UpdateCameraVectors()
 {
-    _left = -_rotationMatrix[0];
-    _up = _rotationMatrix[1];
-    _front = -_rotationMatrix[2];
+    _left = _rotationMatrix[1];
+    _up = _rotationMatrix[2];
+    _front = _rotationMatrix[0];
 }
 
-void Camera::UpdateFrustumPlanes(const mat4x4& m)
+void Camera::UpdateFrustumPlanes()
 {
+    // Flip Y & Z + Negate new Y
+    mat4x4 axisFlipMatrix = mat4x4(1, 0, 0, 0,
+                                   0, 0, -1, 0,
+                                   0, 1, 0, 0,
+                                   0, 0, 0, 1);
+
+    axisFlipMatrix = glm::rotate(axisFlipMatrix, glm::radians(90.0f), glm::vec3(0, 0, 1));
+    mat4x4 m = glm::transpose(_projectionMatrix * (axisFlipMatrix * _viewMatrix));
+
     _frustumPlanes[(size_t)FrustumPlane::Left] = (m[3] + m[0]);
     _frustumPlanes[(size_t)FrustumPlane::Right] = (m[3] - m[0]);
     _frustumPlanes[(size_t)FrustumPlane::Bottom] = (m[3] + m[1]);

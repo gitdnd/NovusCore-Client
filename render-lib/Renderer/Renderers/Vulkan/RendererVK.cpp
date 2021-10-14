@@ -992,7 +992,16 @@ namespace Renderer
 
     void RendererVK::CopyBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range)
     {
-        _uploadBufferHandler->CopyBufferToBuffer(dstBuffer, dstOffset, srcBuffer, srcOffset, range);
+        VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
+
+        VkBuffer vkDstBuffer = _bufferHandler->GetBuffer(dstBuffer);
+        VkBuffer vkSrcBuffer = _bufferHandler->GetBuffer(srcBuffer);
+
+        VkBufferCopy copyRegion = {};
+        copyRegion.srcOffset = srcOffset;
+        copyRegion.dstOffset = dstOffset;
+        copyRegion.size = range;
+        vkCmdCopyBuffer(commandBuffer, vkSrcBuffer, vkDstBuffer, 1, &copyRegion);
     }
 
     void RendererVK::PipelineBarrier(CommandListID commandListID, PipelineBarrierType type, BufferID buffer)
@@ -1406,9 +1415,11 @@ namespace Renderer
 
     void RendererVK::CopyBuffer(BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range)
     {
-        VkBuffer vkDstBuffer = _bufferHandler->GetBuffer(dstBuffer);
+        /*VkBuffer vkDstBuffer = _bufferHandler->GetBuffer(dstBuffer);
         VkBuffer vkSrcBuffer = _bufferHandler->GetBuffer(srcBuffer);
-        _device->CopyBuffer(vkDstBuffer, dstOffset, vkSrcBuffer, srcOffset, range);
+        _device->CopyBuffer(vkDstBuffer, dstOffset, vkSrcBuffer, srcOffset, range);*/
+
+        _uploadBufferHandler->CopyBufferToBuffer(dstBuffer, dstOffset, srcBuffer, srcOffset, range);
     }
 
     void RendererVK::FillBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, u64 size, u32 data)
