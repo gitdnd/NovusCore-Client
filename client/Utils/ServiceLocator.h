@@ -15,6 +15,7 @@ class SceneManager;
 class ScriptLoader;
 class ScriptEngine;
 class ScriptAPI;
+class AnimationSystem;
 
 namespace Editor
 {
@@ -124,6 +125,12 @@ public:
         return _scriptAPI;
     }
     static void SetScriptAPI(ScriptAPI* scriptAPI);
+    static AnimationSystem* GetAnimationSystem()
+    {
+        assert(_animationSystem != nullptr);
+        return _animationSystem;
+    }
+    static void SetAnimationSystem(AnimationSystem* animationSystem);
 
 private:
     ServiceLocator() { }
@@ -143,4 +150,5 @@ private:
     static ScriptEngine* _scriptEngine;
     static ScriptLoader* _scriptLoader;
     static ScriptAPI* _scriptAPI;
+    static AnimationSystem* _animationSystem;
 };

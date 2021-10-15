@@ -13,6 +13,7 @@
 #include "Rendering/RendertargetVisualizer.h"
 #include "Rendering/CameraFreelook.h"
 #include "Rendering/CameraOrbital.h"
+#include "Rendering/AnimationSystem/AnimationSystem.h"
 #include "Editor/Editor.h"
 #include "Window/Window.h"
 
@@ -168,6 +169,7 @@ bool EngineLoop::Init()
     _editor = new Editor::Editor();
 
     ServiceLocator::SetEditor(_editor);
+    ServiceLocator::SetAnimationSystem(new AnimationSystem());
 
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("Debug", 0);

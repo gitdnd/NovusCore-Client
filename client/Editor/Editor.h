@@ -29,6 +29,12 @@ namespace Editor
         ComplexModelTransparent
     };
 
+    struct CModelAnimationEntry
+    {
+        u16 id;
+        const char* name;
+    };
+
     class Editor
     {
     public:
@@ -76,6 +82,9 @@ namespace Editor
             i32 selectedRenderBatch;
             bool drawWireframe = false;
             bool wireframeEntireObject = true;
+
+            u32 selectedAnimationEntry = 0;
+            std::vector<CModelAnimationEntry> animationEntries;
         };
 
     public:

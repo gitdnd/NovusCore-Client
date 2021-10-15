@@ -138,6 +138,7 @@ public:
             PLAY_ONCE,
             PLAY_LOOP
         };
+
         f32 animationProgress = 0.f;
         u32 sequenceIndex = 0;
         u32 animationframeIndex = 0;
@@ -150,12 +151,48 @@ public:
         {
             u32 isPlaying : 1;
             u32 isLooping : 1;
+            u32 stopAll : 1;
         };
 
         u32 instanceId = 0;
         u32 sequenceId = 0;
 
         Flags flags;
+    }; 
+    
+    struct AnimationModelInfo
+    {
+        u16 numSequences = 0;
+        u16 numBones = 0;
+
+        u32 sequenceOffset = 0;
+        u32 boneInfoOffset = 0;
+        u32 padding = 0;
+    };
+
+    struct AnimationSequence
+    {
+        u16 animationId = 0;
+        u16 animationSubId = 0;
+        u16 nextSubAnimationId = 0;
+        u16 nextAliasId = 0;
+
+        struct AnimationSequenceFlag
+        {
+            u32 isAlwaysPlaying : 1;
+            u32 isAlias : 1;
+            u32 blendTransition : 1; // (This applies if set on either side of the transition) If set we lerp between the end -> start states, but only if end != start (Compare Bone Values)
+        } flags;
+
+        f32 duration = 0.f;
+
+        u16 repeatMin = 0;
+        u16 repeatMax = 0;
+
+        u16 blendTimeStart = 0;
+        u16 blendTimeEnd = 0;
+
+        u64 padding = 0;
     };
 
 public:
@@ -185,7 +222,8 @@ public:
     SafeVector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
     SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
     SafeVector<ModelInstanceData>& GetModelInstanceDatas() { return _modelInstanceDatas; }
-    const ModelInstanceData& GetModelInstanceData(size_t index) { return _modelInstanceDatas.ReadGet(index); }
+    const ModelInstanceData& GetModelInstanceData(size_t instanceID) { return _modelInstanceDatas.ReadGet(instanceID); }
+    const AnimationModelInfo& GetAnimationModelInfo(size_t modelID) { return _animationModelInfo.ReadGet(modelID); }
 
     Renderer::GPUVector<mat4x4>& GetModelInstanceMatrices() { return _modelInstanceMatrices; }
     const mat4x4& GetModelInstanceMatrix(size_t index) { return _modelInstanceMatrices.ReadGet(index); }
@@ -200,6 +238,11 @@ public:
     u32 GetNumSequencesForModelId(u32 modelId)
     {
         return _animationModelInfo.ReadGet(modelId).numSequences;
+    }
+
+    const Renderer::GPUVector<AnimationSequence>& GetAnimationSequences()
+    {
+        return _animationSequences;
     }
 
     u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.Size()); }
@@ -254,41 +297,6 @@ private:
         u16 materialType = 0; // Shader ID
         u32 textureIds[2] = { CMODEL_INVALID_TEXTURE_ID, CMODEL_INVALID_TEXTURE_ID };
         u32 pad;
-    };
-
-    struct AnimationModelInfo
-    {
-        u16 numSequences = 0;
-        u16 numBones = 0;
-
-        u32 sequenceOffset = 0;
-        u32 boneInfoOffset = 0;
-        u32 padding = 0;
-    };
-
-    struct AnimationSequence
-    {
-        u16 animationId = 0;
-        u16 animationSubId = 0;
-        u16 nextSubAnimationId = 0;
-        u16 nextAliasId = 0;
-
-        struct AnimationSequenceFlag
-        {
-            u32 isAlwaysPlaying : 1;
-            u32 isAlias : 1;
-            u32 blendTransition : 1; // (This applies if set on either side of the transition) If set we lerp between the end -> start states, but only if end != start (Compare Bone Values)
-        } flags;
-
-        f32 duration = 0.f;
-
-        u16 repeatMin = 0;
-        u16 repeatMax = 0;
-
-        u16 blendTimeStart = 0;
-        u16 blendTimeEnd = 0;
-
-        u64 padding = 0;
     };
 
     struct AnimationBoneInfo

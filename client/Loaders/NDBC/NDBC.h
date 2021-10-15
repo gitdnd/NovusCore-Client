@@ -239,6 +239,20 @@ namespace NDBC
         u32 flags; //  0x1: animation syncs with time of day (uses animation 0, time of day is just in percentage). 0x2: render stars, sun and moons and clouds as well. 0x4: do procedural fog
     };
 
+    struct AnimationData
+    {
+        u32 id;
+        u32 name;
+
+        u32 weaponFlags;
+        u32 bodyFlags;
+        u32 flags;
+
+        u32 fallbackID; // Reference into AnimationData
+        u32 behaviorID;
+        u32 behaviorTier;
+    };
+
     struct CreatureDisplayInfo
     {
         u32 id;

@@ -9,6 +9,7 @@
 #include "../Rendering/DebugRenderer.h"
 #include "../Rendering/PixelQuery.h"
 #include "../Rendering/CameraFreelook.h"
+#include "../Rendering/AnimationSystem/AnimationSystem.h"
 #include "../ECS/Components/Singletons/NDBCSingleton.h"
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
@@ -259,6 +260,41 @@ namespace Editor
 
                             _selectedComplexModelData.numRenderBatches = isOpaque ? loadedComplexModel.numOpaqueDrawCalls : loadedComplexModel.numTransparentDrawCalls;
                             _selectedComplexModelData.selectedRenderBatch = 1;
+
+                            // Generate new Complex Model Animation Data
+                            {
+                                NDBC::File* animationDataFile = ndbcSingleton.GetNDBCFile("AnimationData");
+                                StringTable*& animationDataStringTable = animationDataFile->GetStringTable();
+
+                                const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
+
+                                _selectedComplexModelData.animationEntries.clear();
+                                cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence> animationSequences)
+                                {
+                                    for (u32 i = 0; i < animationModelInfo.numSequences; i++)
+                                    {
+                                        const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
+
+                                        // Skip all variations, global sequences & aliases
+                                        if (animationSequence.animationSubId > 0 ||
+                                            animationSequence.flags.isAlwaysPlaying && animationSequence.flags.isAlias)
+                                            continue;
+
+                                        NDBC::AnimationData* animationData = animationDataFile->GetRowById<NDBC::AnimationData>(animationSequence.animationId);
+                                        if (!animationData)
+                                            continue;
+
+                                        CModelAnimationEntry& animationEntry = _selectedComplexModelData.animationEntries.emplace_back();
+                                        animationEntry.id = animationSequence.animationId;
+                                        animationEntry.name = animationDataStringTable->GetString(animationData->name).c_str();
+                                    }
+                                });
+
+                                std::sort(_selectedComplexModelData.animationEntries.begin(), _selectedComplexModelData.animationEntries.end(), [](const CModelAnimationEntry& a, const CModelAnimationEntry& b)
+                                {
+                                    return a.id < b.id;
+                                });
+                            }
                         }
 
                         ComplexModelSelectionDrawImGui();
@@ -427,110 +463,112 @@ namespace Editor
         u32 loadedObjectIndex = cModelRenderer->GetModelIndexByDrawCallDataIndex(_selectedComplexModelData.drawCallDataID, _selectedComplexModelData.isOpaque);
         const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(loadedObjectIndex);
 
-        SafeVector<CModelRenderer::ModelInstanceData>& cModelModelInstanceDatas = cModelRenderer->GetModelInstanceDatas();
+        const mat4x4& modelInstanceMatrix = cModelRenderer->GetModelInstanceMatrix(_selectedComplexModelData.instanceID);
 
-        cModelModelInstanceDatas.WriteLock([&](std::vector<CModelRenderer::ModelInstanceData>& modelInstanceDatas)
+        glm::vec3 scale;
+        glm::quat rotation;
+        glm::vec3 translation;
+        glm::vec3 skew;
+        glm::vec4 perspective;
+        glm::decompose(modelInstanceMatrix, scale, rotation, translation, skew, perspective);
+
+        glm::vec3 euler = glm::eulerAngles(rotation);
+        glm::vec3 eulerAsDeg = glm::degrees(euler);
+
+        ImGui::Text("Complex Model");
+        ImGui::Text("Model: %s", loadedComplexModel.debugName.c_str());
+        ImGui::Text("Position: X: %.2f, Y: %.2f, Z: %.2f", translation.x, translation.y, translation.z);
+        ImGui::Text("Scale: X: %.2f, Y: %.2f, Z: %.2f", scale.x, scale.y, scale.z);
+        ImGui::Text("Rotation: X: %.2f, Y: %.2f, Z: %.2f", eulerAsDeg.x, eulerAsDeg.y, eulerAsDeg.z);
+
+        bool hasAnimationEntries = _selectedComplexModelData.animationEntries.size() > 0;
+        if (loadedComplexModel.isAnimated && hasAnimationEntries)
         {
-            CModelRenderer::ModelInstanceData& modelInstanceData = modelInstanceDatas[_selectedComplexModelData.instanceID];
-            const mat4x4& modelInstanceMatrix = cModelRenderer->GetModelInstanceMatrix(_selectedComplexModelData.instanceID);
+            AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+            AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
 
-            glm::vec3 scale;
-            glm::quat rotation;
-            glm::vec3 translation;
-            glm::vec3 skew;
-            glm::vec4 perspective;
-            glm::decompose(modelInstanceMatrix, scale, rotation, translation, skew, perspective);
-
-            glm::vec3 euler = glm::eulerAngles(rotation);
-            glm::vec3 eulerAsDeg = glm::degrees(euler);
-
-            ImGui::Text("Complex Model");
-            ImGui::Text("Model: %s", loadedComplexModel.debugName.c_str());
-            ImGui::Text("Position: X: %.2f, Y: %.2f, Z: %.2f", translation.x, translation.y, translation.z);
-            ImGui::Text("Scale: X: %.2f, Y: %.2f, Z: %.2f", scale.x, scale.y, scale.z);
-            ImGui::Text("Rotation: X: %.2f, Y: %.2f, Z: %.2f", eulerAsDeg.x, eulerAsDeg.y, eulerAsDeg.z);
-
-            if (loadedComplexModel.isAnimated)
-            {
-                // Animation Shenanigans
-                {
-                    ImGui::Separator();
-                    ImGui::Separator();
-                    ImGui::Text("Sequence Id: ");
-                    ImGui::SameLine();
-
-                    u32 numSequences = cModelRenderer->GetNumSequencesForModelId(modelInstanceData.modelID);
-                    u32 sequenceId = modelInstanceData.editorSequenceId;
-                    if (ImGui::InputInt("", reinterpret_cast<i32*>(&sequenceId), 1, 1, ImGuiInputTextFlags_CharsNoBlank))
-                    {
-                        if (sequenceId < numSequences)
-                        {
-                            if (sequenceId < 0)
-                                sequenceId = 0;
-                            else
-                                sequenceId = glm::clamp(static_cast<i32>(sequenceId), 0, static_cast<i32>(numSequences - 1));
-                        }
-                        else
-                            sequenceId = 0;
-
-                        modelInstanceData.editorSequenceId = sequenceId;
-                    }
-
-                    bool isLooping = modelInstanceData.editorIsLoop;
-                    if (ImGui::Checkbox("Loop", &isLooping))
-                        modelInstanceData.editorIsLoop = isLooping;
-
-                    if (ImGui::Button("Play"))
-                    {
-                        if (sequenceId < numSequences)
-                        {
-                            CModelRenderer::AnimationRequest request;
-                            request.instanceId = _selectedComplexModelData.instanceID;
-                            request.sequenceId = sequenceId;
-                            request.flags.isLooping = isLooping;
-                            request.flags.isPlaying = true;
-
-                            cModelRenderer->AddAnimationRequest(request);
-                        }
-                    }
-
-                    ImGui::SameLine();
-                    if (ImGui::Button("Stop"))
-                    {
-                        if (sequenceId < numSequences)
-                        {
-                            CModelRenderer::AnimationRequest request;
-                            request.instanceId = _selectedComplexModelData.instanceID;
-                            request.sequenceId = sequenceId;
-                            request.flags.isLooping = false;
-                            request.flags.isPlaying = false;
-
-                            cModelRenderer->AddAnimationRequest(request);
-                        }
-                    }
-                }
-            }
-
-            if (_selectedComplexModelData.numRenderBatches)
+            // Animation Shenanigans
+            if (animationSystem->GetAnimationInstanceData(_selectedComplexModelData.instanceID, animationInstanceData))
             {
                 ImGui::Separator();
-                bool showRenderOptions = ImGui::CollapsingHeader("Render Options");
-                if (showRenderOptions)
-                {
-                    ImGui::Text("Render Batch (%i/%u)", _selectedComplexModelData.selectedRenderBatch, _selectedComplexModelData.numRenderBatches);
-                    if (ImGui::InputInt("##", &_selectedComplexModelData.selectedRenderBatch, 1, 1))
-                    {
-                        i32 minValue = 1;
-                        i32 maxValue = static_cast<i32>(_selectedComplexModelData.numRenderBatches);
+                ImGui::Separator();
+                ImGui::Text("Animations");
 
-                        _selectedComplexModelData.selectedRenderBatch = glm::clamp(_selectedComplexModelData.selectedRenderBatch, minValue, maxValue);
+                static const char* selectedAnimationName = nullptr;
+                static const char* previewAnimationName = nullptr;
+
+                u32& selectedAnimationEntry = _selectedComplexModelData.selectedAnimationEntry;
+                previewAnimationName = _selectedComplexModelData.animationEntries[selectedAnimationEntry].name;
+
+                if (ImGui::BeginCombo("##", previewAnimationName)) // The second parameter is the label previewed before opening the combo.
+                {
+                    for (u32 i = 0; i < _selectedComplexModelData.animationEntries.size(); i++)
+                    {
+                        const CModelAnimationEntry& animationEntry = _selectedComplexModelData.animationEntries[i];
+                        bool isSelected = selectedAnimationEntry == i;
+
+                        if (ImGui::Selectable(animationEntry.name, &isSelected))
+                        {
+                            selectedAnimationEntry = i;
+                            selectedAnimationName = animationEntry.name;
+                            previewAnimationName = animationEntry.name;
+                        }
+
+                        if (isSelected)
+                            ImGui::SetItemDefaultFocus();
                     }
 
-                    ImGui::Checkbox("Draw Wireframe", &_selectedComplexModelData.drawWireframe);
-                    ImGui::Checkbox("Wireframe Entire Object", &_selectedComplexModelData.wireframeEntireObject);
+                    ImGui::EndCombo();
+                }
+
+                ImGui::SameLine();
+
+                bool value = animationInstanceData->editorShouldAnimationLoop;
+                if (ImGui::Checkbox("Loop", &value))
+                {
+                    animationInstanceData->editorShouldAnimationLoop = value;
+                }
+
+                if (ImGui::Button("Play"))
+                {
+                    u32 animationID = _selectedComplexModelData.animationEntries[selectedAnimationEntry].id;
+                    animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, true, animationInstanceData->editorShouldAnimationLoop);
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Stop"))
+                {
+                    u32 animationID = _selectedComplexModelData.animationEntries[selectedAnimationEntry].id;
+                    animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, false);
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Stop All"))
+                {
+                    animationSystem->TryStopAllAnimations(_selectedComplexModelData.instanceID);
                 }
             }
-        });
+        }
+
+        if (_selectedComplexModelData.numRenderBatches)
+        {
+            ImGui::Separator();
+            bool showRenderOptions = ImGui::CollapsingHeader("Render Options");
+            if (showRenderOptions)
+            {
+                ImGui::Text("Render Batch (%i/%u)", _selectedComplexModelData.selectedRenderBatch, _selectedComplexModelData.numRenderBatches);
+                if (ImGui::InputInt("##", &_selectedComplexModelData.selectedRenderBatch, 1, 1))
+                {
+                    i32 minValue = 1;
+                    i32 maxValue = static_cast<i32>(_selectedComplexModelData.numRenderBatches);
+
+                    _selectedComplexModelData.selectedRenderBatch = glm::clamp(_selectedComplexModelData.selectedRenderBatch, minValue, maxValue);
+                }
+
+                ImGui::Checkbox("Draw Wireframe", &_selectedComplexModelData.drawWireframe);
+                ImGui::Checkbox("Wireframe Entire Object", &_selectedComplexModelData.wireframeEntireObject);
+            }
+        }
     }
 
     bool Editor::IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& aabb, f32& t)

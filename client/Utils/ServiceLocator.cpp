@@ -17,6 +17,7 @@ Editor::Editor* ServiceLocator::_editor = nullptr;
 ScriptEngine* ServiceLocator::_scriptEngine = nullptr;
 ScriptLoader* ServiceLocator::_scriptLoader = nullptr;
 ScriptAPI* ServiceLocator::_scriptAPI = nullptr;
+AnimationSystem* ServiceLocator::_animationSystem = nullptr;
 
 moodycamel::ConcurrentQueue<Message>* ServiceLocator::_mainInputQueue = nullptr;
 
@@ -115,4 +116,10 @@ void ServiceLocator::SetScriptAPI(ScriptAPI* scriptAPI)
 {
     assert(_scriptAPI == nullptr);
     _scriptAPI = scriptAPI;
+}
+
+void ServiceLocator::SetAnimationSystem(AnimationSystem* animationSystem)
+{
+    assert(_animationSystem == nullptr);
+    _animationSystem = animationSystem;
 }

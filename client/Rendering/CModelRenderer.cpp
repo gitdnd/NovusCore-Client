@@ -2,8 +2,9 @@
 #include "ClientRenderer.h"
 #include "DebugRenderer.h"
 #include "PixelQuery.h"
+#include "AnimationSystem/AnimationSystem.h"
+#include "CModel/CModel.h"
 #include "../Utils/ServiceLocator.h"
-#include "../Rendering/CModel/CModel.h"
 #include "../Editor/Editor.h"
 #include "SortUtils.h"
 
@@ -196,6 +197,9 @@ void CModelRenderer::OnModelDestroyed(entt::registry& registry, entt::entity ent
 
     const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(instanceID);
 
+    AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+    animationSystem->RemoveInstance(instanceID);
+
     _freedModelIDInstances.WriteLock([&](robin_hood::unordered_map<u32, std::queue<u32>>& freedModelIDInstances)
     {
         freedModelIDInstances[modelInstanceData.modelID].push(instanceID);
@@ -351,13 +355,13 @@ void CModelRenderer::Update(f32 deltaTime)
                         {
                             const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.translationSequenceOffset + j];
 
-                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                            if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
                                 continue;
 
                             AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
                             boneInstance.animationProgress = 0;
 
-                            if (animationRequest.flags.isPlaying)
+                            if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
                             {
                                 bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isTranslationTrackGlobalSequence;
 
@@ -378,13 +382,13 @@ void CModelRenderer::Update(f32 deltaTime)
                         {
                             const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
 
-                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                            if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
                                 continue;
 
                             AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
                             boneInstance.animationProgress = 0;
 
-                            if (animationRequest.flags.isPlaying)
+                            if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
                             {
                                 bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
 
@@ -405,13 +409,13 @@ void CModelRenderer::Update(f32 deltaTime)
                         {
                             const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
 
-                            if (animationTrackInfo.sequenceIndex != sequenceIndex)
+                            if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
                                 continue;
 
                             AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
                             boneInstance.animationProgress = 0;
 
-                            if (animationRequest.flags.isPlaying)
+                            if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
                             {
                                 bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
 
@@ -2409,6 +2413,8 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
             animationBoneInstances.resize(numBoneInstances + numBones);
         });
 
+        AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+        animationSystem->AddInstance(instanceIndex, AnimationSystem::AnimationInstanceData());
         const AnimationModelInfo& animationModelInfo = _animationModelInfo.ReadGet(complexModel.modelID);
 
         _animationSequences.ReadLock([&](const std::vector<AnimationSequence>& animationSequences)
@@ -2425,12 +2431,19 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
                         animationRequest.sequenceId = i;
                         animationRequest.flags.isPlaying = true;
                         animationRequest.flags.isLooping = true;
+                        animationRequest.flags.stopAll = false;
                     }
 
                     _animationRequests.enqueue(animationRequest);
                 }
             }
         });
+
+        // Play Stand By Default
+        if (!animationSystem->TryPlayAnimationID(instanceIndex, 0, true, true))
+        {
+            DebugHandler::PrintError("CModelRenderer : Failed to play animation 'Stand' for '%s'", complexModel.debugName.c_str());
+        }
     }
     else
     {

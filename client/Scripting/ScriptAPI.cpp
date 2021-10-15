@@ -1,6 +1,7 @@
 #include "ScriptAPI.h"
 
 #include "API/Debug/DebugAPI.h"
+#include "API/Gameplay/Time/TimeAPI.h"
 
 #include <Nai/Compiler/Module.h>
 #include <Nai/Compiler/Compiler.h>
@@ -9,6 +10,7 @@ void ScriptAPI::Init()
 {
     // This Init function is responsible for adding API Callbacks
     ScriptingAPI::DebugAPI::Init(this);
+    ScriptingAPI::TimeAPI::Init(this);
 }
 
 void ScriptAPI::RegisterAPI(Compiler* cc)
