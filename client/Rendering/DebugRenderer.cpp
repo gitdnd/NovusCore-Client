@@ -44,20 +44,8 @@ DebugRenderer::DebugRenderer(Renderer::Renderer* renderer, RenderResources& reso
 		bufferDesc.usage = Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::STORAGE_BUFFER;
 		_debugVertexRangeBuffer = _renderer->CreateBuffer(bufferDesc);
 
-		Renderer::BufferDesc stagingBufferDesc;
-		stagingBufferDesc.name = "DebugRangeUploadBuffer";
-		stagingBufferDesc.size = bufferDesc.size;
-		stagingBufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-		stagingBufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-
-		Renderer::BufferID stagingBuffer = _renderer->CreateBuffer(stagingBufferDesc);
-		_renderer->QueueDestroyBuffer(stagingBuffer);
-
-		void* mappedMemory = _renderer->MapBuffer(stagingBuffer);
-		memcpy(mappedMemory, _debugVertexRanges, sizeof(_debugVertexRanges));
-		_renderer->UnmapBuffer(stagingBuffer);
-
-		_renderer->CopyBuffer(_debugVertexRangeBuffer, 0, stagingBuffer, 0, bufferDesc.size);
+		auto uploadBuffer = _renderer->CreateUploadBuffer(_debugVertexRangeBuffer, 0, bufferDesc.size);
+		memcpy(uploadBuffer->mappedMemory, _debugVertexRanges, sizeof(_debugVertexRanges));
 	}
 
 	{
@@ -92,7 +80,7 @@ void DebugRenderer::AddUploadPass(Renderer::RenderGraph* renderGraph)
 	{
 	};
 
-	renderGraph->AddPass<PassData>("DebugUpload", 
+	renderGraph->AddPass<PassData>("DebugUpload",
 		[=](PassData& data, Renderer::RenderGraphBuilder& builder) -> bool
 		{
 			return true;
@@ -119,17 +107,6 @@ void DebugRenderer::AddUploadPass(Renderer::RenderGraph* renderGraph)
 			}
 
 			{
-				Renderer::BufferDesc stagingBufferDesc;
-				stagingBufferDesc.name = "DebugVertexUploadBuffer";
-				stagingBufferDesc.size = totalBufferSize;
-				stagingBufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-				stagingBufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-
-				Renderer::BufferID vertexStagingBuffer = _renderer->CreateBuffer(stagingBufferDesc);
-				_renderer->QueueDestroyBuffer(vertexStagingBuffer);
-
-				void* vertexBufferMemory = _renderer->MapBuffer(vertexStagingBuffer);
-
 				for (size_t i = 0; i < DBG_VERTEX_BUFFER_COUNT; ++i)
 				{
 					const auto& vertices = _debugVertices[i];
@@ -138,30 +115,18 @@ void DebugRenderer::AddUploadPass(Renderer::RenderGraph* renderGraph)
 					const u32 size = sourceVertexCount[i] * sizeof(DebugVertex);
 					if (size > 0)
 					{
-						memcpy((char*)vertexBufferMemory + sourceOffset, vertices.data(), size);
-						commandList.CopyBuffer(_debugVertexBuffer, targetOffset, vertexStagingBuffer, sourceOffset, size);
+						auto uploadBuffer = _renderer->CreateUploadBuffer(_debugVertexBuffer, targetOffset, size);
+						memcpy((char*)uploadBuffer->mappedMemory, vertices.data(), size);
 					}
 				}
-
-				_renderer->UnmapBuffer(vertexStagingBuffer);
 			}
 
 
 			{
-				Renderer::BufferDesc stagingBufferDesc;
-				stagingBufferDesc.name = "DebugCounterUploadBuffer";
-				stagingBufferDesc.size = DBG_VERTEX_BUFFER_COUNT * sizeof(u32);
-				stagingBufferDesc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-				stagingBufferDesc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
+				const u32 size = DBG_VERTEX_BUFFER_COUNT * sizeof(u32);
 
-				Renderer::BufferID counterStagingBuffer = _renderer->CreateBuffer(stagingBufferDesc);
-				_renderer->QueueDestroyBuffer(counterStagingBuffer);
-
-				void* counterBufferMemory = _renderer->MapBuffer(counterStagingBuffer);
-				memcpy(counterBufferMemory, sourceVertexCount, stagingBufferDesc.size);
-				_renderer->UnmapBuffer(counterStagingBuffer);
-
-				commandList.CopyBuffer(_debugVertexCounterBuffer, 0, counterStagingBuffer, 0, stagingBufferDesc.size);
+				auto uploadBuffer = _renderer->CreateUploadBuffer(_debugVertexCounterBuffer, 0, size);
+				memcpy(uploadBuffer->mappedMemory, sourceVertexCount, size);
 			}
 
 			commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _debugVertexBuffer);
@@ -231,61 +196,55 @@ void DebugRenderer::Add3DPass(Renderer::RenderGraph* renderGraph, RenderResource
 			Renderer::GraphicsPipelineDesc pipelineDesc;
 			graphResources.InitializePipelineDesc(pipelineDesc);
 
-			{
-				
-			}
+			// Shader
+			Renderer::VertexShaderDesc vertexShaderDesc;
+			vertexShaderDesc.path = "debug3D.vs.hlsl";
 
-			{
-				// Shader
-				Renderer::VertexShaderDesc vertexShaderDesc;
-				vertexShaderDesc.path = "debug3D.vs.hlsl";
+			Renderer::PixelShaderDesc pixelShaderDesc;
+			pixelShaderDesc.path = "debug3D.ps.hlsl";
 
-				Renderer::PixelShaderDesc pixelShaderDesc;
-				pixelShaderDesc.path = "debug3D.ps.hlsl";
+			pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+			pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
 
-				pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
-				pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+			// Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
+			pipelineDesc.states.inputLayouts[0].enabled = true;
+			pipelineDesc.states.inputLayouts[0].SetName("Position");
+			pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32G32B32_FLOAT;
+			pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_VERTEX;
+			pipelineDesc.states.inputLayouts[0].alignedByteOffset = 0;
 
-				// Input layouts TODO: Improve on this, if I set state 0 and 3 it won't work etc... Maybe responsibility for this should be moved to ModelHandler and the cooker?
-				pipelineDesc.states.inputLayouts[0].enabled = true;
-				pipelineDesc.states.inputLayouts[0].SetName("Position");
-				pipelineDesc.states.inputLayouts[0].format = Renderer::InputFormat::R32G32B32_FLOAT;
-				pipelineDesc.states.inputLayouts[0].inputClassification = Renderer::InputClassification::PER_VERTEX;
-				pipelineDesc.states.inputLayouts[0].alignedByteOffset = 0;
+			pipelineDesc.states.inputLayouts[1].enabled = true;
+			pipelineDesc.states.inputLayouts[1].SetName("Color");
+			pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R8G8B8A8_UNORM;
+			pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_VERTEX;
+			pipelineDesc.states.inputLayouts[1].alignedByteOffset = 12;
 
-				pipelineDesc.states.inputLayouts[1].enabled = true;
-				pipelineDesc.states.inputLayouts[1].SetName("Color");
-				pipelineDesc.states.inputLayouts[1].format = Renderer::InputFormat::R8G8B8A8_UNORM;
-				pipelineDesc.states.inputLayouts[1].inputClassification = Renderer::InputClassification::PER_VERTEX;
-				pipelineDesc.states.inputLayouts[1].alignedByteOffset = 12;
+			pipelineDesc.states.primitiveTopology = Renderer::PrimitiveTopology::Lines;
 
-				pipelineDesc.states.primitiveTopology = Renderer::PrimitiveTopology::Lines;
+			// Depth state
+			pipelineDesc.states.depthStencilState.depthEnable = true;
+			pipelineDesc.states.depthStencilState.depthWriteEnable = false;
+			pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
 
-				// Depth state
-				pipelineDesc.states.depthStencilState.depthEnable = true;
-				pipelineDesc.states.depthStencilState.depthWriteEnable = false;
-				pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+			// Rasterizer state
+			pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+			pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
 
-				// Rasterizer state
-				pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
-				pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+			pipelineDesc.renderTargets[0] = data.color;
 
-				pipelineDesc.renderTargets[0] = data.color;
+			pipelineDesc.depthStencil = data.depth;
 
-				pipelineDesc.depthStencil = data.depth;
+			// Set pipeline
+			Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+			commandList.BeginPipeline(pipeline);
 
-				// Set pipeline
-				Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
-				commandList.BeginPipeline(pipeline);
+			commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+			commandList.SetVertexBuffer(0, _debugVertexBuffer);
 
-				commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-				commandList.SetVertexBuffer(0, _debugVertexBuffer);
+			// Draw
+			commandList.DrawIndirect(_drawArgumentBuffer, GetDrawBufferOffset(DBG_VERTEX_BUFFER_LINES_3D), 1);
 
-				// Draw
-				commandList.DrawIndirect(_drawArgumentBuffer, GetDrawBufferOffset(DBG_VERTEX_BUFFER_LINES_3D), 1);
-
-				commandList.EndPipeline(pipeline);
-			}
+			commandList.EndPipeline(pipeline);
 		});
 }
 

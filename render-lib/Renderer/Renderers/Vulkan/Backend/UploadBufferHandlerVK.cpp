@@ -515,20 +515,33 @@ namespace Renderer
                     VkBuffer dstBuffer = _bufferHandler->GetBuffer(task.targetBuffer);
                     VkBuffer srcBuffer = _bufferHandler->GetBuffer(task.sourceBuffer);
 
+                    {
+                        // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+                        VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                        bufferBarrier.buffer = srcBuffer;
+                        bufferBarrier.size = VK_WHOLE_SIZE;
+                        bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                        bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+                        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+                    }
+
                     VkBufferCopy copyRegion = {};
                     copyRegion.dstOffset = task.targetOffset;
                     copyRegion.srcOffset = task.sourceOffset;
                     copyRegion.size = task.copySize;
                     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
-                    // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
-                    VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-                    bufferBarrier.buffer = dstBuffer;
-                    bufferBarrier.size = VK_WHOLE_SIZE;
-                    bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                    bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    {
+                        // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+                        VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                        bufferBarrier.buffer = dstBuffer;
+                        bufferBarrier.size = VK_WHOLE_SIZE;
+                        bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                        bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-                    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+                        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+                    }
                 }
             }
 
