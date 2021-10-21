@@ -13,6 +13,8 @@ public:
         bool editorShouldAnimationLoop = 0;
 
         std::vector<u16> activeAnimationIDs;
+
+        bool IsAnimationIDPlaying(u16 animationID);
     };
 
 public:

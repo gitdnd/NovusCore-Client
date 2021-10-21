@@ -106,11 +106,11 @@ void TerrainRenderer::Update(f32 deltaTime)
             LocalplayerSingleton& localplayerSingleton = registry->ctx_or_set<LocalplayerSingleton>();
             localplayerSingleton.entity = registry->create();
 
-            registry->emplace<DebugBox>(localplayerSingleton.entity);
+            //registry->emplace<DebugBox>(localplayerSingleton.entity);
             Transform& transform = registry->emplace<Transform>(localplayerSingleton.entity);
             transform.position = vec3(-9249.f, 87.f, 79.f);
             transform.scale = vec3(1.0f, 1.0f, 1.0f);
-            transform.UpdateRotationMatrix();
+            transform.UpdateDirectionVectors();
 
             registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
 

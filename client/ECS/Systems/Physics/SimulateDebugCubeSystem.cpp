@@ -49,7 +49,7 @@ void SimulateDebugCubeSystem::Init(entt::registry& registry)
             transform.position += vec3((i % 10) * 10.0f, (i / 10) * 10.0f, 0);
 
             //transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
-            transform.UpdateRotationMatrix();
+            transform.UpdateDirectionVectors();
 
             registry.emplace<TransformIsDirty>(entity);
             registry.emplace<Rigidbody>(entity);

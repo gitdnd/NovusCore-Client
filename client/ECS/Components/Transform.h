@@ -33,8 +33,10 @@ struct Transform
     } movementFlags;
 
     // Rotation
-    mat4x4 rotationMatrix;
     f32 yaw = 0.0f;
+    f32 yawBase = 0.0f;
+    f32 yawOffset = 0.0f;
+
     f32 pitch = 0.0f;
 
     // Direction vectors
@@ -43,33 +45,33 @@ struct Transform
     vec3 left = vec3(0.f, 0.f, 0.f);
 
     vec3 GetRotation() const { return vec3(pitch, 0.0f, yaw); }
+    mat4x4 GetRotationMatrix() 
+    {
+        glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(pitch), glm::radians(yaw)));
+        return glm::mat4_cast(rotQuat);
+    }
+
     mat4x4 GetMatrix()
     {
         // When we pass 1 into the constructor, it will construct an identity matrix
         mat4x4 matrix(1);
 
         // Order is important here (Go lookup how matrices work if confused)
-        // Gamedev.net suggest (Rotate, Scale and Translate) this could be wrong
-        // Experience tells me (Translate and then scale or rotate in either order)
         matrix = glm::translate(matrix, position);
-        matrix *= rotationMatrix;
+        matrix *= GetRotationMatrix();
         matrix = glm::scale(matrix, scale);
 
         return matrix;
     }
 
-    void UpdateRotationMatrix()
+    void UpdateDirectionVectors()
     {
-        glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(pitch), glm::radians(yaw)));
-        rotationMatrix = glm::mat4_cast(rotQuat);
-        UpdateVectors();
-    }
+        glm::quat rotQuat = glm::quat(glm::vec3(0.0f, glm::radians(pitch), glm::radians(yawBase)));
+        mat4x4 rotationMatrix = glm::mat4_cast(rotQuat);
 
-    void UpdateVectors()
-    {
-        left = rotationMatrix[1];
-        up = rotationMatrix[2];
         front = rotationMatrix[0];
+        up = rotationMatrix[2];
+        left = rotationMatrix[1];
     }
 };
 

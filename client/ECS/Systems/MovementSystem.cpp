@@ -10,10 +10,12 @@
 #include "../../Rendering/CameraOrbital.h"
 #include "../../Rendering/ClientRenderer.h"
 #include "../../Rendering/DebugRenderer.h"
+#include "../../Rendering/AnimationSystem/AnimationSystem.h"
 #include "../Components/Singletons/TimeSingleton.h"
 #include "../Components/Singletons/LocalplayerSingleton.h"
 #include "../Components/Network/ConnectionSingleton.h"
 #include "../Components/Rendering/DebugBox.h"
+#include "../Components/Rendering/ModelDisplayInfo.h"
 #include "../Components/Transform.h"
 
 #include <glm/gtx/rotate_vector.hpp>
@@ -83,6 +85,7 @@ void MovementSystem::Update(entt::registry& registry)
     KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
     KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
+    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(localplayerSingleton.entity);
 
     // Here we save our original movement flags to know if we have "changed" direction, and have to update the server, otherwise we can continue sending heartbeats
     Transform::MovementFlags& movementFlags = transform.movementFlags;
@@ -92,6 +95,7 @@ void MovementSystem::Update(entt::registry& registry)
     vec3 originalPosition = transform.position;
     f32 originalPitch = transform.pitch;
     f32 originalYaw = transform.yaw;
+    f32 originalYawOffset = 0.0f;// transform.yawOffset;
 
     Geometry::Triangle triangle;
     f32 terrainHeight = 0.f;
@@ -101,13 +105,18 @@ void MovementSystem::Update(entt::registry& registry)
     bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
     if (isRightClickDown)
     {
-        transform.yaw = camera->GetYaw();
+        // Update Direction Vectors to properly align with movement (Does not include yawOffset)
+        transform.yawBase = camera->GetYaw();
+        transform.yaw = transform.yawBase + transform.yawOffset;
+        transform.UpdateDirectionVectors();
 
         // Only set Pitch if we are flying
         //transform.pitch = camera->GetPitch();
     }
-
-    transform.UpdateRotationMatrix();
+    else
+    {
+        transform.UpdateDirectionVectors();
+    }
 
     bool isJumping = false;
 
@@ -224,6 +233,42 @@ void MovementSystem::Update(entt::registry& registry)
             transform.fallSpeed += transform.fallAcceleration * timeSingleton.deltaTime;
             transform.velocity -= transform.up * transform.fallSpeed * timeSingleton.deltaTime;
         }
+
+        bool isMovingForward = (movementFlags.FORWARD && !movementFlags.BACKWARD);
+        bool isMovingBackward = (movementFlags.BACKWARD && !movementFlags.FORWARD);
+        bool isMovingLeft = (movementFlags.LEFT && !movementFlags.RIGHT);
+        bool isMovingRight = (movementFlags.RIGHT && !movementFlags.LEFT);
+
+        if (isMovingForward && isMovingLeft)
+        {
+            transform.yawOffset = 45.0f;
+        }
+        else if (isMovingForward && isMovingRight)
+        {
+            transform.yawOffset = -45.0f;
+        }
+        else if (isMovingBackward && isMovingLeft)
+        {
+            transform.yawOffset = -45.0f;
+        }
+        else if (isMovingBackward && isMovingRight)
+        {
+            transform.yawOffset = 45.0f;
+        }
+        else if (isMovingLeft)
+        {
+            transform.yawOffset = 90.0f;
+        }
+        else if (isMovingRight)
+        {
+            transform.yawOffset = -90.0f;
+        }
+        else
+        {
+            transform.yawOffset = 0.0f;
+        }
+
+        transform.yaw = transform.yawBase + transform.yawOffset;
     }
 
     f32 sqrVelocity = glm::length2(transform.velocity);
@@ -265,9 +310,52 @@ void MovementSystem::Update(entt::registry& registry)
     DebugRenderer* debugRenderer = ServiceLocator::GetClientRenderer()->GetDebugRenderer();
     debugRenderer->DrawMatrix(transformMatrix, 1.0f);
 
-    if (transform.position != originalPosition || 
-        transform.pitch    != originalPitch    ||
-        transform.yaw      != originalYaw)
+    // If our movement flags changed, lets see what animations we should play
+    if (movementFlags.value != originalFlags.value)
+    {
+        AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+        u32 instanceID = modelDisplayInfo.instanceID;
+
+        AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
+        if (animationSystem->GetAnimationInstanceData(instanceID, animationInstanceData))
+        {
+            bool playForwardAnimation = (movementFlags.FORWARD || movementFlags.LEFT || movementFlags.RIGHT) && !movementFlags.BACKWARD;
+            bool playBackwardAnimation = (movementFlags.BACKWARD) && !movementFlags.FORWARD;
+
+            if (playForwardAnimation)
+            {
+                // Forward Animation
+                if (!animationInstanceData->IsAnimationIDPlaying(5))
+                {
+                    animationSystem->TryStopAllAnimations(instanceID);
+                    animationSystem->TryPlayAnimationID(instanceID, 5, true, true);
+                }
+            }
+            else if (playBackwardAnimation)
+            {
+                // Backward Animation
+                if (!animationInstanceData->IsAnimationIDPlaying(13))
+                {
+                    animationSystem->TryStopAllAnimations(instanceID);
+                    animationSystem->TryPlayAnimationID(instanceID, 13, true, true);
+                }
+            }
+            else
+            {
+                // Stand
+                if (!animationInstanceData->IsAnimationIDPlaying(0))
+                {
+                    animationSystem->TryStopAllAnimations(instanceID);
+                    animationSystem->TryPlayAnimationID(instanceID, 0, true, true);
+                }
+            }
+        }
+    }
+
+    if (transform.position  != originalPosition || 
+        transform.pitch     != originalPitch    ||
+        transform.yaw       != originalYaw      ||
+        transform.yawOffset != originalYaw)
     {
         registry.emplace_or_replace<TransformIsDirty>(localplayerSingleton.entity);
     }

@@ -208,14 +208,14 @@ bool ScriptLoader::LoadScriptPipeline3(Module* module)
     if (!Typer::Process(&_compiler, module))
         return false;
 
-    if (!Bytecode::Process(&_compiler, module))
-        return false;
-
     return true;
 }
 
 bool ScriptLoader::LoadScriptPipeline4(Module* module, bool didFail)
 {
+    if (!Bytecode::Process(&_compiler, module))
+        return false;
+
     if (!didFail)
     {
         u32 mainHash = "main"_djb2;

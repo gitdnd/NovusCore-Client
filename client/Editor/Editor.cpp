@@ -490,15 +490,15 @@ namespace Editor
             // Animation Shenanigans
             if (animationSystem->GetAnimationInstanceData(_selectedComplexModelData.instanceID, animationInstanceData))
             {
-                ImGui::Separator();
-                ImGui::Separator();
-                ImGui::Text("Animations");
-
                 static const char* selectedAnimationName = nullptr;
                 static const char* previewAnimationName = nullptr;
 
                 u32& selectedAnimationEntry = _selectedComplexModelData.selectedAnimationEntry;
                 previewAnimationName = _selectedComplexModelData.animationEntries[selectedAnimationEntry].name;
+
+                ImGui::Separator();
+                ImGui::Separator();
+                ImGui::Text("Animation (ID: %u)", _selectedComplexModelData.animationEntries[selectedAnimationEntry].id);
 
                 if (ImGui::BeginCombo("##", previewAnimationName)) // The second parameter is the label previewed before opening the combo.
                 {

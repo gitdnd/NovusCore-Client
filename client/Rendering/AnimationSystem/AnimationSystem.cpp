@@ -144,3 +144,9 @@ void AnimationSystem::TryStopAllAnimations(u32 instanceID)
 
     animationInstanceData->activeAnimationIDs.clear();
 }
+
+bool AnimationSystem::AnimationInstanceData::IsAnimationIDPlaying(u16 animationID)
+{
+    auto itr = std::find(activeAnimationIDs.begin(), activeAnimationIDs.end(), animationID);
+    return itr != activeAnimationIDs.end();
+}
