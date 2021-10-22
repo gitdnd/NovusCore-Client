@@ -88,22 +88,8 @@ namespace Renderer
         desc.usage |= BufferUsage::TRANSFER_DESTINATION; // If we're supposed to stage into it, we have to make sure it's a transfer destination
         BufferID bufferID = CreateBuffer(desc);
 
-        // Create staging buffer
-        desc.name += "Staging";
-        desc.usage = BufferUsage::TRANSFER_SOURCE; // The staging buffer needs to be transfer source
-        desc.cpuAccess = BufferCPUAccess::WriteOnly;
-
-        BufferID stagingBuffer = CreateBuffer(desc);
-
-        // Upload to staging buffer
-        void* dst = MapBuffer(stagingBuffer);
-        callback(dst);
-        UnmapBuffer(stagingBuffer);
-
-        // Queue destroy staging buffer
-        QueueDestroyBuffer(stagingBuffer);
-        // Copy from staging buffer to buffer
-        CopyBuffer(bufferID, 0, stagingBuffer, 0, desc.size);
+        auto uploadBuffer = CreateUploadBuffer(bufferID, 0, desc.size);
+        callback(uploadBuffer->mappedMemory);
 
         return bufferID;
     }

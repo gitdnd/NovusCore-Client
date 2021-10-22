@@ -53,11 +53,15 @@ namespace Renderer
                 _renderer = renderer;
                 _allocator.Init(0, 0);
                 _initialized = true;
+
+                if (vectorByteSize == 0) // Not sure about this
+                {
+                    ResizeBuffer(renderer, 1, false);
+                }
             }
 
             if (vectorByteSize == 0) // Not sure about this
             {
-                ResizeBuffer(renderer, 1, false);
                 return false;
             }
 
@@ -183,13 +187,17 @@ namespace Renderer
 
             BufferID newBuffer = renderer->CreateBuffer(desc);
 
-            if (copyOld && _buffer != BufferID::Invalid())
+            if (_buffer != BufferID::Invalid())
             {
-                size_t oldSize = _allocator.AllocatedBytes();
-                if (oldSize > 0)
+                if (copyOld)
                 {
-                    renderer->CopyBuffer(newBuffer, 0, _buffer, 0, oldSize);
+                    size_t oldSize = _allocator.AllocatedBytes();
+                    if (oldSize > 0)
+                    {
+                        renderer->CopyBuffer(newBuffer, 0, _buffer, 0, oldSize);
+                    }
                 }
+                renderer->QueueDestroyBuffer(_buffer);
             }
 
             _allocator.Grow(newSize);

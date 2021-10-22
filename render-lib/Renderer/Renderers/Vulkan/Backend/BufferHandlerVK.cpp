@@ -147,20 +147,25 @@ namespace Renderer
 
             const BufferID bufferID = AcquireNewBufferID();
 
+            if (bufferID == BufferID::Invalid())
+            {
+                DebugHandler::PrintFatal("BufferHandlerVK: Acquired new buffer ID that was BufferID::Invalid, are we overflowing?");
+            }
+
             bool failed = false;
             data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
+            {
+                Buffer& buffer = buffers[(BufferID::type)bufferID];
+                buffer.size = descSize;
+
+                if (vmaCreateBuffer(_device->_allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr) != VK_SUCCESS)
                 {
-                    Buffer& buffer = buffers[(BufferID::type)bufferID];
-                    buffer.size = descSize;
+                    failed = true;
+                    return;
+                }
 
-                    if (vmaCreateBuffer(_device->_allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr) != VK_SUCCESS)
-                    {
-                        failed = true;
-                        return;
-                    }
-
-                    DebugMarkerUtilVK::SetObjectName(_device->_device, (u64)buffer.buffer, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, desc.name.c_str());
-                });
+                DebugMarkerUtilVK::SetObjectName(_device->_device, (u64)buffer.buffer, VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT, desc.name.c_str());
+            });
 
             if (failed)
             {
@@ -212,10 +217,10 @@ namespace Renderer
             {
                 // Else create a new one
                 data.buffers.WriteLock([&](std::vector<Buffer>& buffers)
-                    {
-                        bufferID = BufferID(static_cast<BufferID::type>(buffers.size()));
-                        buffers.emplace_back();
-                    });
+                {
+                    bufferID = BufferID(static_cast<BufferID::type>(buffers.size()));
+                    buffers.emplace_back();
+                });
                 
             }
 
