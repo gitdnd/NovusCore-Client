@@ -7,7 +7,7 @@
 namespace CModel
 {
     constexpr u32 COMPLEX_MODEL_TOKEN = 10;
-    constexpr u32 COMPLEX_MODEL_VERSION = 4;
+    constexpr u32 COMPLEX_MODEL_VERSION = 5;
 
     struct ComplexVertex
     {
