@@ -33,27 +33,37 @@ namespace ScriptingAPI
                 {
                     AddStringToResult(result, buffer, lastFormatSign, delta);
 
-                    u32* num = interpreter->GetParameter<u32>(paramCounter++);
+                    u32* num = interpreter->ReadParameter<u32>();
                     result += std::to_string(*num);
 
                     i += 2;
                     lastFormatSign = i;
                 }
-                if (c == '%' && cc == 'l')
+                else if (c == '%' && cc == 'l')
                 {
                     AddStringToResult(result, buffer, lastFormatSign, delta);
 
-                    u64* num = interpreter->GetParameter<u64>(paramCounter++);
+                    u64* num = interpreter->ReadParameter<u64>();
                     result += std::to_string(*num);
 
                     i += 2;
                     lastFormatSign = i;
                 }
-                if (c == '%' && cc == 'f')
+                else if (c == '%' && cc == 'f')
                 {
                     AddStringToResult(result, buffer, lastFormatSign, delta);
 
-                    f64* num = interpreter->GetParameter<f64>(paramCounter++);
+                    f32* num = interpreter->ReadParameter<f32>();
+                    result += std::to_string(*num);
+
+                    i += 2;
+                    lastFormatSign = i;
+                }
+                else if (c == '%' && cc == 'd')
+                {
+                    AddStringToResult(result, buffer, lastFormatSign, delta);
+
+                    f64* num = interpreter->ReadParameter<f64>();
                     result += std::to_string(*num);
 
                     i += 2;
@@ -63,7 +73,7 @@ namespace ScriptingAPI
                 {
                     AddStringToResult(result, buffer, lastFormatSign, delta);
 
-                    char* str = interpreter->GetParameter<char>(paramCounter++, true);
+                    char* str = interpreter->ReadParameter<char>(true);
                     result += std::string(str);
 
                     i += 2;
@@ -86,7 +96,7 @@ namespace ScriptingAPI
         }
         bool PrintCallback(Interpreter* interpreter)
         {
-            char* format = interpreter->GetParameter<char>(1, true);
+            char* format = interpreter->ReadParameter<char>(true);
             PrintWithArgs(interpreter, format, static_cast<u32>(strlen(format)));
 
             return true;

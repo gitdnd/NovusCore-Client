@@ -142,13 +142,14 @@ bool ScriptLoader::LoadScriptDirectory(std::string& scriptFolder)
     }
 
     // LoadScriptPipeline4
+    if (!didFail)
     {
         enki::TaskSet pipeline4(numModulesFromNai, [this, &didFail](enki::TaskSetPartition range, uint32_t threadNum)
         {
             for (u32 i = range.start; i < range.end; i++)
             {
                 Module* module = _compiler.GetModuleByIndex(i);
-                LoadScriptPipeline4(module, didFail);
+                LoadScriptPipeline4(module);
             }
         });
 
@@ -211,25 +212,22 @@ bool ScriptLoader::LoadScriptPipeline3(Module* module)
     return true;
 }
 
-bool ScriptLoader::LoadScriptPipeline4(Module* module, bool didFail)
+bool ScriptLoader::LoadScriptPipeline4(Module* module)
 {
     if (!Bytecode::Process(&_compiler, module))
         return false;
 
-    if (!didFail)
+    u32 mainHash = "main"_djb2;
+
+    auto itr = module->bytecodeInfo.functionHashToDeclaration.find(mainHash);
+    if (itr != module->bytecodeInfo.functionHashToDeclaration.end())
     {
-        u32 mainHash = "main"_djb2;
-
-        auto itr = module->bytecodeInfo.functionHashToDeclaration.find(mainHash);
-        if (itr != module->bytecodeInfo.functionHashToDeclaration.end())
+        // Add Main to be executed later
         {
-            // Add Main to be executed later
-            {
-                ScriptEngine* scriptEngine = ServiceLocator::GetScriptEngine();
+            ScriptEngine* scriptEngine = ServiceLocator::GetScriptEngine();
 
-                ScriptExecutionInfo scriptExecutionInfo(module, mainHash);
-                scriptEngine->AddExecution(scriptExecutionInfo);
-            }
+            ScriptExecutionInfo scriptExecutionInfo(module, mainHash);
+            scriptEngine->AddExecution(scriptExecutionInfo);
         }
     }
 

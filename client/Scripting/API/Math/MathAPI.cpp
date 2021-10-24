@@ -10,461 +10,221 @@ namespace ScriptingAPI
         bool Vec2Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(16, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec2), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
-
-                // Set Return Vec2
-                *reinterpret_cast<f64*>(&memory[returnAddress]) = *interpreter->GetParameter<f64>(1);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 8]) = *interpreter->GetParameter<f64>(2);
+                vec2 result = vec2(*interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>());
+                interpreter->SetValueAtAddress(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool Vec3Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec3), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
-
-                // Set Return Vec3
-                *reinterpret_cast<f64*>(&memory[returnAddress]) = *interpreter->GetParameter<f64>(1);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 8]) = *interpreter->GetParameter<f64>(2);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 16]) = *interpreter->GetParameter<f64>(3);
+                vec3 result = vec3(*interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>());
+                interpreter->SetValueAtAddress(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool ColorCallback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(Color), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
-
-                // Set Return Color
-                *reinterpret_cast<f64*>(&memory[returnAddress]) = *interpreter->GetParameter<f64>(1);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 8]) = *interpreter->GetParameter<f64>(2);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 16]) = *interpreter->GetParameter<f64>(3);
-                *reinterpret_cast<f64*>(&memory[returnAddress + 24]) = *interpreter->GetParameter<f64>(4);
+                Color result = Color(*interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>(), *interpreter->ReadParameter<f32>());
+                interpreter->SetValueAtAddress(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
 
         bool AddVec2Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(16, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec2), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec2* vecA = interpreter->ReadParameter<vec2>(true);
+                vec2* vecB = interpreter->ReadParameter<vec2>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-
-                // Set Return Values
-                *x3 = x1 + x2;
-                *y3 = y1 + y2;
+                vec2 result = *vecA + *vecB;
+                interpreter->SetValueAtAddress<vec2>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool AddVec3Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec3), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec3* vecA = interpreter->ReadParameter<vec3>(true);
+                vec3* vecB = interpreter->ReadParameter<vec3>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 z1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 z2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* z3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-
-                // Set Return Values
-                *x3 = x1 + x2;
-                *y3 = y1 + y2;
-                *z3 = z1 + z2;
+                vec3 result = *vecA + *vecB;
+                interpreter->SetValueAtAddress<vec3>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool AddColorCallback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(32, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(Color), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                Color* colorA = interpreter->ReadParameter<Color>(true);
+                Color* colorB = interpreter->ReadParameter<Color>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 r1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 g1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 b1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-                f64 a1 = *reinterpret_cast<f64*>(&memory[address1 + 24]);
-
-                // Get B Vec
-                f64 r2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 g2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 b2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-                f64 a2 = *reinterpret_cast<f64*>(&memory[address2 + 24]);
-
-                // Get Return Vec
-                f64* r3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* g3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* b3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-                f64* a3 = reinterpret_cast<f64*>(&memory[returnAddress + 24]);
-
-                // Set Return Values
-                *r3 = r1 + r2;
-                *g3 = g1 + g2;
-                *b3 = b1 + b2;
-                *a3 = a1 + a2;
+                Color result = *colorA + *colorB;
+                interpreter->SetValueAtAddress<Color>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
 
         bool SubVec2Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(16, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec2), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec2* vecA = interpreter->ReadParameter<vec2>(true);
+                vec2* vecB = interpreter->ReadParameter<vec2>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-
-                // Set Return Values
-                *x3 = x1 - x2;
-                *y3 = y1 - y2;
+                vec2 result = *vecA - *vecB;
+                interpreter->SetValueAtAddress<vec2>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool SubVec3Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec3), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec3* vecA = interpreter->ReadParameter<vec3>(true);
+                vec3* vecB = interpreter->ReadParameter<vec3>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 z1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 z2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* z3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-
-                // Set Return Values
-                *x3 = x1 - x2;
-                *y3 = y1 - y2;
-                *z3 = z1 - z2;
+                vec3 result = *vecA - *vecB;
+                interpreter->SetValueAtAddress<vec3>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool SubColorCallback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(32, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(Color), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                Color* colorA = interpreter->ReadParameter<Color>(true);
+                Color* colorB = interpreter->ReadParameter<Color>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 r1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 g1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 b1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-                f64 a1 = *reinterpret_cast<f64*>(&memory[address1 + 24]);
-
-                // Get B Vec
-                f64 r2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 g2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 b2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-                f64 a2 = *reinterpret_cast<f64*>(&memory[address2 + 24]);
-
-                // Get Return Vec
-                f64* r3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* g3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* b3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-                f64* a3 = reinterpret_cast<f64*>(&memory[returnAddress + 24]);
-
-                // Set Return Values
-                *r3 = r1 - r2;
-                *g3 = g1 - g2;
-                *b3 = b1 - b2;
-                *a3 = a1 - a2;
+                Color result = *colorA - *colorB;
+                interpreter->SetValueAtAddress<Color>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
 
         bool MulVec2Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(16, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec2), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec2* vecA = interpreter->ReadParameter<vec2>(true);
+                vec2* vecB = interpreter->ReadParameter<vec2>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-
-                // Set Return Values
-                *x3 = x1 * x2;
-                *y3 = y1 * y2;
+                vec2 result = *vecA * *vecB;
+                interpreter->SetValueAtAddress<vec2>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool MulVec3Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec3), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec3* vecA = interpreter->ReadParameter<vec3>(true);
+                vec3* vecB = interpreter->ReadParameter<vec3>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 z1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 z2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* z3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-
-                // Set Return Values
-                *x3 = x1 * x2;
-                *y3 = y1 * y2;
-                *z3 = z1 * z2;
+                vec3 result = *vecA * *vecB;
+                interpreter->SetValueAtAddress<vec3>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool MulColorCallback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(32, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(Color), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                Color* colorA = interpreter->ReadParameter<Color>(true);
+                Color* colorB = interpreter->ReadParameter<Color>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 r1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 g1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 b1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-                f64 a1 = *reinterpret_cast<f64*>(&memory[address1 + 24]);
-
-                // Get B Vec
-                f64 r2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 g2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 b2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-                f64 a2 = *reinterpret_cast<f64*>(&memory[address2 + 24]);
-
-                // Get Return Vec
-                f64* r3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* g3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* b3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-                f64* a3 = reinterpret_cast<f64*>(&memory[returnAddress + 24]);
-
-                // Set Return Values
-                *r3 = r1 * r2;
-                *g3 = g1 * g2;
-                *b3 = b1 * b2;
-                *a3 = a1 * a2;
+                Color result = *colorA * *colorB;
+                interpreter->SetValueAtAddress<Color>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
 
         bool DivVec2Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(16, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec2), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec2* vecA = interpreter->ReadParameter<vec2>(true);
+                vec2* vecB = interpreter->ReadParameter<vec2>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-
-                // Set Return Values
-                *x3 = x1 / x2;
-                *y3 = y1 / y2;
+                vec2 result = *vecA / *vecB;
+                interpreter->SetValueAtAddress<vec2>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool DivVec3Callback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(24, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(vec3), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                vec3* vecA = interpreter->ReadParameter<vec3>(true);
+                vec3* vecB = interpreter->ReadParameter<vec3>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 x1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 y1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 z1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-
-                // Get B Vec
-                f64 x2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 y2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 z2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-
-                // Get Return Vec
-                f64* x3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* y3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* z3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-
-                // Set Return Values
-                *x3 = x1 / x2;
-                *y3 = y1 / y2;
-                *z3 = z1 / z2;
+                vec3 result = *vecA / *vecB;
+                interpreter->SetValueAtAddress<vec3>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
         bool DivColorCallback(Interpreter* interpreter)
         {
             size_t returnAddress = 0;
-            if (interpreter->AllocateHeap(32, returnAddress))
+            if (interpreter->AllocateHeap(sizeof(Color), returnAddress))
             {
-                u8* memory = interpreter->GetMemory();
+                Color* colorA = interpreter->ReadParameter<Color>(true);
+                Color* colorB = interpreter->ReadParameter<Color>(true);
 
-                u64 address1 = *interpreter->GetParameter<u64>(1);
-                u64 address2 = *interpreter->GetParameter<u64>(2);
-
-                // Get A Vec
-                f64 r1 = *reinterpret_cast<f64*>(&memory[address1]);
-                f64 g1 = *reinterpret_cast<f64*>(&memory[address1 + 8]);
-                f64 b1 = *reinterpret_cast<f64*>(&memory[address1 + 16]);
-                f64 a1 = *reinterpret_cast<f64*>(&memory[address1 + 24]);
-
-                // Get B Vec
-                f64 r2 = *reinterpret_cast<f64*>(&memory[address2]);
-                f64 g2 = *reinterpret_cast<f64*>(&memory[address2 + 8]);
-                f64 b2 = *reinterpret_cast<f64*>(&memory[address2 + 16]);
-                f64 a2 = *reinterpret_cast<f64*>(&memory[address2 + 24]);
-
-                // Get Return Vec
-                f64* r3 = reinterpret_cast<f64*>(&memory[returnAddress]);
-                f64* g3 = reinterpret_cast<f64*>(&memory[returnAddress + 8]);
-                f64* b3 = reinterpret_cast<f64*>(&memory[returnAddress + 16]);
-                f64* a3 = reinterpret_cast<f64*>(&memory[returnAddress + 24]);
-
-                // Set Return Values
-                *r3 = r1 / r2;
-                *g3 = g1 / g2;
-                *b3 = b1 / b2;
-                *a3 = a1 / a2;
+                Color result = *colorA / *colorB;
+                interpreter->SetValueAtAddress<Color>(returnAddress, result);
             }
 
-            interpreter->SetReturnValue<u64>(&returnAddress);
+            interpreter->SetReturnValue<u64>(returnAddress);
             return true;
         }
 
@@ -473,25 +233,25 @@ namespace ScriptingAPI
             Module* module = cc->CreateNativeModule("Math");
             scriptAPI->RegisterModule(module);
 
-            NativeFunction nfVec2(cc, module, "Vec2", Vec2Callback);
-            NativeFunction nfVec3(cc, module, "Vec3", Vec3Callback);
-            NativeFunction nfColor(cc, module, "Color", ColorCallback);
+            NativeFunction nfVec2(cc, module, "Vec2", Vec2Callback); { nfVec2.AddParamF32("x", NativeFunction::PassAs::Value); nfVec2.AddParamF32("y", NativeFunction::PassAs::Value); }
+            NativeFunction nfVec3(cc, module, "Vec3", Vec3Callback); { nfVec3.AddParamF32("x", NativeFunction::PassAs::Value); nfVec3.AddParamF32("y", NativeFunction::PassAs::Value); nfVec3.AddParamF32("z", NativeFunction::PassAs::Value); }
+            NativeFunction nfColor(cc, module, "Color", ColorCallback); { nfColor.AddParamF32("r", NativeFunction::PassAs::Value); nfColor.AddParamF32("g", NativeFunction::PassAs::Value); nfColor.AddParamF32("b", NativeFunction::PassAs::Value); nfColor.AddParamF32("a", NativeFunction::PassAs::Value); }
 
-            NativeFunction nfAddVec2(cc, module, "AddVec2", AddVec2Callback);
-            NativeFunction nfAddVec3(cc, module, "AddVec3", AddVec3Callback);
-            NativeFunction nfAddColor(cc, module, "AddColor", AddColorCallback);
+            NativeFunction nfAddVec2(cc, module, "AddVec2", AddVec2Callback); { nfAddVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfAddVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfAddVec3(cc, module, "AddVec3", AddVec3Callback); { nfAddVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfAddVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfAddColor(cc, module, "AddColor", AddColorCallback); { nfAddColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfAddColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
 
-            NativeFunction nfSubVec2(cc, module, "SubVec2", SubVec2Callback);
-            NativeFunction nfSubVec3(cc, module, "SubVec3", SubVec3Callback);
-            NativeFunction nfSubColor(cc, module, "SubColor", SubColorCallback);
+            NativeFunction nfSubVec2(cc, module, "SubVec2", SubVec2Callback); { nfSubVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfSubVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfSubVec3(cc, module, "SubVec3", SubVec3Callback); { nfSubVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfSubVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfSubColor(cc, module, "SubColor", SubColorCallback); { nfSubColor.AddParamUnknown("ColorA", "lhs", NativeFunction::PassAs::Pointer); nfSubColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
 
-            NativeFunction nfMulVec2(cc, module, "MulVec2", MulVec2Callback);
-            NativeFunction nfMulVec3(cc, module, "MulVec3", MulVec3Callback);
-            NativeFunction nfMulColor(cc, module, "MulColor", MulColorCallback);
+            NativeFunction nfMulVec2(cc, module, "MulVec2", MulVec2Callback); { nfMulVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfMulVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfMulVec3(cc, module, "MulVec3", MulVec3Callback); { nfMulVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfMulVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfMulColor(cc, module, "MulColor", MulColorCallback); { nfMulColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfMulColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
 
-            NativeFunction nfDivVec2(cc, module, "DivVec2", DivVec2Callback);
-            NativeFunction nfDivVec3(cc, module, "DivVec3", DivVec3Callback);
-            NativeFunction nfDivColor(cc, module, "DivColor", DivColorCallback);
+            NativeFunction nfDivVec2(cc, module, "DivVec2", DivVec2Callback); { nfDivVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfDivVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfDivVec3(cc, module, "DivVec3", DivVec3Callback); { nfDivVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfDivVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfDivColor(cc, module, "DivColor", DivColorCallback); { nfDivColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfDivColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
         }
 
         void Init(ScriptAPI* scriptAPI)

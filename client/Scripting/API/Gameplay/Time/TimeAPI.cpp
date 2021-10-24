@@ -18,7 +18,7 @@ namespace ScriptingAPI
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
             f64 timeInSecond = timeSingleton.lifeTimeInS;
-            interpreter->SetReturnValue<f64>(&timeInSecond);
+            interpreter->SetReturnValue<f64>(timeInSecond);
 
             return true;
         }
@@ -28,7 +28,7 @@ namespace ScriptingAPI
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
             f64 timeInSecond = timeSingleton.lifeTimeInMS;
-            interpreter->SetReturnValue<f64>(&timeInSecond);
+            interpreter->SetReturnValue<f64>(timeInSecond);
 
             return true;
         }
@@ -38,7 +38,7 @@ namespace ScriptingAPI
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
             f64 timeInSecond = timeSingleton.deltaTime;
-            interpreter->SetReturnValue<f64>(&timeInSecond);
+            interpreter->SetReturnValue<f64>(timeInSecond);
 
             return true;
         }
@@ -48,7 +48,7 @@ namespace ScriptingAPI
             DayNightSingleton& dayNightSingleton = registry->ctx<DayNightSingleton>();
 
             f64 timeInSecond = dayNightSingleton.seconds;
-            interpreter->SetReturnValue<f64>(&timeInSecond);
+            interpreter->SetReturnValue<f64>(timeInSecond);
 
             return true;
         }

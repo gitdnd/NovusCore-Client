@@ -16,7 +16,7 @@ public:
     bool LoadScriptPipeline1(std::string& scriptName, std::string& scriptPath);
     bool LoadScriptPipeline2(Module* module);
     bool LoadScriptPipeline3(Module* module);
-    bool LoadScriptPipeline4(Module* module, bool didFail);
+    bool LoadScriptPipeline4(Module* module);
 
     Compiler* GetCompiler() { return &_compiler; }
     enki::TaskScheduler* GetTaskScheduler() { return &_taskScheduler; }
