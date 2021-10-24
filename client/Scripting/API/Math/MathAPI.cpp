@@ -228,30 +228,42 @@ namespace ScriptingAPI
             return true;
         }
 
+        void RegisterVec2Functions(Compiler* cc, Module* module)
+        {
+            NativeFunction nfVec2(cc, module, "Vec2", Vec2Callback); { nfVec2.AddParamF32("x", NativeFunction::PassAs::Value); nfVec2.AddParamF32("y", NativeFunction::PassAs::Value); nfVec2.SetReturnTypeUnknown("Vec2", NativeFunction::PassAs::Pointer); }
+
+            NativeFunction nfAddVec2(cc, module, "AddVec2", AddVec2Callback); { nfAddVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfAddVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); nfAddVec2.SetReturnTypeUnknown("Vec2", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfSubVec2(cc, module, "SubVec2", SubVec2Callback); { nfSubVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfSubVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); nfSubVec2.SetReturnTypeUnknown("Vec2", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfMulVec2(cc, module, "MulVec2", MulVec2Callback); { nfMulVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfMulVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); nfMulVec2.SetReturnTypeUnknown("Vec2", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfDivVec2(cc, module, "DivVec2", DivVec2Callback); { nfDivVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfDivVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); nfDivVec2.SetReturnTypeUnknown("Vec2", NativeFunction::PassAs::Pointer); }
+        }
+        void RegisterVec3Functions(Compiler* cc, Module* module)
+        {
+            NativeFunction nfVec3(cc, module, "Vec3", Vec3Callback); { nfVec3.AddParamF32("x", NativeFunction::PassAs::Value); nfVec3.AddParamF32("y", NativeFunction::PassAs::Value); nfVec3.AddParamF32("z", NativeFunction::PassAs::Value); nfVec3.SetReturnTypeUnknown("Vec3", NativeFunction::PassAs::Pointer);  }
+
+            NativeFunction nfAddVec3(cc, module, "AddVec3", AddVec3Callback); { nfAddVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfAddVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); nfAddVec3.SetReturnTypeUnknown("Vec3", NativeFunction::PassAs::Pointer);  }
+            NativeFunction nfSubVec3(cc, module, "SubVec3", SubVec3Callback); { nfSubVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfSubVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); nfSubVec3.SetReturnTypeUnknown("Vec3", NativeFunction::PassAs::Pointer);  }
+            NativeFunction nfMulVec3(cc, module, "MulVec3", MulVec3Callback); { nfMulVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfMulVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); nfMulVec3.SetReturnTypeUnknown("Vec3", NativeFunction::PassAs::Pointer);  }
+            NativeFunction nfDivVec3(cc, module, "DivVec3", DivVec3Callback); { nfDivVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfDivVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); nfDivVec3.SetReturnTypeUnknown("Vec3", NativeFunction::PassAs::Pointer);  }
+        }
+        void RegisterColorFunctions(Compiler* cc, Module* module)
+        {
+            NativeFunction nfColor(cc, module, "Color", ColorCallback); { nfColor.AddParamF32("r", NativeFunction::PassAs::Value); nfColor.AddParamF32("g", NativeFunction::PassAs::Value); nfColor.AddParamF32("b", NativeFunction::PassAs::Value); nfColor.AddParamF32("a", NativeFunction::PassAs::Value); nfColor.SetReturnTypeUnknown("Color", NativeFunction::PassAs::Pointer);  }
+
+            NativeFunction nfAddColor(cc, module, "AddColor", AddColorCallback); { nfAddColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfAddColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); nfAddColor.SetReturnTypeUnknown("Color", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfSubColor(cc, module, "SubColor", SubColorCallback); { nfSubColor.AddParamUnknown("ColorA", "lhs", NativeFunction::PassAs::Pointer); nfSubColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); nfSubColor.SetReturnTypeUnknown("Color", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfMulColor(cc, module, "MulColor", MulColorCallback); { nfMulColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfMulColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); nfMulColor.SetReturnTypeUnknown("Color", NativeFunction::PassAs::Pointer); }
+            NativeFunction nfDivColor(cc, module, "DivColor", DivColorCallback); { nfDivColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfDivColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); nfDivColor.SetReturnTypeUnknown("Color", NativeFunction::PassAs::Pointer); }
+        }
+
         void Register(Compiler* cc, ScriptAPI* scriptAPI)
         {
             Module* module = cc->CreateNativeModule("Math");
             scriptAPI->RegisterModule(module);
 
-            NativeFunction nfVec2(cc, module, "Vec2", Vec2Callback); { nfVec2.AddParamF32("x", NativeFunction::PassAs::Value); nfVec2.AddParamF32("y", NativeFunction::PassAs::Value); }
-            NativeFunction nfVec3(cc, module, "Vec3", Vec3Callback); { nfVec3.AddParamF32("x", NativeFunction::PassAs::Value); nfVec3.AddParamF32("y", NativeFunction::PassAs::Value); nfVec3.AddParamF32("z", NativeFunction::PassAs::Value); }
-            NativeFunction nfColor(cc, module, "Color", ColorCallback); { nfColor.AddParamF32("r", NativeFunction::PassAs::Value); nfColor.AddParamF32("g", NativeFunction::PassAs::Value); nfColor.AddParamF32("b", NativeFunction::PassAs::Value); nfColor.AddParamF32("a", NativeFunction::PassAs::Value); }
-
-            NativeFunction nfAddVec2(cc, module, "AddVec2", AddVec2Callback); { nfAddVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfAddVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfAddVec3(cc, module, "AddVec3", AddVec3Callback); { nfAddVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfAddVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfAddColor(cc, module, "AddColor", AddColorCallback); { nfAddColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfAddColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
-
-            NativeFunction nfSubVec2(cc, module, "SubVec2", SubVec2Callback); { nfSubVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfSubVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfSubVec3(cc, module, "SubVec3", SubVec3Callback); { nfSubVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfSubVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfSubColor(cc, module, "SubColor", SubColorCallback); { nfSubColor.AddParamUnknown("ColorA", "lhs", NativeFunction::PassAs::Pointer); nfSubColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
-
-            NativeFunction nfMulVec2(cc, module, "MulVec2", MulVec2Callback); { nfMulVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfMulVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfMulVec3(cc, module, "MulVec3", MulVec3Callback); { nfMulVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfMulVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfMulColor(cc, module, "MulColor", MulColorCallback); { nfMulColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfMulColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
-
-            NativeFunction nfDivVec2(cc, module, "DivVec2", DivVec2Callback); { nfDivVec2.AddParamUnknown("Vec2", "lhs", NativeFunction::PassAs::Pointer); nfDivVec2.AddParamUnknown("Vec2", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfDivVec3(cc, module, "DivVec3", DivVec3Callback); { nfDivVec3.AddParamUnknown("Vec3", "lhs", NativeFunction::PassAs::Pointer); nfDivVec3.AddParamUnknown("Vec3", "rhs", NativeFunction::PassAs::Pointer); }
-            NativeFunction nfDivColor(cc, module, "DivColor", DivColorCallback); { nfDivColor.AddParamUnknown("Color", "lhs", NativeFunction::PassAs::Pointer); nfDivColor.AddParamUnknown("Color", "rhs", NativeFunction::PassAs::Pointer); }
+            RegisterVec2Functions(cc, module);
+            RegisterVec3Functions(cc, module);
+            RegisterColorFunctions(cc, module);
         }
 
         void Init(ScriptAPI* scriptAPI)

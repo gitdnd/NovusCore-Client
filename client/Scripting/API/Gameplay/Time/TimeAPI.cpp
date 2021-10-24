@@ -17,8 +17,7 @@ namespace ScriptingAPI
             entt::registry* registry = ServiceLocator::GetGameRegistry();
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
-            f64 timeInSecond = timeSingleton.lifeTimeInS;
-            interpreter->SetReturnValue<f64>(timeInSecond);
+            interpreter->SetReturnValue<f32>(timeSingleton.lifeTimeInS);
 
             return true;
         }
@@ -27,8 +26,7 @@ namespace ScriptingAPI
             entt::registry* registry = ServiceLocator::GetGameRegistry();
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
-            f64 timeInSecond = timeSingleton.lifeTimeInMS;
-            interpreter->SetReturnValue<f64>(timeInSecond);
+            interpreter->SetReturnValue<f32>(timeSingleton.lifeTimeInMS);
 
             return true;
         }
@@ -37,8 +35,7 @@ namespace ScriptingAPI
             entt::registry* registry = ServiceLocator::GetGameRegistry();
             TimeSingleton& timeSingleton = registry->ctx<TimeSingleton>();
 
-            f64 timeInSecond = timeSingleton.deltaTime;
-            interpreter->SetReturnValue<f64>(timeInSecond);
+            interpreter->SetReturnValue<f32>(timeSingleton.deltaTime);
 
             return true;
         }
@@ -47,8 +44,7 @@ namespace ScriptingAPI
             entt::registry* registry = ServiceLocator::GetGameRegistry();
             DayNightSingleton& dayNightSingleton = registry->ctx<DayNightSingleton>();
 
-            f64 timeInSecond = dayNightSingleton.seconds;
-            interpreter->SetReturnValue<f64>(timeInSecond);
+            interpreter->SetReturnValue<f32>(dayNightSingleton.seconds);
 
             return true;
         }
@@ -58,10 +54,10 @@ namespace ScriptingAPI
             Module* module = cc->CreateNativeModule("Time");
             scriptAPI->RegisterModule(module);
 
-            NativeFunction nfGetTime(cc, module, "GetTime", GetTimeCallback);
-            NativeFunction nfGetTimeInMS(cc, module, "GetTimeInMS", GetTimeInMSCallback);
-            NativeFunction nfGetDeltaTime(cc, module, "GetDeltaTime", GetDeltaTimeCallback);
-            NativeFunction nfGetTimeOfDay(cc, module, "GetTimeOfDay", GetTimeOfDayCallback);
+            NativeFunction nfGetTime(cc, module, "GetTime", GetTimeCallback); { nfGetTime.SetReturnTypeF32(NativeFunction::PassAs::Value); }
+            NativeFunction nfGetTimeInMS(cc, module, "GetTimeInMS", GetTimeInMSCallback); { nfGetTimeInMS.SetReturnTypeF32(NativeFunction::PassAs::Value); }
+            NativeFunction nfGetDeltaTime(cc, module, "GetDeltaTime", GetDeltaTimeCallback); { nfGetDeltaTime.SetReturnTypeF32(NativeFunction::PassAs::Value); }
+            NativeFunction nfGetTimeOfDay(cc, module, "GetTimeOfDay", GetTimeOfDayCallback); { nfGetTimeOfDay.SetReturnTypeF32(NativeFunction::PassAs::Value); }
         }
 
         void Init(ScriptAPI* scriptAPI)
