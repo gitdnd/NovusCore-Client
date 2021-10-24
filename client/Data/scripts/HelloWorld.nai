@@ -1,6 +1,11 @@
 import Debug;
+import Time;
 
 fn main()
 {
-    Debug::Print("Hello World this is Nai");
+    Debug::Print("## Welcome to NovusCore ##");
+    Debug::Print("- TimeSinceLaunch : (%f)", Time::GetTime());
+    Debug::Print("- TimeSinceLaunchMS : (%f)", Time::GetTimeInMS());
+    Debug::Print("- DeltaTime : (%f)", Time::GetDeltaTime());
+    Debug::Print("- GetTimeOfDay : (%f)", Time::GetTimeOfDay());
 }

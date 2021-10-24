@@ -2,21 +2,21 @@ export Types;
 
 struct Vec2
 {
-    f64 x;
-    f64 y;
+    f32 x;
+    f32 y;
 }
 
 struct Vec3
 {
-    f64 x;
-    f64 y;
-    f64 z;
+    f32 x;
+    f32 y;
+    f32 z;
 }
 
 struct Color
 {
-    f64 r;
-    f64 g;
-    f64 b;
-    f64 a;
+    f32 r;
+    f32 g;
+    f32 b;
+    f32 a;
 }
