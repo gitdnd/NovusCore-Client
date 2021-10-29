@@ -193,27 +193,78 @@ namespace Renderer
             }
         }
 
+        
+        void DescriptorSetBuilderVK::BindStorageImage(i32 set, i32 binding, VkDescriptorImageInfo* imageInfos, i32 count)
+        {
+            ImageWriteDescriptor newWrite;
+            newWrite.dstSet = set;
+            newWrite.dstBinding = binding;
+            newWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
-        void DescriptorSetBuilderVK::BindStorageImage(u32 nameHash, const VkDescriptorImageInfo& imageInfo)
+            if (count == 1)
+            {
+                for (auto& imageWrite : _imageWrites)
+                {
+                    if (imageWrite.dstBinding == binding && imageWrite.dstSet == set)
+                    {
+                        imageWrite.imageInfo = imageInfos[0];
+                        return;
+                    }
+                }
+
+                newWrite.imageInfo = imageInfos[0];
+            }
+            else
+            {
+                for (auto& imageWrite : _imageWrites)
+                {
+                    if (imageWrite.dstBinding == binding && imageWrite.dstSet == set)
+                    {
+                        imageWrite.imageArray = imageInfos;
+                        newWrite.imageCount = count;
+                        return;
+                    }
+                }
+
+                newWrite.imageArray = imageInfos;
+                newWrite.imageCount = count;
+            }
+
+            _imageWrites.push_back(newWrite);
+        }
+
+        void DescriptorSetBuilderVK::BindStorageImage(u32 nameHash, VkDescriptorImageInfo* imageInfos, i32 count)
         {
             for (auto& bindInfo : _bindInfos)
             {
                 if (nameHash == bindInfo.nameHash)
                 {
-                    BindStorageImage(bindInfo.set, bindInfo.binding, imageInfo);
+                    BindStorageImage(bindInfo.set, bindInfo.binding, imageInfos, count);
                     return;
                 }
             }
         }
 
+        void DescriptorSetBuilderVK::BindStorageImageArray(u32 nameHash, VkDescriptorImageInfo* imageInfos, i32 count)
+        {
+            for (auto& bindInfo : _bindInfos)
+            {
+                if (nameHash == bindInfo.nameHash)
+                {
+                    BindStorageImageArray(bindInfo.set, bindInfo.binding, imageInfos, count);
+                    return;
+                }
+            }
+        }
 
-        void DescriptorSetBuilderVK::BindStorageImage(i32 set, i32 binding, const VkDescriptorImageInfo& imageInfo)
+        void DescriptorSetBuilderVK::BindStorageImageArray(i32 set, i32 binding, VkDescriptorImageInfo* imageInfos, i32 count)
         {
             for (auto& imageWrite : _imageWrites)
             {
                 if (imageWrite.dstBinding == binding && imageWrite.dstSet == set)
                 {
-                    imageWrite.imageInfo = imageInfo;
+                    imageWrite.imageArray = imageInfos;
+                    imageWrite.imageCount = count;
                     return;
                 }
             }
@@ -222,7 +273,8 @@ namespace Renderer
             newWrite.dstSet = set;
             newWrite.dstBinding = binding;
             newWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            newWrite.imageInfo = imageInfo;
+            newWrite.imageArray = imageInfos;
+            newWrite.imageCount = count;
 
             _imageWrites.push_back(newWrite);
         }
@@ -373,7 +425,7 @@ namespace Renderer
 
             for (const ImageWriteDescriptor& imageWrite : _imageWrites)
             {
-                if (imageWrite.imageArray != nullptr && imageWrite.dstSet == set)
+                if (imageWrite.descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && imageWrite.imageArray != nullptr && imageWrite.dstSet == set)
                 {
                     counts[0] = imageWrite.imageCount;
                     next = &setCounts;

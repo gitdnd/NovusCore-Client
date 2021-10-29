@@ -15,7 +15,13 @@ namespace Renderer
 class DepthPyramidUtils
 {
 public:
+	static void InitBuffers(Renderer::Renderer* renderer);
 	static void BuildPyramid(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, RenderResources& resources, u32 frameIndex);
+	static void BuildPyramid2(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, RenderResources& resources, u32 frameIndex);
 
-	static Renderer::DescriptorSet _reduceDescriptorSet;
+	static Renderer::SamplerID _copySampler;
+	static Renderer::SamplerID _pyramidSampler;
+	static Renderer::DescriptorSet _copyDescriptorSet;
+	static Renderer::DescriptorSet _pyramidDescriptorSet;
+	static Renderer::BufferID _atomicBuffer;
 };

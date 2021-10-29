@@ -44,6 +44,7 @@ namespace Renderer
             VkImage image;
             VkImageView colorView;
             std::vector<VkImageView> mipViews;
+            std::vector<VkImageView> mipArrayViews;
 
             bool isSwapchain = false;
         };
@@ -251,6 +252,42 @@ namespace Renderer
             return { uwidth >> mip, uheight >> mip };
         }
 
+        uvec2 ImageHandlerVK::GetDimension(const DepthImageID id)
+        {
+            auto desc = GetDepthImageDesc(id);
+
+            f32 width = desc.dimensions.x;
+            f32 height = desc.dimensions.y;
+
+            u32 uwidth = static_cast<u32>(width);
+            u32 uheight = static_cast<u32>(height);
+
+            // If the supplied dimensions is a % of window size
+            if (desc.dimensionType == ImageDimensionType::DIMENSION_SCALE)
+            {
+                uvec2 windowSize = _device->GetMainWindowSize();
+                width *= windowSize.x;
+                height *= windowSize.y;
+
+                uwidth = static_cast<u32>(width);
+                uheight = static_cast<u32>(height);
+            }
+            else if (desc.dimensionType == ImageDimensionType::DIMENSION_PYRAMID)
+            {
+                uvec2 windowSize = _device->GetMainWindowSize();
+                width *= windowSize.x;
+                height *= windowSize.y;
+
+                uwidth = static_cast<u32>(width);
+                uheight = static_cast<u32>(height);
+
+                uwidth = (PreviousPow2(uwidth));
+                uheight = (PreviousPow2(uheight));
+            }
+
+            return { uwidth, uheight };
+        }
+
         VkImage ImageHandlerVK::GetImage(const ImageID id)
         {
             ImageHandlerVKData& data = static_cast<ImageHandlerVKData&>(*_data);
@@ -280,8 +317,37 @@ namespace Renderer
             }
             // Lets make sure this id exists
             ImageID::type tid = static_cast<ImageID::type>(id);
+            if (tid >= data.images.size())
+            {
+                DebugHandler::PrintFatal("ImageHandlerVK: Tried to GetColorView of invalid ImageID");
+            }
+
+            if (mipLevel >= data.images[tid].mipViews.size())
+            {
+                DebugHandler::PrintFatal("ImageHandlerVK: GetColorView tried to get a mipLevel that doesn't exist");
+            }
 
             return data.images[tid].mipViews[mipLevel];
+        }
+
+        VkImageView ImageHandlerVK::GetColorArrayView(const ImageID id, u32 mipLevel)
+        {
+            ImageHandlerVKData& data = static_cast<ImageHandlerVKData&>(*_data);
+            VkImageView view = VK_NULL_HANDLE;
+
+            // Lets make sure this id exists
+            ImageID::type tid = static_cast<ImageID::type>(id);
+            if (tid >= data.images.size())
+            {
+                DebugHandler::PrintFatal("ImageHandlerVK: Tried to GetColorArrayView of invalid ImageID");
+            }
+
+            if (mipLevel >= data.images[tid].mipArrayViews.size())
+            {
+                DebugHandler::PrintFatal("ImageHandlerVK: GetColorArrayView tried to get a mipLevel that doesn't exist");
+            }
+
+            return data.images[tid].mipArrayViews[mipLevel];
         }
 
         VkImage ImageHandlerVK::GetImage(const DepthImageID id)
@@ -486,7 +552,7 @@ namespace Renderer
         {
             ImageHandlerVKData& data = static_cast<ImageHandlerVKData&>(*_data);
 
-            // Create Color View
+            // Create Color View for individual mips
             VkImageViewCreateInfo colorViewInfo = {};
             colorViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             colorViewInfo.image = image.image;
@@ -509,6 +575,7 @@ namespace Renderer
 
             //we want a full mip chain of views
             image.mipViews.resize(image.desc.mipLevels);
+            image.mipArrayViews.resize(image.desc.mipLevels);
 
             for (u32 i = 0; i < image.desc.mipLevels; ++i)
             {
@@ -525,6 +592,21 @@ namespace Renderer
             if (vkCreateImageView(_device->_device, &colorViewInfo, nullptr, &image.colorView) != VK_SUCCESS)
             {
                 DebugHandler::PrintFatal("Failed to create color image view!");
+            }
+
+            // Also create mipViews that are arrays of the specific view, down to the last mip
+            colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+
+            for (u32 i = 0; i < image.desc.mipLevels; ++i)
+            {
+                VkImageViewCreateInfo pyramidLevelInfo = colorViewInfo;
+                pyramidLevelInfo.subresourceRange.baseMipLevel = i;
+                pyramidLevelInfo.subresourceRange.levelCount = image.desc.mipLevels - i;
+
+                if (vkCreateImageView(_device->_device, &pyramidLevelInfo, nullptr, &image.mipArrayViews[i]) != VK_SUCCESS)
+                {
+                    DebugHandler::PrintFatal("Failed to create color image view!");
+                }
             }
 
             DebugMarkerUtilVK::SetObjectName(_device->_device, (u64)image.colorView, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT, image.desc.debugName.c_str());

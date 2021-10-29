@@ -148,7 +148,11 @@ namespace Renderer
 
         virtual [[nodiscard]] ImageDesc GetImageDesc(ImageID ID) = 0;
         virtual [[nodiscard]] DepthImageDesc GetDepthImageDesc(DepthImageID ID) = 0;
+
+        virtual [[nodiscard]] uvec2 GetImageDimension(const ImageID id) = 0;
         virtual [[nodiscard]] uvec2 GetImageDimension(const ImageID id, u32 mipLevel) = 0;
+
+        virtual [[nodiscard]] uvec2 GetImageDimension(const DepthImageID id) = 0;
 
         virtual [[nodiscard]] const std::string& GetGPUName() = 0;
 
