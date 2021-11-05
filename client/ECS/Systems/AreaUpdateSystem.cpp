@@ -7,6 +7,7 @@
 #include "../Components/Singletons/NDBCSingleton.h"
 #include "../Components/Singletons/DayNightSingleton.h"
 
+#include <entt.hpp>
 #include <glm/glm.hpp>
 #include <imgui/imgui.h>
 

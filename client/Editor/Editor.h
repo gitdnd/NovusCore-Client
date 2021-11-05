@@ -106,7 +106,6 @@ namespace Editor
         void MapObjectSelectionDrawImGui();
         void ComplexModelSelectionDrawImGui();
 
-        bool IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& boundingBox, f32& t);
         bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
 
         NDBCEditorHandler _ndbcEditorHandler;

@@ -16,9 +16,9 @@ struct Constants
 
 struct PackedCullingData
 {
-    uint packed0; // half minBoundingBox.x, half minBoundingBox.y, 
-    uint packed1; // half minBoundingBox.z, half maxBoundingBox.x,  
-    uint packed2; // half maxBoundingBox.y, half maxBoundingBox.z, 
+    uint packed0; // half center.x, half center.y, 
+    uint packed1; // half center.z, half extents.x,  
+    uint packed2; // half extents.y, half extents.z, 
     float sphereRadius;
 }; // 16 bytes
 
@@ -130,9 +130,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const CullingData cullingData = LoadCullingData(lookupData.cullingDataID);
     const InstanceData instanceData = _mapObjectInstanceData[lookupData.instanceID];
     
-    // Get center and extents
-    float3 center = (cullingData.boundingBox.min + cullingData.boundingBox.max) * 0.5f;
-    float3 extents = cullingData.boundingBox.max - center;
+    // Get center and extents (Center is stored in min & Extents is stored in max)
+    float3 center = cullingData.boundingBox.min;
+    float3 extents = cullingData.boundingBox.max;
     
     // Transform center
     const float4x4 m = instanceData.instanceMatrix;

@@ -1,13 +1,14 @@
 #pragma once
 #include <NovusTypes.h>
 #include <NovusTypeHeader.h>
+#include <Math/Geometry.h>
 #include <vector>
 
 #pragma pack(push, 1)
 namespace CModel
 {
     constexpr u32 COMPLEX_MODEL_TOKEN = 10;
-    constexpr u32 COMPLEX_MODEL_VERSION = 5;
+    constexpr u32 COMPLEX_MODEL_VERSION = 6;
 
     struct ComplexVertex
     {
@@ -153,17 +154,23 @@ namespace CModel
                     if (!buffer->GetU32(numTimestamps))
                         return false;
 
-                    track.timestamps.resize(numTimestamps);
-                    if (!buffer->GetBytes(reinterpret_cast<u8*>(track.timestamps.data()), numTimestamps * sizeof(u32)))
-                        return false;
+                    if (numTimestamps > 0)
+                    {
+                        track.timestamps.resize(numTimestamps);
+                        if (!buffer->GetBytes(reinterpret_cast<u8*>(track.timestamps.data()), numTimestamps * sizeof(u32)))
+                            return false;
+                    }
 
                     u32 numValues = 0;
                     if (!buffer->GetU32(numValues))
                         return false;
 
-                    track.values.resize(numValues);
-                    if (!buffer->GetBytes(reinterpret_cast<u8*>(track.values.data()), numValues * sizeof(T)))
-                        return false;
+                    if (numValues > 0)
+                    {
+                        track.values.resize(numValues);
+                        if (!buffer->GetBytes(reinterpret_cast<u8*>(track.values.data()), numValues * sizeof(T)))
+                            return false;
+                    }
                 }
             }
 
@@ -303,15 +310,15 @@ namespace CModel
 
     struct CullingData
     {
-        hvec3 minBoundingBox = hvec3(static_cast<f16>(65535.0f));
-        hvec3 maxBoundingBox = hvec3(static_cast<f16>(-65535.0f));
+        hvec3 center = hvec3(static_cast<f16>(65535.0f));
+        hvec3 extents = hvec3(static_cast<f16>(-65535.0f));
         f32 boundingSphereRadius = 0.0f;
     }; // 16 bytes
 
     struct ComplexModel
     {
     public:
-        NovusTypeHeader header = NovusTypeHeader(10, 4);
+        NovusTypeHeader header = NovusTypeHeader(10, 6);
 
         char* name;
         ComplexModelFlag flags;
@@ -331,6 +338,11 @@ namespace CModel
 
         std::vector<u16> textureCombinerCombos;
 
+        std::vector<vec3> collisionVertexPositions;
+        std::vector<u16> collisionIndices;
+        std::vector<std::array<u8, 2>> collisionNormals;
+
+        Geometry::AABoundingBox collisionAABB;
         CullingData cullingData;
     };
 }

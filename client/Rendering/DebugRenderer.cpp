@@ -337,13 +337,16 @@ void DebugRenderer::DrawLine3D(const glm::vec3& from, const glm::vec3& to, uint3
 	_debugVertices[DBG_VERTEX_BUFFER_LINES_3D].push_back({ to, color });
 }
 
-void DebugRenderer::DrawAABB3D(const vec3& v0, const vec3& v1, uint32_t color)
+void DebugRenderer::DrawAABB3D(const vec3& center, const vec3& extents, uint32_t color)
 {
 	if (_debugVertices[DBG_VERTEX_BUFFER_LINES_3D].size() + 24 > _debugVertexRanges[DBG_VERTEX_BUFFER_LINES_3D].y)
 	{
 		DebugHandler::PrintError("Debug vertex buffer out of memory.");
 		return;
 	}
+
+	vec3 v0 = center - extents;
+	vec3 v1 = center + extents;
 
 	// Bottom
 	_debugVertices[DBG_VERTEX_BUFFER_LINES_3D].push_back({ { v0.x, v0.y, v0.z }, color });

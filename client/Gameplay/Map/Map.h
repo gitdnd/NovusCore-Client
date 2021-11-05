@@ -24,8 +24,10 @@
 #pragma once
 #include <NovusTypes.h>
 #include <robin_hood.h>
+#include <entity/fwd.hpp>
 #include <limits>
 #include <Containers/StringTable.h>
+#include <Utils/SafeVector.h>
 #include "Chunk.h"
 
 // First of all, forget every naming convention wowdev.wiki uses, it's extremely confusing.
@@ -72,6 +74,8 @@ namespace Terrain
         u16 id = std::numeric_limits<u16>().max(); // Default Map to Invalid ID
         std::string_view name;
         robin_hood::unordered_map<u16, Chunk> chunks;
+        robin_hood::unordered_map<u16, SafeVector<entt::entity>> chunksEntityList;
+        robin_hood::unordered_map<u16, SafeVector<entt::entity>> chunksCollidableEntityList;
         robin_hood::unordered_map<u16, StringTable> stringTables;
 
         bool IsLoadedMap() { return id != std::numeric_limits<u16>().max(); }
@@ -79,12 +83,29 @@ namespace Terrain
 
         Terrain::Chunk* GetChunkById(u16 chunkID)
         {
-            auto& itr = chunks.find(chunkID);
+            auto itr = chunks.find(chunkID);
             if (itr == chunks.end())
                 return nullptr;
 
             return &itr->second;
         }
+        SafeVector<entt::entity>* GetEntityListByChunkID(u16 chunkID)
+        {
+            auto itr = chunksEntityList.find(chunkID);
+            if (itr == chunksEntityList.end())
+                return nullptr;
+
+            return &itr->second;
+        }
+        SafeVector<entt::entity>* GetCollidableEntityListByChunkID(u16 chunkID)
+        {
+            auto itr = chunksCollidableEntityList.find(chunkID);
+            if (itr == chunksCollidableEntityList.end())
+                return nullptr;
+
+            return &itr->second;
+        }
+
         void GetChunkPositionFromChunkId(u16 chunkId, u16& x, u16& y) const;
         bool GetChunkIdFromChunkPosition(u16 x, u16 y, u16& chunkId) const;
 
@@ -101,9 +122,21 @@ namespace Terrain
 
             chunks.clear();
 
-            for (auto& itr : stringTables)
+            for (auto& pair : chunksEntityList)
             {
-                itr.second.Clear();
+                pair.second.Clear();
+            }
+            chunksEntityList.clear();
+
+            for (auto& pair : chunksCollidableEntityList)
+            {
+                pair.second.Clear();
+            }
+            chunksCollidableEntityList.clear();
+
+            for (auto& pair : stringTables)
+            {
+                pair.second.Clear();
             }
             stringTables.clear();
         }

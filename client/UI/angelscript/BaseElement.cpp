@@ -180,7 +180,7 @@ namespace UIScripting
     void BaseElement::SetDepthLayer(const UI::DepthLayer layer)
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry();
-        if (!registry->has<UIComponent::Root>(_entityId))
+        if (!registry->all_of<UIComponent::Root>(_entityId))
         {
             DebugHandler::PrintWarning("UI: Can't set depthLayer on non-root element.");
             return;
@@ -200,7 +200,7 @@ namespace UIScripting
     void BaseElement::SetDepth(const u16 depth)
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry(); 
-        if (!registry->has<UIComponent::Root>(_entityId))
+        if (!registry->all_of<UIComponent::Root>(_entityId))
         {
             DebugHandler::PrintWarning("UI: Can't set depth on non-root element.");
             return;
@@ -333,7 +333,7 @@ namespace UIScripting
     void BaseElement::Destroy(bool destroyChildren)
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry();
-        if(!registry->has<UIComponent::Destroy>(_entityId))
+        if(!registry->all_of<UIComponent::Destroy>(_entityId))
             registry->emplace<UIComponent::Destroy>(_entityId);
 
         if (destroyChildren)
@@ -343,7 +343,7 @@ namespace UIScripting
     void BaseElement::MarkDirty()
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry();
-        if (!registry->has<UIComponent::Dirty>(_entityId))
+        if (!registry->all_of<UIComponent::Dirty>(_entityId))
             registry->emplace<UIComponent::Dirty>(_entityId);
 
         UIUtils::MarkChildrenDirty(registry, _entityId);
@@ -352,14 +352,14 @@ namespace UIScripting
     void BaseElement::MarkSelfDirty()
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry();
-        if (!registry->has<UIComponent::Dirty>(_entityId))
+        if (!registry->all_of<UIComponent::Dirty>(_entityId))
             registry->emplace<UIComponent::Dirty>(_entityId);
     }
 
     void BaseElement::MarkBoundsDirty()
     {
         entt::registry* registry = ServiceLocator::GetUIRegistry();
-        if (!registry->has<UIComponent::BoundsDirty>(_entityId))
+        if (!registry->all_of<UIComponent::BoundsDirty>(_entityId))
             registry->emplace<UIComponent::BoundsDirty>(_entityId);
     }
 

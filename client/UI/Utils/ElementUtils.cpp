@@ -41,7 +41,7 @@ namespace UIUtils
         const UIComponent::Relation* relation = &registry->get<UIComponent::Relation>(entityId);
         for (const UI::UIChild& child : relation->children)
         {
-            if (!registry->has<UIComponent::Dirty>(child.entId))
+            if (!registry->all_of<UIComponent::Dirty>(child.entId))
                 registry->emplace<UIComponent::Dirty>(child.entId);
 
             MarkChildrenDirty(registry, child.entId);
@@ -53,7 +53,7 @@ namespace UIUtils
         const UIComponent::Relation* relation = &registry->get<UIComponent::Relation>(entityId);
         for (const UI::UIChild& child : relation->children)
         {
-            if (!registry->has<UIComponent::Destroy>(child.entId))
+            if (!registry->all_of<UIComponent::Destroy>(child.entId))
                 registry->emplace<UIComponent::Destroy>(child.entId);
 
             MarkChildrenForDestruction(registry, entityId);

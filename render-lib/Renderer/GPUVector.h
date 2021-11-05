@@ -173,6 +173,7 @@ namespace Renderer
             }
 
             _dirtyRegions.Clear();
+            _initialized = false;
         }
 
         BufferID GetBuffer() { return _buffer; }

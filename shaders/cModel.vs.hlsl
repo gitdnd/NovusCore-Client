@@ -44,7 +44,7 @@ VSOutput main(VSInput input)
         StoreAnimatedVertexPosition(animatedVertexID, position.xyz);
     }
 
-    position = mul(float4(-position.x, -position.y, position.z, 1.0f), instanceMatrix);
+    position = mul(position, instanceMatrix);
 
     // Pass data to pixelshader
     VSOutput output;

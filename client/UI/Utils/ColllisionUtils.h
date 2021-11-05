@@ -22,7 +22,7 @@ namespace UIUtils::Collision
 
     inline static void MarkBoundsDirty(entt::registry* registry, entt::entity entityId)
     {
-        if (!registry->has<UIComponent::BoundsDirty>(entityId))
+        if (!registry->all_of<UIComponent::BoundsDirty>(entityId))
             registry->emplace<UIComponent::BoundsDirty>(entityId);
     }
 };

@@ -31,6 +31,9 @@
 #include "../ECS/Components/Singletons/TextureSingleton.h"
 #include "../ECS/Components/Rendering/ModelDisplayInfo.h"
 #include "../ECS/Components/Rendering/VisibleModel.h"
+#include "../ECS/Components/Rendering/CModelInfo.h"
+#include "../ECS/Components/Rendering/Collidable.h"
+#include "../ECS/Components/Transform.h"
 
 #include "Camera.h"
 #include "../Gameplay/Map/Map.h"
@@ -44,6 +47,7 @@ AutoCVar_Int CVAR_ComplexModelCullingEnabled("complexModels.cullEnable", "enable
 AutoCVar_Int CVAR_ComplexModelLockCullingFrustum("complexModels.lockCullingFrustum", "lock frustrum for complex model culling", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_ComplexModelDrawBoundingBoxes("complexModels.drawBoundingBoxes", "draw bounding boxes for complex models", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_ComplexModelOcclusionCullEnabled("complexModels.occlusionCullEnable", "enable culling of complex models", 1, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_ComplexModelDrawCollisionMeshEnabled("complexModels.drawCollisionMesh", "enable collision mesh drawing of complex models (Requires Restart)", 0, CVarFlags::EditCheckbox);
 AutoCVar_VecFloat CVAR_ComplexModelWireframeColor("complexModels.wireframeColor", "set the wireframe color for complex models", vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
 CModelRenderer::CModelRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
@@ -137,6 +141,7 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
     modelToBeLoaded.placement = defaultPlacement;
     modelToBeLoaded.name = &modelPath;
     modelToBeLoaded.nameHash = modelPathHash;
+    modelToBeLoaded.entityID = entity;
 
     if (shouldLoad)
     {
@@ -149,6 +154,7 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
             complexModel->failedToLoad = true;
             DebugHandler::PrintError("Failed to load Complex Model: %s", complexModel->debugName.c_str());
         }
+        complexModel->isStaticModel = false;
     }
 
     // Add Placement Details (This is used to go from a placement to LoadedComplexModel or InstanceData
@@ -166,17 +172,30 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
 
             freedModelIDInstances[modelID].pop();
             reusedInstance = true;
+
+            _instanceIDToEntityID.WriteLock([&](std::vector<entt::entity>& instanceIDToEntityID)
+            {
+                entt::registry* registry = ServiceLocator::GetGameRegistry();
+                CModelInfo& cmodelInfo = registry->get_or_emplace<CModelInfo>(entity, modelDisplayInfo.instanceID, false);
+
+                if (complexModel->numCollisionTriangles > 0)
+                {
+                    registry->emplace_or_replace<Collidable>(entity);
+                }
+
+                instanceIDToEntityID[modelDisplayInfo.instanceID] = entity;
+            });
         }
     });
 
     if (!reusedInstance)
     {
         // Add placement as an instance
-        AddInstance(*complexModel, *modelToBeLoaded.placement, placementDetails.instanceIndex);
+        AddInstance(*complexModel, *modelToBeLoaded.placement, modelToBeLoaded.entityID, placementDetails.instanceIndex);
         modelDisplayInfo.instanceID = placementDetails.instanceIndex;
     }
 
-    if (registry.has<VisibleModel>(entity))
+    if (registry.all_of<VisibleModel>(entity))
     {
         OnModelVisible(registry, entity);
     }
@@ -204,11 +223,16 @@ void CModelRenderer::OnModelDestroyed(entt::registry& registry, entt::entity ent
     {
         freedModelIDInstances[modelInstanceData.modelID].push(instanceID);
     });
+    
+    _instanceIDToEntityID.WriteLock([&](std::vector<entt::entity>& instanceIDToEntityID)
+    {
+        instanceIDToEntityID[modelInstanceData.modelID] = entt::null;
+    });
 }
 
 void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entity)
 {
-    if (!registry.has<ModelDisplayInfo>(entity))
+    if (!registry.all_of<ModelDisplayInfo>(entity))
         return;
 
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
@@ -248,7 +272,7 @@ void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entit
 
 void CModelRenderer::OnModelInvisible(entt::registry& registry, entt::entity entity)
 {
-    if (!registry.has<ModelDisplayInfo>(entity))
+    if (!registry.all_of<ModelDisplayInfo>(entity))
         return;
 
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
@@ -305,11 +329,8 @@ void CModelRenderer::Update(f32 deltaTime)
 
                 const CModel::CullingData& cullingData = _cullingDatas.ReadGet(loadedComplexModel.cullingDataID);
 
-                vec3 minBoundingBox = cullingData.minBoundingBox;
-                vec3 maxBoundingBox = cullingData.maxBoundingBox;
-
-                vec3 center = (minBoundingBox + maxBoundingBox) * 0.5f;
-                vec3 extents = maxBoundingBox - center;
+                vec3 center = cullingData.center;
+                vec3 extents = cullingData.extents;
 
                 // transform center
                 const mat4x4& m = GetModelInstanceMatrix(placementDetails.instanceIndex);
@@ -319,11 +340,7 @@ void CModelRenderer::Update(f32 deltaTime)
                 glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(m[0])), glm::abs(vec3(m[1])), glm::abs(vec3(m[2])));
                 vec3 transformedExtents = absMatrix * extents;
 
-                // Transform to min/max box representation
-                vec3 transformedMin = transformedCenter - transformedExtents;
-                vec3 transformedMax = transformedCenter + transformedExtents;
-
-                _debugRenderer->DrawAABB3D(transformedMin, transformedMax, 0xff00ffff);
+                _debugRenderer->DrawAABB3D(transformedCenter, transformedExtents, 0xff00ffff);
             }
         });
     }
@@ -1163,6 +1180,8 @@ void CModelRenderer::AddTransparencyPass(Renderer::RenderGraph* renderGraph, Ren
 
 void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& chunk, StringTable& stringTable)
 {
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+
     for (const Terrain::Placement& placement : chunk.complexModelPlacements)
     {
         u32 uniqueID = placement.uniqueID;
@@ -1171,10 +1190,14 @@ void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& ch
             std::unique_lock lock(_uniqueIdCounterMutex);
             if (_uniqueIdCounter[uniqueID]++ == 0)
             {
-                ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
-                modelToBeLoaded.placement = &placement;
-                modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
-                modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
+                _complexModelsToBeLoaded.WriteLock([&](std::vector<ComplexModelToBeLoaded>& complexModelsToBeLoaded)
+                {
+                    ComplexModelToBeLoaded& modelToBeLoaded = complexModelsToBeLoaded.emplace_back();
+                    modelToBeLoaded.placement = &placement;
+                    modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
+                    modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
+                    modelToBeLoaded.entityID = registry->create();
+                });
             }
         }
     }
@@ -1182,16 +1205,20 @@ void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& ch
 
 void CModelRenderer::RegisterLoadFromDecoration(const std::string& modelPath, const u32& modelPathHash, vec3 position, quaternion rotation, f32 scale)
 {
-    ComplexModelToBeLoaded& modelToBeLoaded = _complexModelsToBeLoaded.EmplaceBack();
+    _complexModelsToBeLoaded.WriteLock([&](std::vector<ComplexModelToBeLoaded>& complexModelsToBeLoaded)
+    {
+        ComplexModelToBeLoaded& modelToBeLoaded = complexModelsToBeLoaded.emplace_back();
 
-    Terrain::Placement* placement = new Terrain::Placement();
-    placement->position = position;
-    placement->rotation = rotation;
-    placement->scale = static_cast<u16>(scale * 1024);
+        Terrain::Placement* placement = new Terrain::Placement();
+        placement->position = position;
+        placement->rotation = rotation;
+        placement->scale = static_cast<u16>(scale * 1024);
 
-    modelToBeLoaded.placement = placement;
-    modelToBeLoaded.name = new std::string(modelPath);
-    modelToBeLoaded.nameHash = modelPathHash;
+        modelToBeLoaded.placement = placement;
+        modelToBeLoaded.name = new std::string(modelPath);
+        modelToBeLoaded.nameHash = modelPathHash;
+        modelToBeLoaded.entityID = entt::null;
+    });
 }
 
 void CModelRenderer::ExecuteLoad()
@@ -1235,6 +1262,11 @@ void CModelRenderer::ExecuteLoad()
         _complexModelPlacementDetails.WriteLock([&](std::vector<Terrain::PlacementDetails>& complexModelPlacementDetails)
         {
             complexModelPlacementDetails.reserve(numComplexModelsToBeLoaded);
+        });
+
+        _instanceIDToEntityID.WriteLock([&](std::vector<entt::entity>& instanceIDToEntityID)
+        {
+            instanceIDToEntityID.reserve(numComplexModelsToBeLoaded);
         });
 
 #if PARALLEL_LOADING
@@ -1296,6 +1328,8 @@ void CModelRenderer::ExecuteLoad()
                     complexModel->failedToLoad = true;
                     DebugHandler::PrintError("Failed to load Complex Model: %s", complexModel->debugName.c_str());
                 }
+
+                complexModel->isStaticModel = true;
             }
 
             if (complexModel->failedToLoad)
@@ -1314,7 +1348,7 @@ void CModelRenderer::ExecuteLoad()
             placementDetails.loadedIndex = modelID;
 
             // Add placement as an instance
-            AddInstance(*complexModel, *modelToBeLoaded.placement, placementDetails.instanceIndex);
+            AddInstance(*complexModel, *modelToBeLoaded.placement, modelToBeLoaded.entityID, placementDetails.instanceIndex);
 
             numComplexModelsToLoad++;
         }
@@ -1373,6 +1407,7 @@ void CModelRenderer::Clear()
     _textureUnits.Clear();
     _modelInstanceDatas.Clear();
     _instanceDisplayInfos.Clear();
+    _collisionTriangles.Clear();
     _modelInstanceMatrices.Clear();
     _cullingDatas.Clear();
     _freedModelIDInstances.Clear();
@@ -1392,6 +1427,9 @@ void CModelRenderer::Clear()
     _transparentDrawCallDatas.Clear();
 
     _renderer->UnloadTexturesInArray(_cModelTextures, 0);
+
+    // Entity IDs are cleared in the registry when a new map is loaded in TerrainRenderer
+    _instanceIDToEntityID.Clear();
 }
 
 void CModelRenderer::CreatePermanentResources()
@@ -1403,6 +1441,16 @@ void CModelRenderer::CreatePermanentResources()
     _geometryPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
     _materialPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
     _transparencyPassDescriptorSet.Bind("_cModelTextures"_h, _cModelTextures);
+
+    Renderer::DataTextureDesc dataTextureDesc;
+    dataTextureDesc.width = 1;
+    dataTextureDesc.height = 1;
+    dataTextureDesc.format = Renderer::ImageFormat::R8G8B8A8_UNORM_SRGB;
+    dataTextureDesc.data = new u8[4]{ 200, 200, 200, 255 };
+    dataTextureDesc.debugName = "CModel DebugTexture";
+
+    u32 arrayIndex = 0;
+    _renderer->CreateDataTextureIntoArray(dataTextureDesc, _cModelTextures, arrayIndex);
 
     Renderer::SamplerDesc samplerDesc;
     samplerDesc.enabled = true;
@@ -1538,228 +1586,6 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
     if (!LoadFile(modelPath, cModel))
         return false;
 
-    vec3 minBounding = cModel.cullingData.minBoundingBox;
-    vec3 maxBounding = cModel.cullingData.maxBoundingBox;
-    entt::registry* registry = ServiceLocator::GetGameRegistry();
-    TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
-
-    // Add Sequences
-    {
-        _animationSequences.WriteLock([&](std::vector<AnimationSequence>& animationSequence)
-        {
-            size_t numSequenceInfoBefore = animationSequence.size();
-            size_t numSequencesToAdd = cModel.sequences.size();
-
-            animationModelInfo.numSequences = static_cast<u16>(numSequencesToAdd);
-            animationModelInfo.sequenceOffset = static_cast<u32>(numSequenceInfoBefore);
-
-            animationSequence.resize(numSequenceInfoBefore + numSequencesToAdd);
-
-            for (u32 i = 0; i < numSequencesToAdd; i++)
-            {
-                AnimationSequence& sequence = animationSequence[numSequenceInfoBefore + i];
-                CModel::ComplexAnimationSequence& cmodelSequence = cModel.sequences[i];
-
-                sequence.animationId = cmodelSequence.id;
-                sequence.animationSubId = cmodelSequence.subId;
-                sequence.nextSubAnimationId = cmodelSequence.nextVariationId;
-                sequence.nextAliasId = cmodelSequence.nextAliasId;
-
-                sequence.flags.isAlwaysPlaying = cmodelSequence.flags.isAlwaysPlaying;
-                sequence.flags.isAlias = cmodelSequence.flags.isAlias;
-                sequence.flags.blendTransition = cmodelSequence.flags.blendTransition;
-
-                sequence.duration = static_cast<float>(cmodelSequence.duration) / 1000.f;
-                sequence.repeatMin = cmodelSequence.repetitionRange.x;
-                sequence.repeatMax = cmodelSequence.repetitionRange.y;
-                sequence.blendTimeStart = cmodelSequence.blendTimeStart;
-                sequence.blendTimeEnd = cmodelSequence.blendTimeEnd;
-            }
-        });
-    }
-
-    // Add Bones
-    _animationBoneInfo.WriteLock([&](std::vector<AnimationBoneInfo>& animationBoneInfo)
-    {
-        size_t numBoneInfoBefore = animationBoneInfo.size();
-        size_t numBonesToAdd = cModel.bones.size();
-
-        complexModel.numBones = static_cast<u32>(numBonesToAdd);
-
-        animationModelInfo.numBones = static_cast<u16>(numBonesToAdd);
-        animationModelInfo.boneInfoOffset = static_cast<u32>(numBoneInfoBefore);
-
-        u32 numSequences = 0;
-        u32 numTracksWithValues = 0;
-
-        animationBoneInfo.resize(numBoneInfoBefore + numBonesToAdd);
-        for (u32 i = 0; i < numBonesToAdd; i++)
-        {
-            AnimationBoneInfo& boneInfo = animationBoneInfo[numBoneInfoBefore + i];
-            CModel::ComplexBone& bone = cModel.bones[i];
-
-            boneInfo.numTranslationSequences = static_cast<u16>(bone.translation.tracks.size());
-            if (boneInfo.numTranslationSequences > 0)
-            {
-                std::scoped_lock lock(_animationTrackMutex);
-
-                boneInfo.translationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
-                for (u32 j = 0; j < boneInfo.numTranslationSequences; j++)
-                {
-                    CModel::ComplexAnimationTrack<vec3>& track = bone.translation.tracks[j];
-                    AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
-
-                    trackInfo.sequenceIndex = track.sequenceId;
-
-                    trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
-                    trackInfo.numValues = static_cast<u16>(track.values.size());
-
-                    trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
-                    trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
-
-                    // Add Timestamps
-                    {
-                        size_t numTimestampsBefore = _animationTrackTimestamps.size();
-                        size_t numTimestampsToAdd = track.timestamps.size();
-
-                        _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
-                        memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
-                    }
-
-                    // Add Values
-                    {
-                        size_t numValuesBefore = _animationTrackValues.size();
-                        size_t numValuesToAdd = track.values.size();
-
-                        _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
-
-                        for (size_t x = numValuesBefore; x < numValuesBefore + numValuesToAdd; x++)
-                        {
-                            _animationTrackValues[x] = vec4(track.values[x - numValuesBefore], 0.f);
-                        }
-                    }
-
-                    numTracksWithValues += trackInfo.numValues;
-                }
-            }
-
-            boneInfo.numRotationSequences = static_cast<u16>(bone.rotation.tracks.size());
-            if (boneInfo.numRotationSequences > 0)
-            {
-                std::scoped_lock lock(_animationTrackMutex);
-
-                boneInfo.rotationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
-                for (u32 j = 0; j < boneInfo.numRotationSequences; j++)
-                {
-                    CModel::ComplexAnimationTrack<quaternion>& track = bone.rotation.tracks[j];
-                    AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
-
-                    trackInfo.sequenceIndex = track.sequenceId;
-
-                    trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
-                    trackInfo.numValues = static_cast<u16>(track.values.size());
-
-                    trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
-                    trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
-
-                    // Add Timestamps
-                    {
-                        size_t numTimestampsBefore = _animationTrackTimestamps.size();
-                        size_t numTimestampsToAdd = track.timestamps.size();
-
-                        _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
-                        memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
-                    }
-
-                    // Add Values
-                    {
-                        size_t numValuesBefore = _animationTrackValues.size();
-                        size_t numValuesToAdd = track.values.size();
-
-                        _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
-                        memcpy(&_animationTrackValues[numValuesBefore], track.values.data(), numValuesToAdd * sizeof(quaternion));
-                    }
-
-                    numTracksWithValues += trackInfo.numValues;
-                }
-            }
-
-            boneInfo.numScaleSequences = static_cast<u16>(bone.scale.tracks.size());
-            if (boneInfo.numScaleSequences > 0)
-            {
-                std::scoped_lock lock(_animationTrackMutex);
-
-                boneInfo.scaleSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
-                for (u32 j = 0; j < boneInfo.numScaleSequences; j++)
-                {
-                    CModel::ComplexAnimationTrack<vec3>& track = bone.scale.tracks[j];
-                    AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
-
-                    trackInfo.sequenceIndex = track.sequenceId;
-
-                    trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
-                    trackInfo.numValues = static_cast<u16>(track.values.size());
-
-                    trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
-                    trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
-
-                    // Add Timestamps
-                    {
-                        size_t numTimestampsBefore = _animationTrackTimestamps.size();
-                        size_t numTimestampsToAdd = track.timestamps.size();
-
-                        _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
-                        memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
-                    }
-
-                    // Add Values
-                    {
-                        size_t numValuesBefore = _animationTrackValues.size();
-                        size_t numValuesToAdd = track.values.size();
-
-                        _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
-
-                        for (size_t x = numValuesBefore; x < numValuesBefore + numValuesToAdd; x++)
-                        {
-                            _animationTrackValues[x] = vec4(track.values[x - numValuesBefore], 0.f);
-                        }
-                    }
-
-                    numTracksWithValues += trackInfo.numValues;
-                }
-            }
-
-            numSequences += boneInfo.numTranslationSequences + boneInfo.numRotationSequences + boneInfo.numScaleSequences;
-
-            boneInfo.flags.isTranslationTrackGlobalSequence = bone.translation.isGlobalSequence;
-            boneInfo.flags.isRotationTrackGlobalSequence = bone.rotation.isGlobalSequence;
-            boneInfo.flags.isScaleTrackGlobalSequence = bone.scale.isGlobalSequence;
-
-            boneInfo.parentBoneId = bone.parentBoneId;
-            boneInfo.flags.animate = (bone.flags.transformed | bone.flags.unk_0x80) > 0;
-            boneInfo.pivotPointX = bone.pivot.x;
-            boneInfo.pivotPointY = bone.pivot.y;
-            boneInfo.pivotPointZ = bone.pivot.z;
-        }
-
-        // We also need to account for the possibility that a model comes with no included values due to the values being found in a separate '.anim' file
-        complexModel.isAnimated = complexModel.numBones > 0 && numSequences > 0 && numTracksWithValues > 0;
-    });
-
-    // Add vertices
-    size_t numVerticesBeforeAdd = 0;
-    _vertices.WriteLock([&](std::vector<CModel::ComplexVertex>& vertices)
-    {
-        numVerticesBeforeAdd = vertices.size();
-        size_t numVerticesToAdd = cModel.vertices.size();
-
-        vertices.resize(numVerticesBeforeAdd + numVerticesToAdd);
-        memcpy(&vertices[numVerticesBeforeAdd], cModel.vertices.data(), numVerticesToAdd * sizeof(CModel::ComplexVertex));
-    });
-
-    complexModel.numVertices = static_cast<u32>(cModel.vertices.size());
-    complexModel.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
-
     // Set the CullingData
     _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
     {
@@ -1767,53 +1593,104 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         cullingData = cModel.cullingData;
     });
 
-    NDBCSingleton& ndbcSingleton = registry->ctx<NDBCSingleton>();
-    NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
-    StringTable*& creatureDisplayInfoStringTable = creatureDisplayInfoFile->GetStringTable();
+    complexModel.collisionAABB = cModel.collisionAABB;
 
-    fs::path modelTexturePath = "Data/extracted/Textures/" + modelPath;
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
 
-    NDBC::CreatureDisplayInfo* creatureDisplayInfo = nullptr;
-    _nameHashToCreatureDisplayInfo.TryGetUnsafe(toBeLoaded.nameHash, creatureDisplayInfo);
+    bool drawCollisionMesh = CVAR_ComplexModelDrawCollisionMeshEnabled.Get();
+    bool hasCollisionMesh = cModel.collisionVertexPositions.size() > 0 && cModel.collisionIndices.size() > 0;
 
-    // Handle this models renderbatches
-    size_t numRenderBatches = static_cast<u32>(cModel.modelData.renderBatches.size());
-    for (size_t i = 0; i < numRenderBatches; i++)
+    // Construct Collision Triangles
+    if (hasCollisionMesh)
     {
-        CModel::ComplexRenderBatch& renderBatch = cModel.modelData.renderBatches[i];
+        size_t numCollisionTrianglesBeforeAdd = 0;
+        size_t numCollisionTrianglesToAdd = 0;
 
-        // Select where to store the DrawCall templates, this won't be necessary once we do backface culling in the culling compute shader
-        bool isTransparent = IsRenderBatchTransparent(renderBatch, cModel);
-        std::vector<DrawCall>& drawCallTemplates = (isTransparent) ? complexModel.transparentDrawCallTemplates : complexModel.opaqueDrawCallTemplates;
-        std::vector<DrawCallData>& drawCallDataTemplates = (isTransparent) ? complexModel.transparentDrawCallDataTemplates : complexModel.opaqueDrawCallDataTemplates;
-
-        if (isTransparent)
+        _collisionTriangles.WriteLock([&](std::vector<Geometry::Triangle>& collisionTriangles)
         {
-            complexModel.numTransparentDrawCalls++;
-        }
-        else
-        {
-            complexModel.numOpaqueDrawCalls++;
-        }
+            numCollisionTrianglesBeforeAdd = collisionTriangles.size();
+            numCollisionTrianglesToAdd = cModel.collisionIndices.size() / 3;
 
-        // For each renderbatch we want to create a template DrawCall and DrawCallData inside of the LoadedComplexModel
+            collisionTriangles.resize(numCollisionTrianglesBeforeAdd + numCollisionTrianglesToAdd);
+
+            for (u32 i = 0; i < numCollisionTrianglesToAdd; i++)
+            {
+                Geometry::Triangle& collisionTriangle = collisionTriangles[numCollisionTrianglesBeforeAdd + i];
+
+                u32 indexOffset = i * 3;
+
+                u16 vert1Index = cModel.collisionIndices[indexOffset];
+                u16 vert2Index = cModel.collisionIndices[indexOffset + 1];
+                u16 vert3Index = cModel.collisionIndices[indexOffset + 2];
+
+                collisionTriangle.vert1 = cModel.collisionVertexPositions[vert1Index];
+                collisionTriangle.vert2 = cModel.collisionVertexPositions[vert2Index];
+                collisionTriangle.vert3 = cModel.collisionVertexPositions[vert3Index];
+            }
+        });
+
+        complexModel.collisionTriangleOffset = static_cast<u32>(numCollisionTrianglesBeforeAdd);
+        complexModel.numCollisionTriangles = static_cast<u32>(numCollisionTrianglesToAdd);
+    }
+
+    if (drawCollisionMesh && hasCollisionMesh)
+    {
+        animationModelInfo.numSequences = 0;
+        animationModelInfo.sequenceOffset = 0;
+
+        complexModel.isAnimated = false;
+        complexModel.numBones = 0;
+        animationModelInfo.numBones = 0;
+        animationModelInfo.boneInfoOffset = 0;
+
+        // Add vertices
+        size_t numVerticesBeforeAdd = 0;
+        _vertices.WriteLock([&](std::vector<CModel::ComplexVertex>& vertices)
+        {
+            numVerticesBeforeAdd = vertices.size();
+            size_t numCollisionVerticesToAdd = cModel.collisionVertexPositions.size();
+
+            vertices.resize(numVerticesBeforeAdd + numCollisionVerticesToAdd);
+
+            for (u32 i = 0; i < numCollisionVerticesToAdd; i++)
+            {
+                CModel::ComplexVertex& vertex = vertices[numVerticesBeforeAdd + i];
+                vertex.position = cModel.collisionVertexPositions[i];
+            }
+        });
+
+        complexModel.numVertices = static_cast<u32>(cModel.vertices.size());
+        complexModel.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
+
+        _cullingDatas.WriteLock([&](std::vector<CModel::CullingData>& cullingDatas)
+        {
+            CModel::CullingData& cullingData = cullingDatas[complexModel.modelID];
+            cullingData = cModel.cullingData;
+        });
+
+        complexModel.numOpaqueDrawCalls++;
+
+        std::vector<DrawCall>& drawCallTemplates = complexModel.opaqueDrawCallTemplates;
+        std::vector<DrawCallData>& drawCallDataTemplates = complexModel.opaqueDrawCallDataTemplates;
+
         DrawCall& drawCallTemplate = drawCallTemplates.emplace_back();
         DrawCallData& drawCallDataTemplate = drawCallDataTemplates.emplace_back();
         drawCallTemplate.instanceCount = 1;
         drawCallTemplate.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
-        
+
         // Add indices
         size_t numIndicesBeforeAdd = 0;
         size_t numIndicesToAdd = 0;
         _indices.WriteLock([&](std::vector<u16>& indices)
         {
             numIndicesBeforeAdd = indices.size();
-            numIndicesToAdd = renderBatch.indexCount;
+            numIndicesToAdd = cModel.collisionIndices.size();
 
             indices.resize(numIndicesBeforeAdd + numIndicesToAdd);
-            memcpy(&indices[numIndicesBeforeAdd], &cModel.modelData.indices[renderBatch.indexStart], numIndicesToAdd * sizeof(u16));
+            memcpy(&indices[numIndicesBeforeAdd], &cModel.collisionIndices[0], numIndicesToAdd * sizeof(u16));
         });
-        
+
         drawCallTemplate.firstIndex = static_cast<u32>(numIndicesBeforeAdd);
         drawCallTemplate.indexCount = static_cast<u32>(numIndicesToAdd);
 
@@ -1824,93 +1701,391 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
         _textureUnits.WriteLock([&](std::vector<TextureUnit>& textureUnits)
         {
             numTextureUnitsBeforeAdd = textureUnits.size();
-            numTextureUnitsToAdd = renderBatch.textureUnits.size();
+            numTextureUnitsToAdd = 1;
 
             textureUnits.resize(numTextureUnitsBeforeAdd + numTextureUnitsToAdd);
-            for (size_t j = 0; j < numTextureUnitsToAdd; j++)
+            
+            TextureUnit& textureUnit = textureUnits[numTextureUnitsBeforeAdd];
+
+            textureUnit.data = 0x2;
+            textureUnit.materialType = 0;
+            numUnlitTextureUnits = 1;
+
+            // Set Debug Texture
             {
-                TextureUnit& textureUnit = textureUnits[numTextureUnitsBeforeAdd + j];
-
-                CModel::ComplexTextureUnit& complexTextureUnit = renderBatch.textureUnits[j];
-                CModel::ComplexMaterial& complexMaterial = cModel.materials[complexTextureUnit.materialIndex];
-
-                bool isProjectedTexture = (static_cast<u8>(complexTextureUnit.flags) & static_cast<u8>(CModel::ComplexTextureUnitFlag::PROJECTED_TEXTURE)) != 0;
-                u16 materialFlag = *reinterpret_cast<u16*>(&complexMaterial.flags) << 1;
-                u16 blendingMode = complexMaterial.blendingMode << 11;
-
-                textureUnit.data = static_cast<u16>(isProjectedTexture) | materialFlag | blendingMode;
-                textureUnit.materialType = complexTextureUnit.shaderId;
-
-                numUnlitTextureUnits += materialFlag & 0x1;
-
-                // Load Textures into Texture Array
-                {
-                    // TODO: Wotlk only supports 2 textures, when we upgrade to cata+ this might need to be reworked
-                    for (u32 t = 0; t < complexTextureUnit.textureCount; t++)
-                    {
-                        // Load Texture
-                        CModel::ComplexTexture& complexTexture = cModel.textures[complexTextureUnit.textureIndices[t]];
-
-                        if (complexTexture.type == CModel::ComplexTextureType::NONE)
-                        {
-                            Renderer::TextureDesc textureDesc;
-                            textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
-                            _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                        }
-                        else if (creatureDisplayInfo != nullptr)
-                        {
-                            if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
-                            {
-                                if (creatureDisplayInfo->texture1 == std::numeric_limits<u32>().max())
-                                    continue;
-
-                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture1);
-
-                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
-
-                                Renderer::TextureDesc textureDesc;
-                                textureDesc.path = modelTexturePath.string();
-                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                            }
-                            else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_2)
-                            {
-                                if (creatureDisplayInfo->texture2 == std::numeric_limits<u32>().max())
-                                    continue;
-
-                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture2);
-
-                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
-
-                                Renderer::TextureDesc textureDesc;
-                                textureDesc.path = modelTexturePath.string();
-                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                            }
-                            else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_3)
-                            {
-                                if (creatureDisplayInfo->texture3 == std::numeric_limits<u32>().max())
-                                    continue;
-
-                                std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture3);
-
-                                modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
-
-                                Renderer::TextureDesc textureDesc;
-                                textureDesc.path = modelTexturePath.string();
-                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
-                            }
-                            else
-                            {
-                                // TODO: Add support for more complex texture types, like playermodels
-                            }
-                        }
-                    }
-                }
+                textureUnit.textureIds[0] = 0;
+                textureUnit.textureIds[1] = 0;
             }
         });
 
         drawCallDataTemplate.textureUnitOffset = static_cast<u16>(numTextureUnitsBeforeAdd);
         drawCallDataTemplate.numTextureUnits = static_cast<u16>(numTextureUnitsToAdd);
         drawCallDataTemplate.numUnlitTextureUnits = static_cast<u16>(numUnlitTextureUnits);
+    }
+    else
+    {
+        // Add Sequences
+        {
+            _animationSequences.WriteLock([&](std::vector<AnimationSequence>& animationSequence)
+            {
+                size_t numSequenceInfoBefore = animationSequence.size();
+                size_t numSequencesToAdd = cModel.sequences.size();
+
+                animationModelInfo.numSequences = static_cast<u16>(numSequencesToAdd);
+                animationModelInfo.sequenceOffset = static_cast<u32>(numSequenceInfoBefore);
+
+                animationSequence.resize(numSequenceInfoBefore + numSequencesToAdd);
+
+                for (u32 i = 0; i < numSequencesToAdd; i++)
+                {
+                    AnimationSequence& sequence = animationSequence[numSequenceInfoBefore + i];
+                    CModel::ComplexAnimationSequence& cmodelSequence = cModel.sequences[i];
+
+                    sequence.animationId = cmodelSequence.id;
+                    sequence.animationSubId = cmodelSequence.subId;
+                    sequence.nextSubAnimationId = cmodelSequence.nextVariationId;
+                    sequence.nextAliasId = cmodelSequence.nextAliasId;
+
+                    sequence.flags.isAlwaysPlaying = cmodelSequence.flags.isAlwaysPlaying;
+                    sequence.flags.isAlias = cmodelSequence.flags.isAlias;
+                    sequence.flags.blendTransition = cmodelSequence.flags.blendTransition;
+
+                    sequence.duration = static_cast<float>(cmodelSequence.duration) / 1000.f;
+                    sequence.repeatMin = cmodelSequence.repetitionRange.x;
+                    sequence.repeatMax = cmodelSequence.repetitionRange.y;
+                    sequence.blendTimeStart = cmodelSequence.blendTimeStart;
+                    sequence.blendTimeEnd = cmodelSequence.blendTimeEnd;
+                }
+            });
+        }
+
+        // Add Bones
+        _animationBoneInfo.WriteLock([&](std::vector<AnimationBoneInfo>& animationBoneInfo)
+        {
+            size_t numBoneInfoBefore = animationBoneInfo.size();
+            size_t numBonesToAdd = cModel.bones.size();
+
+            complexModel.numBones = static_cast<u32>(numBonesToAdd);
+
+            animationModelInfo.numBones = static_cast<u16>(numBonesToAdd);
+            animationModelInfo.boneInfoOffset = static_cast<u32>(numBoneInfoBefore);
+
+            u32 numSequences = 0;
+            u32 numTracksWithValues = 0;
+
+            animationBoneInfo.resize(numBoneInfoBefore + numBonesToAdd);
+            for (u32 i = 0; i < numBonesToAdd; i++)
+            {
+                AnimationBoneInfo& boneInfo = animationBoneInfo[numBoneInfoBefore + i];
+                CModel::ComplexBone& bone = cModel.bones[i];
+
+                boneInfo.numTranslationSequences = static_cast<u16>(bone.translation.tracks.size());
+                if (boneInfo.numTranslationSequences > 0)
+                {
+                    std::scoped_lock lock(_animationTrackMutex);
+
+                    boneInfo.translationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
+                    for (u32 j = 0; j < boneInfo.numTranslationSequences; j++)
+                    {
+                        CModel::ComplexAnimationTrack<vec3>& track = bone.translation.tracks[j];
+                        AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
+
+                        trackInfo.sequenceIndex = track.sequenceId;
+
+                        trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
+                        trackInfo.numValues = static_cast<u16>(track.values.size());
+
+                        trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
+                        trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
+
+                        // Add Timestamps
+                        {
+                            size_t numTimestampsBefore = _animationTrackTimestamps.size();
+                            size_t numTimestampsToAdd = track.timestamps.size();
+
+                            _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
+                            memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
+                        }
+
+                        // Add Values
+                        {
+                            size_t numValuesBefore = _animationTrackValues.size();
+                            size_t numValuesToAdd = track.values.size();
+
+                            _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
+
+                            for (size_t x = numValuesBefore; x < numValuesBefore + numValuesToAdd; x++)
+                            {
+                                _animationTrackValues[x] = vec4(track.values[x - numValuesBefore], 0.f);
+                            }
+                        }
+
+                        numTracksWithValues += trackInfo.numValues;
+                    }
+                }
+
+                boneInfo.numRotationSequences = static_cast<u16>(bone.rotation.tracks.size());
+                if (boneInfo.numRotationSequences > 0)
+                {
+                    std::scoped_lock lock(_animationTrackMutex);
+
+                    boneInfo.rotationSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
+                    for (u32 j = 0; j < boneInfo.numRotationSequences; j++)
+                    {
+                        CModel::ComplexAnimationTrack<quaternion>& track = bone.rotation.tracks[j];
+                        AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
+
+                        trackInfo.sequenceIndex = track.sequenceId;
+
+                        trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
+                        trackInfo.numValues = static_cast<u16>(track.values.size());
+
+                        trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
+                        trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
+
+                        // Add Timestamps
+                        {
+                            size_t numTimestampsBefore = _animationTrackTimestamps.size();
+                            size_t numTimestampsToAdd = track.timestamps.size();
+
+                            _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
+                            memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
+                        }
+
+                        // Add Values
+                        {
+                            size_t numValuesBefore = _animationTrackValues.size();
+                            size_t numValuesToAdd = track.values.size();
+
+                            _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
+                            memcpy(&_animationTrackValues[numValuesBefore], track.values.data(), numValuesToAdd * sizeof(quaternion));
+                        }
+
+                        numTracksWithValues += trackInfo.numValues;
+                    }
+                }
+
+                boneInfo.numScaleSequences = static_cast<u16>(bone.scale.tracks.size());
+                if (boneInfo.numScaleSequences > 0)
+                {
+                    std::scoped_lock lock(_animationTrackMutex);
+
+                    boneInfo.scaleSequenceOffset = static_cast<u32>(_animationTrackInfo.size());
+                    for (u32 j = 0; j < boneInfo.numScaleSequences; j++)
+                    {
+                        CModel::ComplexAnimationTrack<vec3>& track = bone.scale.tracks[j];
+                        AnimationTrackInfo& trackInfo = _animationTrackInfo.emplace_back();
+
+                        trackInfo.sequenceIndex = track.sequenceId;
+
+                        trackInfo.numTimestamps = static_cast<u16>(track.timestamps.size());
+                        trackInfo.numValues = static_cast<u16>(track.values.size());
+
+                        trackInfo.timestampOffset = static_cast<u32>(_animationTrackTimestamps.size());
+                        trackInfo.valueOffset = static_cast<u32>(_animationTrackValues.size());
+
+                        // Add Timestamps
+                        {
+                            size_t numTimestampsBefore = _animationTrackTimestamps.size();
+                            size_t numTimestampsToAdd = track.timestamps.size();
+
+                            _animationTrackTimestamps.resize(numTimestampsBefore + numTimestampsToAdd);
+                            memcpy(&_animationTrackTimestamps[numTimestampsBefore], track.timestamps.data(), numTimestampsToAdd * sizeof(u32));
+                        }
+
+                        // Add Values
+                        {
+                            size_t numValuesBefore = _animationTrackValues.size();
+                            size_t numValuesToAdd = track.values.size();
+
+                            _animationTrackValues.resize(numValuesBefore + numValuesToAdd);
+
+                            for (size_t x = numValuesBefore; x < numValuesBefore + numValuesToAdd; x++)
+                            {
+                                _animationTrackValues[x] = vec4(track.values[x - numValuesBefore], 0.f);
+                            }
+                        }
+
+                        numTracksWithValues += trackInfo.numValues;
+                    }
+                }
+
+                numSequences += boneInfo.numTranslationSequences + boneInfo.numRotationSequences + boneInfo.numScaleSequences;
+
+                boneInfo.flags.isTranslationTrackGlobalSequence = bone.translation.isGlobalSequence;
+                boneInfo.flags.isRotationTrackGlobalSequence = bone.rotation.isGlobalSequence;
+                boneInfo.flags.isScaleTrackGlobalSequence = bone.scale.isGlobalSequence;
+
+                boneInfo.parentBoneId = bone.parentBoneId;
+                boneInfo.flags.animate = (bone.flags.transformed | bone.flags.unk_0x80) > 0;
+                boneInfo.pivotPointX = bone.pivot.x;
+                boneInfo.pivotPointY = bone.pivot.y;
+                boneInfo.pivotPointZ = bone.pivot.z;
+            }
+
+            // We also need to account for the possibility that a model comes with no included values due to the values being found in a separate '.anim' file
+            complexModel.isAnimated = complexModel.numBones > 0 && numSequences > 0 && numTracksWithValues > 0;
+        });
+
+        // Add vertices
+        size_t numVerticesBeforeAdd = 0;
+        _vertices.WriteLock([&](std::vector<CModel::ComplexVertex>& vertices)
+        {
+            numVerticesBeforeAdd = vertices.size();
+            size_t numVerticesToAdd = cModel.vertices.size();
+
+            vertices.resize(numVerticesBeforeAdd + numVerticesToAdd);
+            memcpy(&vertices[numVerticesBeforeAdd], cModel.vertices.data(), numVerticesToAdd * sizeof(CModel::ComplexVertex));
+        });
+
+        complexModel.numVertices = static_cast<u32>(cModel.vertices.size());
+        complexModel.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
+
+        NDBCSingleton& ndbcSingleton = registry->ctx<NDBCSingleton>();
+        NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
+        StringTable*& creatureDisplayInfoStringTable = creatureDisplayInfoFile->GetStringTable();
+
+        fs::path modelTexturePath = "Data/extracted/Textures/" + modelPath;
+
+        NDBC::CreatureDisplayInfo* creatureDisplayInfo = nullptr;
+        _nameHashToCreatureDisplayInfo.TryGetUnsafe(toBeLoaded.nameHash, creatureDisplayInfo);
+
+        // Handle this models renderbatches
+        size_t numRenderBatches = static_cast<u32>(cModel.modelData.renderBatches.size());
+        for (size_t i = 0; i < numRenderBatches; i++)
+        {
+            CModel::ComplexRenderBatch& renderBatch = cModel.modelData.renderBatches[i];
+
+            // Select where to store the DrawCall templates, this won't be necessary once we do backface culling in the culling compute shader
+            bool isTransparent = IsRenderBatchTransparent(renderBatch, cModel);
+            std::vector<DrawCall>& drawCallTemplates = (isTransparent) ? complexModel.transparentDrawCallTemplates : complexModel.opaqueDrawCallTemplates;
+            std::vector<DrawCallData>& drawCallDataTemplates = (isTransparent) ? complexModel.transparentDrawCallDataTemplates : complexModel.opaqueDrawCallDataTemplates;
+
+            if (isTransparent)
+            {
+                complexModel.numTransparentDrawCalls++;
+            }
+            else
+            {
+                complexModel.numOpaqueDrawCalls++;
+            }
+
+            // For each renderbatch we want to create a template DrawCall and DrawCallData inside of the LoadedComplexModel
+            DrawCall& drawCallTemplate = drawCallTemplates.emplace_back();
+            DrawCallData& drawCallDataTemplate = drawCallDataTemplates.emplace_back();
+            drawCallTemplate.instanceCount = 1;
+            drawCallTemplate.vertexOffset = static_cast<u32>(numVerticesBeforeAdd);
+
+            // Add indices
+            size_t numIndicesBeforeAdd = 0;
+            size_t numIndicesToAdd = 0;
+            _indices.WriteLock([&](std::vector<u16>& indices)
+            {
+                numIndicesBeforeAdd = indices.size();
+                numIndicesToAdd = renderBatch.indexCount;
+
+                indices.resize(numIndicesBeforeAdd + numIndicesToAdd);
+                memcpy(&indices[numIndicesBeforeAdd], &cModel.modelData.indices[renderBatch.indexStart], numIndicesToAdd * sizeof(u16));
+            });
+
+            drawCallTemplate.firstIndex = static_cast<u32>(numIndicesBeforeAdd);
+            drawCallTemplate.indexCount = static_cast<u32>(numIndicesToAdd);
+
+            // Add texture units
+            size_t numTextureUnitsBeforeAdd = 0;
+            size_t numTextureUnitsToAdd = 0;
+            size_t numUnlitTextureUnits = 0;
+            _textureUnits.WriteLock([&](std::vector<TextureUnit>& textureUnits)
+            {
+                numTextureUnitsBeforeAdd = textureUnits.size();
+                numTextureUnitsToAdd = renderBatch.textureUnits.size();
+
+                textureUnits.resize(numTextureUnitsBeforeAdd + numTextureUnitsToAdd);
+                for (size_t j = 0; j < numTextureUnitsToAdd; j++)
+                {
+                    TextureUnit& textureUnit = textureUnits[numTextureUnitsBeforeAdd + j];
+
+                    CModel::ComplexTextureUnit& complexTextureUnit = renderBatch.textureUnits[j];
+                    CModel::ComplexMaterial& complexMaterial = cModel.materials[complexTextureUnit.materialIndex];
+
+                    bool isProjectedTexture = (static_cast<u8>(complexTextureUnit.flags) & static_cast<u8>(CModel::ComplexTextureUnitFlag::PROJECTED_TEXTURE)) != 0;
+                    u16 materialFlag = *reinterpret_cast<u16*>(&complexMaterial.flags) << 1;
+                    u16 blendingMode = complexMaterial.blendingMode << 11;
+
+                    textureUnit.data = static_cast<u16>(isProjectedTexture) | materialFlag | blendingMode;
+                    textureUnit.materialType = complexTextureUnit.shaderId;
+
+                    numUnlitTextureUnits += materialFlag & 0x2;
+
+                    // Load Textures into Texture Array
+                    {
+                        // TODO: Wotlk only supports 2 textures, when we upgrade to cata+ this might need to be reworked
+                        for (u32 t = 0; t < complexTextureUnit.textureCount; t++)
+                        {
+                            // Load Texture
+                            CModel::ComplexTexture& complexTexture = cModel.textures[complexTextureUnit.textureIndices[t]];
+
+                            if (complexTexture.type == CModel::ComplexTextureType::NONE)
+                            {
+                                Renderer::TextureDesc textureDesc;
+                                textureDesc.path = textureSingleton.textureHashToPath[complexTexture.textureNameIndex];
+                                _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                            }
+                            else if (creatureDisplayInfo != nullptr)
+                            {
+                                if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_1)
+                                {
+                                    if (creatureDisplayInfo->texture1 == std::numeric_limits<u32>().max())
+                                        continue;
+
+                                    std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture1);
+
+                                    modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                    Renderer::TextureDesc textureDesc;
+                                    textureDesc.path = modelTexturePath.string();
+                                    _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                                }
+                                else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_2)
+                                {
+                                    if (creatureDisplayInfo->texture2 == std::numeric_limits<u32>().max())
+                                        continue;
+
+                                    std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture2);
+
+                                    modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                    Renderer::TextureDesc textureDesc;
+                                    textureDesc.path = modelTexturePath.string();
+                                    _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                                }
+                                else if (complexTexture.type == CModel::ComplexTextureType::COMPONENT_MONSTER_SKIN_3)
+                                {
+                                    if (creatureDisplayInfo->texture3 == std::numeric_limits<u32>().max())
+                                        continue;
+
+                                    std::string monsterSkinPath = creatureDisplayInfoStringTable->GetString(creatureDisplayInfo->texture3);
+
+                                    modelTexturePath = modelTexturePath.replace_filename(monsterSkinPath).replace_extension(".dds");
+
+                                    Renderer::TextureDesc textureDesc;
+                                    textureDesc.path = modelTexturePath.string();
+                                    _renderer->LoadTextureIntoArray(textureDesc, _cModelTextures, textureUnit.textureIds[t]);
+                                }
+                                else
+                                {
+                                    // TODO: Add support for more complex texture types, like playermodels
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            drawCallDataTemplate.textureUnitOffset = static_cast<u16>(numTextureUnitsBeforeAdd);
+            drawCallDataTemplate.numTextureUnits = static_cast<u16>(numTextureUnitsToAdd);
+            drawCallDataTemplate.numUnlitTextureUnits = static_cast<u16>(numUnlitTextureUnits);
+        }
     }
 
     return true;
@@ -2064,7 +2239,7 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
         // If there are no vertices, we don't need to render it
         if (numVertices == 0)
         {
-            DebugHandler::PrintError("Complex Model has no vertices: %s", cModel.name);
+            //DebugHandler::PrintError("Complex Model has no vertices: %s", cModel.name);
             return false;
         }
 
@@ -2320,6 +2495,64 @@ bool CModelRenderer::LoadFile(const std::string& cModelPathString, CModel::Compl
         }
     }
 
+    // Read Collision Data
+    {
+        // Collision Vertex Positions
+        {
+            u32 numElements = 0;
+            if (!cModelBuffer.GetU32(numElements))
+            {
+                DebugHandler::PrintError("Failed to load Collision Vertex Positions for Complex Model: %s", cModel.name);
+                return false;
+            }
+
+            if (numElements > 0)
+            {
+                cModel.collisionVertexPositions.resize(numElements);
+                cModelBuffer.GetBytes(reinterpret_cast<u8*>(cModel.collisionVertexPositions.data()), numElements * sizeof(vec3));
+            }
+        }
+
+        // Collision Indices
+        {
+            u32 numElements = 0;
+            if (!cModelBuffer.GetU32(numElements))
+            {
+                DebugHandler::PrintError("Failed to load Collision Indices for Complex Model: %s", cModel.name);
+                return false;
+            }
+
+            if (numElements > 0)
+            {
+                cModel.collisionIndices.resize(numElements);
+                cModelBuffer.GetBytes(reinterpret_cast<u8*>(cModel.collisionIndices.data()), numElements * sizeof(u16));
+            }
+        }
+
+        // Collision Normals
+        {
+            u32 numElements = 0;
+            if (!cModelBuffer.GetU32(numElements))
+            {
+                DebugHandler::PrintError("Failed to load Collision Normals for Complex Model: %s", cModel.name);
+                return false;
+            }
+
+            if (numElements > 0)
+            {
+                cModel.collisionNormals.resize(numElements);
+                cModelBuffer.GetBytes(reinterpret_cast<u8*>(cModel.collisionNormals.data()), numElements * sizeof(std::array<u8, 2>));
+            }
+        }
+
+        // Collision AABB
+        if (!cModelBuffer.GetBytes(reinterpret_cast<u8*>(&cModel.collisionAABB), sizeof(Geometry::AABoundingBox)))
+        {
+            DebugHandler::PrintError("Failed to load Collision AABB for Complex Model: %s", cModel.name);
+            return false;
+        }
+    }
+
     // Read Culling Data
     if (!cModelBuffer.GetBytes(reinterpret_cast<u8*>(&cModel.cullingData), sizeof(CModel::CullingData)))
     {
@@ -2342,7 +2575,7 @@ bool CModelRenderer::IsRenderBatchTransparent(const CModel::ComplexRenderBatch& 
     return false;
 }
 
-void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, u32& instanceIndex)
+void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, entt::entity entityID, u32& instanceIndex)
 {
     ModelInstanceData* modelInstanceData = nullptr;
     mat4x4* modelInstanceMatrix = nullptr;
@@ -2362,6 +2595,30 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
         {
             instanceDisplayInfo = &instanceDisplayInfos.emplace_back();
         });
+
+        _instanceIDToEntityID.WriteLock([&](std::vector<entt::entity>& instanceIDToEntityID)
+        {
+            instanceIDToEntityID.emplace_back() = entityID;
+        });
+
+        if (entityID != entt::null)
+        {
+            entt::registry* registry = ServiceLocator::GetGameRegistry();
+            CModelInfo& cmodelInfo = registry->get_or_emplace<CModelInfo>(entityID, instanceIndex, complexModel.isStaticModel);
+
+            if (cmodelInfo.isStaticModel)
+            {
+                Transform& transform = registry->emplace_or_replace<Transform>(entityID);
+                transform.position = placement.position;
+
+                registry->emplace_or_replace<TransformIsDirty>(entityID);
+            }
+
+            if (cmodelInfo.isStaticModel && complexModel.numCollisionTriangles > 0)
+            {
+                registry->emplace_or_replace<Collidable>(entityID);
+            }
+        }
     });
 
     // Add the instance
@@ -2636,12 +2893,12 @@ void CModelRenderer::CreateBuffers()
         _animationPrepassDescriptorSet.Bind("_animationBoneInfos"_h, _animationBoneInfo.GetBuffer());
     }
 
-    // Create AnimationSequence buffer
+    // Create AnimationTrackInfo buffer
     {
-        size_t numSequenceInfo = _animationTrackInfo.size();
+        size_t numAnimationTrackInfos = _animationTrackInfo.size();
         Renderer::BufferDesc desc;
         desc.name = "AnimationTrackInfoBuffer";
-        desc.size = sizeof(AnimationTrackInfo) * numSequenceInfo;
+        desc.size = sizeof(AnimationTrackInfo) * numAnimationTrackInfos;
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
         _animationTrackInfoBuffer = _renderer->CreateAndFillBuffer(_animationTrackInfoBuffer, desc, _animationTrackInfo.data(), desc.size);

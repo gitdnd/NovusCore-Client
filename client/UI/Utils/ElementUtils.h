@@ -15,7 +15,7 @@ namespace UIUtils
 
     inline static void MarkDirty(entt::registry* registry, entt::entity entId)
     {
-        if (!registry->has<UIComponent::Dirty>(entId))
+        if (!registry->all_of<UIComponent::Dirty>(entId))
             registry->emplace<UIComponent::Dirty>(entId);
     }
 };

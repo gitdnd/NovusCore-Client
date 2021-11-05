@@ -71,8 +71,8 @@ void MapObjectRenderer::Update(f32 deltaTime)
 
                 const Terrain::CullingData& cullingData = _cullingData.ReadGet(instanceLookupData.cullingDataID);
 
-                vec3 center = (cullingData.minBoundingBox + cullingData.maxBoundingBox) * f16(0.5f);
-                vec3 extents = vec3(cullingData.maxBoundingBox) - center;
+                vec3 center = cullingData.center;
+                vec3 extents = cullingData.extents;
 
                 // transform center
                 const mat4x4& m = instanceData.instanceMatrix;
@@ -82,11 +82,7 @@ void MapObjectRenderer::Update(f32 deltaTime)
                 glm::mat3x3 absMatrix = glm::mat3x3(glm::abs(vec3(m[0])), glm::abs(vec3(m[1])), glm::abs(vec3(m[2])));
                 vec3 transformedExtents = absMatrix * extents;
 
-                // Transform to min/max box representation
-                vec3 transformedMin = transformedCenter - transformedExtents;
-                vec3 transformedMax = transformedCenter + transformedExtents;
-
-                _debugRenderer->DrawAABB3D(transformedMin, transformedMax, 0xff00ffff);
+                _debugRenderer->DrawAABB3D(transformedCenter, transformedExtents, 0xff00ffff);
             }
         });
     }
@@ -831,25 +827,30 @@ bool MapObjectRenderer::LoadMapObject(MapObjectToBeLoaded& mapObjectToBeLoaded, 
         mapObjectCullingData = &cullingData.emplace_back();
     });
 
+    vec3 aabbMin = vec3(10000.0f, 10000.0f, 10000.0f);
+    vec3 aabbMax = vec3(-10000.0f, -10000.0f, -10000.0f);
     for (const Terrain::CullingData& cullingData : mapObject.cullingData)
     {
+        vec3 currMin = cullingData.center - cullingData.extents;
+        vec3 currMax = cullingData.center + cullingData.extents;
+
         for (u32 i = 0; i < 3; i++)
         {
-            if (cullingData.minBoundingBox[i] < mapObjectCullingData->minBoundingBox[i])
+            if (currMin[i] < aabbMin[i])
             {
-                mapObjectCullingData->minBoundingBox[i] = cullingData.minBoundingBox[i];
+                aabbMin[i] = currMin[i];
             }
-            if (cullingData.maxBoundingBox[i] > mapObjectCullingData->maxBoundingBox[i])
+
+            if (currMax[i] > aabbMax[i])
             {
-                mapObjectCullingData->maxBoundingBox[i] = cullingData.maxBoundingBox[i];
+                aabbMax[i] = currMax[i];
             }
         }
     }
 
-    vec3 minPos = mapObjectCullingData->minBoundingBox;
-    vec3 maxPos = mapObjectCullingData->maxBoundingBox;
-
-    mapObjectCullingData->boundingSphereRadius = glm::distance(minPos, maxPos) / 2.0f;
+    mapObjectCullingData->center = (aabbMin + aabbMax) * 0.5f;
+    mapObjectCullingData->extents = hvec3(aabbMax) - mapObjectCullingData->center;
+    mapObjectCullingData->boundingSphereRadius = glm::distance(aabbMin, aabbMax) / 2.0f;
 
     return true;
 }

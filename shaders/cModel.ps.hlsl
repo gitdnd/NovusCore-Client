@@ -87,7 +87,7 @@ PSOutput main(PSInput input)
         //float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertices[i]);
 
         //vertices[i].position = mul(float4(vertices[i].position, 1.0f), boneTransformMatrix).xyz;
-        vertices[i].position = mul(float4(-vertices[i].position.x, -vertices[i].position.y, vertices[i].position.z, 1.0f), instanceMatrix).xyz;
+        vertices[i].position = mul(float4(vertices[i].position, 1.0f), instanceMatrix).xyz;
     }
 
     // Calculate Barycentrics

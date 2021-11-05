@@ -32,7 +32,7 @@ namespace UIUtils::Sort
             relation = &registry->get<UIComponent::Relation>(entity);
         }
 
-        if (!registry->has<UIComponent::SortKeyDirty>(entity))
+        if (!registry->all_of<UIComponent::SortKeyDirty>(entity))
             registry->emplace<UIComponent::SortKeyDirty>(entity);
     }
 }

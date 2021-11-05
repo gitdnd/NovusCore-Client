@@ -1,4 +1,5 @@
 #include "EngineLoop.h"
+#include <entt.hpp>
 #include <Networking/InputQueue.h>
 #include <Networking/MessageHandler.h>
 #include <Memory/MemoryTracker.h>
@@ -29,11 +30,13 @@
 #include "ECS/Components/Singletons/StatsSingleton.h"
 #include "ECS/Components/Singletons/ScriptSingleton.h"
 #include "ECS/Components/Singletons/ConfigSingleton.h"
+#include "ECS/Components/Singletons/LocalplayerSingleton.h"
 
 // Components
 #include "ECS/Components/Transform.h"
 #include "ECS/Components/Physics/Rigidbody.h"
 #include "ECS/Components/Rendering/DebugBox.h"
+#include "ECS/Components/Rendering/CModelInfo.h"
 
 #include "UI/ECS/Components/Transform.h"
 #include "UI/ECS/Components/NotCulled.h"
@@ -41,6 +44,7 @@
 // Systems
 #include "ECS/Systems/Network/ConnectionSystems.h"
 #include "ECS/Systems/Rendering/UpdateModelTransformSystem.h"
+#include "ECS/Systems/Rendering/UpdateCModelInfoSystem.h"
 #include "ECS/Systems/Physics/SimulateDebugCubeSystem.h"
 #include "ECS/Systems/MovementSystem.h"
 #include "ECS/Systems/AreaUpdateSystem.h"
@@ -140,8 +144,6 @@ bool EngineLoop::Init()
     CPUInfo cpuInfo = CPUInfo::Get();
     cpuInfo.Print();
 
-    _updateFramework.gameRegistry.create();
-    _updateFramework.uiRegistry.create();
     SetupUpdateFramework();
 
     LoaderSystem* loaderSystem = LoaderSystem::Get();
@@ -554,14 +556,23 @@ void EngineLoop::SetupUpdateFramework()
     });
     simulateDebugCubeSystemTask.gather(areaUpdateSystemTask);
 
-    // RenderModelSystem
-    tf::Task renderModelSystemTask = framework.emplace([this, &gameRegistry]()
+    // UpdateCModelInfoSystem
+    tf::Task updateCModelInfoSystemTask = framework.emplace([this, &gameRegistry]()
+    {
+        ZoneScopedNC("UpdateCModelInfoSystem::Update", tracy::Color::Blue2);
+        UpdateCModelInfoSystem::Update(gameRegistry);
+        //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+    });
+    updateCModelInfoSystemTask.gather(simulateDebugCubeSystemTask);
+
+    // UpdateModelTransformSystem
+    tf::Task updateModelTransformSystemTask = framework.emplace([this, &gameRegistry]()
     {
         ZoneScopedNC("UpdateModelTransformSystem::Update", tracy::Color::Blue2);
         UpdateModelTransformSystem::Update(gameRegistry);
         //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
     });
-    renderModelSystemTask.gather(simulateDebugCubeSystemTask);
+    updateModelTransformSystemTask.gather(updateCModelInfoSystemTask);
 
     // ScriptSingletonTask
     tf::Task scriptSingletonTask = framework.emplace([&uiRegistry, &gameRegistry]()
@@ -573,7 +584,7 @@ void EngineLoop::SetupUpdateFramework()
         //gameRegistry.ctx<ScriptSingleton>().ResetCompletedSystems();
     });
     //scriptSingletonTask.gather(uiFinalCleanUpSystemTask);
-    scriptSingletonTask.gather(renderModelSystemTask);
+    scriptSingletonTask.gather(updateModelTransformSystemTask);
 }
 void EngineLoop::SetupMessageHandler()
 {
@@ -959,6 +970,7 @@ void EngineLoop::DrawMapStats()
 }
 void EngineLoop::DrawPositionStats()
 {
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
     Camera* camera = ServiceLocator::GetCamera();
     vec3 cameraLocation = camera->GetPosition();
     vec3 cameraRotation = camera->GetRotation();
@@ -982,6 +994,28 @@ void EngineLoop::DrawPositionStats()
     vec2 patchPos = patchLocalPos / Terrain::MAP_PATCH_SIZE;
     vec2 patchRemainder = patchPos - glm::floor(patchPos);
 
+    u32 currentChunkID = -1;
+    u32 numCollidableCModels = 0;
+
+    LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
+    if (localplayerSingleton.entity != entt::null)
+    {
+        if (CModelInfo* cmodelInfo = registry->try_get<CModelInfo>(localplayerSingleton.entity))
+        {
+            currentChunkID = cmodelInfo->currentChunkID;
+
+            MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+            Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
+            
+            if (SafeVector<entt::entity>* collidableEntityList = currentMap.GetCollidableEntityListByChunkID(currentChunkID))
+            {
+                numCollidableCModels = static_cast<u32>(collidableEntityList->Size());
+            }
+        }
+    }
+
+    ImGui::Text("ChunkID : (%u)", currentChunkID);
+    ImGui::Text("Collidable CModels : (%u)", numCollidableCModels);
     ImGui::Text("Chunk : (%f, %f)", chunkPos.x, chunkPos.y);
     ImGui::Text("cellPos : (%f, %f)", cellLocalPos.x, cellLocalPos.y);
     ImGui::Text("patchPos : (%f, %f)", patchLocalPos.x, patchLocalPos.y);

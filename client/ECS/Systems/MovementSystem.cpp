@@ -3,21 +3,24 @@
 #include <Utils/ByteBuffer.h>
 #include <Utils/StringUtils.h>
 #include <Networking/Opcode.h>
-#include <Window/Window.h>
-#include <InputManager.h>
 #include "../../Utils/ServiceLocator.h"
 #include "../../Utils/MapUtils.h"
+#include "../../Utils/PhysicsUtils.h"
 #include "../../Rendering/CameraOrbital.h"
 #include "../../Rendering/ClientRenderer.h"
+#include "../../Rendering/CModelRenderer.h"
 #include "../../Rendering/DebugRenderer.h"
 #include "../../Rendering/AnimationSystem/AnimationSystem.h"
 #include "../Components/Singletons/TimeSingleton.h"
 #include "../Components/Singletons/LocalplayerSingleton.h"
 #include "../Components/Network/ConnectionSingleton.h"
 #include "../Components/Rendering/DebugBox.h"
+#include "../Components/Rendering/CModelInfo.h"
 #include "../Components/Rendering/ModelDisplayInfo.h"
 #include "../Components/Transform.h"
 
+#include <InputManager.h>
+#include <entt.hpp>
 #include <glm/gtx/rotate_vector.hpp>
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtx/norm.hpp>
@@ -80,7 +83,13 @@ void MovementSystem::Update(entt::registry& registry)
         return;
 
     InputManager* inputManager = ServiceLocator::GetInputManager();
+    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+    CModelRenderer* cmodelRenderer = clientRenderer->GetCModelRenderer();
+    DebugRenderer* debugRenderer = clientRenderer->GetDebugRenderer();
+
     TimeSingleton& timeSingleton = registry.ctx<TimeSingleton>();
+    MapSingleton& mapSingleton = registry.ctx<MapSingleton>();
+    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
 
     KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
     KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
@@ -97,41 +106,30 @@ void MovementSystem::Update(entt::registry& registry)
     f32 originalYaw = transform.yaw;
     f32 originalYawOffset = 0.0f;// transform.yawOffset;
 
-    Geometry::Triangle triangle;
-    f32 terrainHeight = 0.f;
-    Terrain::MapUtils::GetTriangleFromWorldPosition(transform.position, triangle, terrainHeight);
-
-    bool isGrounded = transform.position.z <= terrainHeight;
     bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
     if (isRightClickDown)
     {
         // Update Direction Vectors to properly align with movement (Does not include yawOffset)
         transform.yawBase = camera->GetYaw();
         transform.yaw = transform.yawBase + transform.yawOffset;
-        transform.UpdateDirectionVectors();
 
         // Only set Pitch if we are flying
         //transform.pitch = camera->GetPitch();
     }
-    else
-    {
-        transform.UpdateDirectionVectors();
-    }
+    transform.UpdateDirectionVectors();
 
-    bool isJumping = false;
-
-    // Handle Input
     {
         vec3 moveDirection = vec3(0.f, 0.f, 0.f);
-        i8 moveAlongHorizontalAxis = 0;
         i8 moveAlongVerticalAxis = 0;
+        i8 moveAlongHorizontalAxis = 0;
         bool isMoving = false;
+        bool isJumping = false;
 
-        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Left"_h);
-        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Right"_h);
         moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Forward"_h);
         moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Backward"_h);
-        isMoving = moveAlongHorizontalAxis + moveAlongVerticalAxis;
+        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Left"_h);
+        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Right"_h);
+        isMoving = moveAlongVerticalAxis + moveAlongHorizontalAxis;
 
         // Handle Move Direction
         {
@@ -169,69 +167,104 @@ void MovementSystem::Update(entt::registry& registry)
             {
                 moveDirection = glm::normalize(moveDirection);
             }
-        }
 
-        if (isGrounded)
-        {
-            localplayerSingleton.movement.flags.canChangeDirection = true;
-            transform.velocity = vec3(0.f, 0.f, 0.f);
-            transform.fallSpeed = 19.5f;
-
-            // Clip to Terrain
+            if (originalFlags.GROUNDED)
             {
-                transform.position.z = terrainHeight;
-                movementFlags.GROUNDED = !isJumping;
-            }
-
-            movementFlags.FORWARD = moveAlongVerticalAxis == 1;
-            movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
-            movementFlags.LEFT = moveAlongHorizontalAxis == 1;
-            movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
-            transform.velocity = moveDirection * transform.moveSpeed;
-
-            if (isJumping)
-            {
-                transform.velocity += transform.up * 8.f;
-
-                // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
-                localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
-            }
-        }
-        else
-        {
-            movementFlags.GROUNDED = false;
-
-            // Check if we can change direction
-            if (isMoving && localplayerSingleton.movement.flags.canChangeDirection)
-            {
-                localplayerSingleton.movement.flags.canChangeDirection = false;
-
-                f32 moveSpeed = transform.moveSpeed;
-
-                // If we were previously standing still reduce our moveSpeed by half
-                if (originalFlags.value == 0 || originalFlags.value == 0x16)
-                    moveSpeed *= 0.33f;
-
                 movementFlags.FORWARD = moveAlongVerticalAxis == 1;
                 movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
                 movementFlags.LEFT = moveAlongHorizontalAxis == 1;
                 movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
 
-                vec3 newVelocity = moveDirection * moveSpeed;
-                transform.velocity.x = newVelocity.x;
-                transform.velocity.y = newVelocity.y;
+                transform.velocity = moveDirection * transform.moveSpeed;
+
+                if (isJumping)
+                {
+                    transform.velocity += transform.up * 30.f; // 8 is decent value
+
+                    // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
+                    localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
+                }
             }
             else
             {
-                // We rebuild our movementFlags every frame to check if we need to send an update to the server, this ensures we keep the correct movement flags
-                movementFlags.FORWARD = originalFlags.FORWARD;
-                movementFlags.BACKWARD = originalFlags.BACKWARD;
-                movementFlags.LEFT = originalFlags.LEFT;
-                movementFlags.RIGHT = originalFlags.RIGHT;
-            }
+                // Check if we can change direction
+                if (isMoving && localplayerSingleton.movement.flags.canChangeDirection)
+                {
+                    localplayerSingleton.movement.flags.canChangeDirection = false;
 
-            transform.fallSpeed += transform.fallAcceleration * timeSingleton.deltaTime;
-            transform.velocity -= transform.up * transform.fallSpeed * timeSingleton.deltaTime;
+                    f32 moveSpeed = transform.moveSpeed;
+
+                    // If we were previously standing still reduce our moveSpeed by 66 percent
+                    if (originalFlags.value == 0 || originalFlags.value == 0x16)
+                        moveSpeed *= 0.33f;
+
+                    movementFlags.FORWARD = moveAlongVerticalAxis == 1;
+                    movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
+                    movementFlags.LEFT = moveAlongHorizontalAxis == 1;
+                    movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
+
+                    vec3 newVelocity = moveDirection * moveSpeed;
+                    transform.velocity.x = newVelocity.x;
+                    transform.velocity.y = newVelocity.y;
+                }
+                else
+                {
+                    // We rebuild our movementFlags every frame to check if we need to send an update to the server, this ensures we keep the correct movement flags
+                    movementFlags.FORWARD = originalFlags.FORWARD;
+                    movementFlags.BACKWARD = originalFlags.BACKWARD;
+                    movementFlags.LEFT = originalFlags.LEFT;
+                    movementFlags.RIGHT = originalFlags.RIGHT;
+                }
+
+                transform.fallSpeed += transform.fallAcceleration * timeSingleton.deltaTime;
+                transform.velocity -= transform.up * transform.fallSpeed * timeSingleton.deltaTime;
+            }
+        }
+
+        CModelInfo& localplayerCModelInfo = registry.get<CModelInfo>(localplayerSingleton.entity);
+
+        bool isGrounded = false;
+        f32 timeToCollide = 0;
+
+        vec3 triangleNormal;
+        f32 triangleSteepness = 0;
+        bool willCollide = PhysicsUtils::CheckCollisionForCModels(currentMap, transform, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
+        if (willCollide)
+        {
+            transform.position += (transform.velocity * timeToCollide) * timeSingleton.deltaTime;
+            isGrounded = triangleSteepness <= 50;
+        }
+        else
+        {
+            f32 sqrVelocity = glm::length2(transform.velocity);
+            if (sqrVelocity != 0)
+            {
+                vec3 newPosition = transform.position + (transform.velocity * timeSingleton.deltaTime);
+                transform.position = newPosition;
+            }
+        }
+
+        f32 terrainHeight = 0;
+        bool isStandingOnTerrain = false;
+        if (!isGrounded)
+        {
+            isStandingOnTerrain = Terrain::MapUtils::IsStandingOnTerrain(transform.position, terrainHeight);
+            isGrounded = isStandingOnTerrain;
+        }
+
+        movementFlags.GROUNDED = isGrounded;
+
+        if (isGrounded)
+        {
+            localplayerSingleton.movement.flags.canChangeDirection = true;
+            transform.velocity.z = 0.0f;
+            transform.fallSpeed = 19.5f;
+
+            // Clip to Terrain
+            if (isStandingOnTerrain)
+            {
+                transform.position.z = glm::max(transform.position.z, terrainHeight);
+            }
         }
 
         bool isMovingForward = (movementFlags.FORWARD && !movementFlags.BACKWARD);
@@ -271,43 +304,10 @@ void MovementSystem::Update(entt::registry& registry)
         transform.yaw = transform.yawBase + transform.yawOffset;
     }
 
-    f32 sqrVelocity = glm::length2(transform.velocity);
-    if (sqrVelocity != 0)
-    {
-        vec3 newPosition = transform.position + (transform.velocity * timeSingleton.deltaTime);
-        Terrain::MapUtils::GetTriangleFromWorldPosition(newPosition, triangle, terrainHeight);
-
-        f32 diff = newPosition.z - terrainHeight;
-        if (!isJumping && originalFlags.GROUNDED && diff < 0.25f)
-        {
-            newPosition.z = terrainHeight;
-        }
-        else
-        {
-            newPosition.z = glm::max(newPosition.z, terrainHeight);
-        }
-
-        if (isGrounded)
-        {
-            f32 angle = triangle.GetSteepnessAngle();
-
-            // TODO: Properly Push the player down the slope
-            if (angle <= 50 || newPosition.z <= transform.position.z)
-            {
-                transform.position = newPosition;
-            }
-        }
-        else
-        {
-            transform.position = newPosition;
-        }
-    }
-
     vec3 cameraTransformPos = transform.position + vec3(0.0f, 0.0f, 1.3f);
     camera->SetPosition(cameraTransformPos);
 
     mat4x4 transformMatrix = transform.GetMatrix();
-    DebugRenderer* debugRenderer = ServiceLocator::GetClientRenderer()->GetDebugRenderer();
     debugRenderer->DrawMatrix(transformMatrix, 1.0f);
 
     // If our movement flags changed, lets see what animations we should play

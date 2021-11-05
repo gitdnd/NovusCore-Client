@@ -7,7 +7,9 @@
 #include <Utils/ConcurrentQueue.h>
 #include <Utils/SafeVector.h>
 #include <Utils/SafeUnorderedMap.h>
+#include <Math/Geometry.h>
 #include <Memory/BufferRangeAllocator.h>
+#include <entity/fwd.hpp>
 
 #include <Renderer/Descriptors/ImageDesc.h>
 #include <Renderer/Descriptors/DepthImageDesc.h>
@@ -116,8 +118,12 @@ public:
         u32 cullingDataID = std::numeric_limits<u32>().max();
         u32 numVertices = 0;
         u32 vertexOffset = 0;
+        u32 numCollisionTriangles = 0;
+        u32 collisionTriangleOffset = 0;
+        Geometry::AABoundingBox collisionAABB;
         u32 numBones = 0;
         bool isAnimated = false;
+        bool isStaticModel = false;
 
         u32 numOpaqueDrawCalls = 0;
         std::vector<DrawCall> opaqueDrawCallTemplates;
@@ -222,6 +228,7 @@ public:
     SafeVector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
     SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
     SafeVector<ModelInstanceData>& GetModelInstanceDatas() { return _modelInstanceDatas; }
+    SafeVector<Geometry::Triangle>& GetCollisionTriangles() { return _collisionTriangles; }
     const ModelInstanceData& GetModelInstanceData(size_t instanceID) { return _modelInstanceDatas.ReadGet(instanceID); }
     const AnimationModelInfo& GetAnimationModelInfo(size_t modelID) { return _animationModelInfo.ReadGet(modelID); }
 
@@ -289,6 +296,7 @@ private:
         const Terrain::Placement* placement = nullptr;
         const std::string* name = nullptr;
         u32 nameHash = 0;
+        entt::entity entityID = entt::null;
     };
 
     struct TextureUnit
@@ -389,7 +397,7 @@ private:
 
     bool IsRenderBatchTransparent(const CModel::ComplexRenderBatch& renderBatch, const CModel::ComplexModel& cModel);
 
-    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, u32& instanceIndex);
+    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, entt::entity entityID, u32& instanceIndex);
 
     void CreateBuffers();
     void SyncBuffers();
@@ -438,6 +446,8 @@ private:
     Renderer::GPUVector<TextureUnit> _textureUnits;
     Renderer::GPUVector<ModelInstanceData> _modelInstanceDatas;
     SafeVector<InstanceDisplayInfo> _instanceDisplayInfos;
+    SafeVector<Geometry::Triangle> _collisionTriangles;
+    SafeVector<entt::entity> _instanceIDToEntityID;
 
     Renderer::GPUVector<mat4x4> _modelInstanceMatrices;
     Renderer::GPUVector<CModel::CullingData> _cullingDatas;

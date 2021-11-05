@@ -154,18 +154,10 @@ void TerrainRenderer::Update(f32 deltaTime)
             CVAR_HeightBoxPosition.Set(position);
         }
 
-        f32 halfSize = CVAR_HeightBoxScale.GetFloat();
-        vec3 min = CVAR_HeightBoxPosition.Get();
-        min.x -= halfSize;
-        min.y -= halfSize;
+        vec3 center = CVAR_HeightBoxPosition.Get();
+        vec3 extents = vec3(CVAR_HeightBoxScale.GetFloat());
 
-        vec3 max = CVAR_HeightBoxPosition.Get();
-        max.x += halfSize;
-        max.y += halfSize;
-
-        max.z += halfSize;
-
-        _debugRenderer->DrawAABB3D(min, max, 0xff00ff00);
+        _debugRenderer->DrawAABB3D(center, extents, 0xff00ff00);
     }
     
     if (CVAR_DrawCellGrid.Get())
@@ -1060,8 +1052,11 @@ void TerrainRenderer::LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded)
             max.z = *minmax.second;
 
             Geometry::AABoundingBox& boundingBox = _cellBoundingBoxes.EmplaceBack();
-            boundingBox.min = glm::max(min, max);
-            boundingBox.max = glm::min(min, max);
+            vec3 aabbMin = glm::max(min, max);
+            vec3 aabbMax = glm::min(min, max);
+
+            boundingBox.center = (aabbMin + aabbMax) * 0.5f;
+            boundingBox.extents = aabbMax - boundingBox.center;
 
             TerrainCellHeightRange heightRange;
 #if USE_PACKED_HEIGHT_RANGE

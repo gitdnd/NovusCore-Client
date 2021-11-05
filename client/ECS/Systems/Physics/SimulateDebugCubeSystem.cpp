@@ -7,7 +7,7 @@
 #include <InputManager.h>
 #include <Math/Geometry.h>
 #include "../../../Utils/ServiceLocator.h"
-#include "../../../Utils/MapUtils.h"
+#include "../../../Utils/PhysicsUtils.h"
 #include "../../../Rendering/DebugRenderer.h"
 #include "../../../Rendering/Camera.h"
 
@@ -107,19 +107,17 @@ void SimulateDebugCubeSystem::Update(entt::registry& registry, DebugRenderer* de
         f32 dist = GRAVITY_SCALE * timeSingleton.deltaTime;
 
         Geometry::AABoundingBox box;
-        box.min = transform.position;
-        box.min.x -= transform.scale.x;
-        box.min.y -= transform.scale.y;
-
-        box.max = transform.position + transform.scale;
+        box.center = transform.position;
+        box.extents = transform.scale;
 
         Geometry::Triangle triangle;
         f32 height = 0;
 
-        vec3 distToCollision;
-        if (Terrain::MapUtils::Intersect_AABB_TERRAIN_SWEEP(box, triangle, vec3(0, 0, -1), height, dist, distToCollision))
+        f32 timeToCollide;
+        vec3 direction = vec3(0, 0, -1);
+        if (PhysicsUtils::Intersect_AABB_TERRAIN_SWEEP(box, triangle, direction, height, dist, timeToCollide))
         {
-            transform.position.z += distToCollision.z;
+            transform.position += direction * timeToCollide;
             registry.remove<Rigidbody>(entity);
         }
         else
@@ -133,18 +131,17 @@ void SimulateDebugCubeSystem::Update(entt::registry& registry, DebugRenderer* de
     auto debugCubeView = registry.view<Transform, DebugBox>();
     debugCubeView.each([&](const auto entity, Transform& transform)
     {
-        vec3 min = transform.position;
-        min.x -= transform.scale.x;
-        min.y -= transform.scale.y;
-        vec3 max = transform.position + transform.scale;
+        Geometry::AABoundingBox box;
+        box.center = transform.position;
+        box.extents = transform.scale;
 
         u32 color = 0xff0000ff; // Red if it doesn't have a rigidbody
-        if (registry.has<Rigidbody>(entity))
+        if (registry.all_of<Rigidbody>(entity))
         {
             color = 0xff00ff00; // Green if it does
         }
 
         // This registers the model to be rendered THIS frame.
-        debugRenderer->DrawAABB3D(min, max, color);
+        debugRenderer->DrawAABB3D(box.center, box.extents, color);
     });
 }

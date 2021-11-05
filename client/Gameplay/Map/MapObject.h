@@ -27,7 +27,7 @@
 namespace Terrain
 {
     constexpr i32 MAP_OBJECT_TOKEN = 7236975; // UTF8 -> Binary -> Decimal for "nmo"
-    constexpr i32 MAP_OBJECT_VERSION = 6;
+    constexpr i32 MAP_OBJECT_VERSION = 7;
 
     struct TriangleData
     {
@@ -121,8 +121,8 @@ namespace Terrain
 
     struct CullingData
     {
-        hvec3 minBoundingBox = hvec3(static_cast<f16>(10000.0f));
-        hvec3 maxBoundingBox = hvec3(static_cast<f16>(-10000.0f));
+        hvec3 center = hvec3(static_cast<f16>(10000.0f));
+        hvec3 extents = hvec3(static_cast<f16>(-10000.0f));
         f32 boundingSphereRadius = 0.0f;
     }; // 16 bytes
 

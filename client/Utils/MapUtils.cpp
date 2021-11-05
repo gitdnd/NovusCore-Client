@@ -110,10 +110,14 @@ bool Terrain::MapUtils::LoadMap(entt::registry* registry, const NDBC::Map* map)
 
             u16 x = std::stoi(splitName[numberOfSplits - 2]);
             u16 y = std::stoi(splitName[numberOfSplits - 1]);
-            u32 chunkId = x + (y * Terrain::MAP_CHUNKS_PER_MAP_STRIDE);
+            u16 chunkId = x + (y * Terrain::MAP_CHUNKS_PER_MAP_STRIDE);
 
             currentMap.chunks[chunkId] = chunk;
             currentMap.stringTables[chunkId].CopyFrom(chunkStringTable);
+
+            // Auto Create (SafeVector has no copy constructor, this is a way around that)
+            SafeVector<entt::entity>& chunkEntityList = currentMap.chunksEntityList[chunkId];
+            SafeVector<entt::entity>& chunkCollidableEntityList = currentMap.chunksCollidableEntityList[chunkId];
 
             Terrain::MapUtils::AlignCellBorders(currentMap.chunks[chunkId]);
 

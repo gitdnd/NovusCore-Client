@@ -126,12 +126,13 @@ namespace Editor
                             max.y = chunkOrigin.x - ((cellX + 1) * Terrain::MAP_CELL_SIZE);
                             max.z = *heightMinMax.second + 0.1f;
 
-                            _selectedTerrainData.boundingBox.min = glm::max(min, max);
-                            _selectedTerrainData.boundingBox.max = glm::min(min, max);
+                            vec3 aabbMin = glm::max(min, max);
+                            vec3 aabbMax = glm::min(min, max);
+                            _selectedTerrainData.boundingBox.center = (aabbMin + aabbMax) * 0.5f;
+                            _selectedTerrainData.boundingBox.extents = aabbMax - _selectedTerrainData.boundingBox.center;
 
-                            vec3 center = (_selectedTerrainData.boundingBox.min + _selectedTerrainData.boundingBox.max) / vec3(2.0f, 2.0f, 2.0f);
                             _selectedTerrainData.triangles.clear();
-                            _selectedTerrainData.triangles = Terrain::MapUtils::GetCellTrianglesFromWorldPosition(center);
+                            _selectedTerrainData.triangles = Terrain::MapUtils::GetCellTrianglesFromWorldPosition(_selectedTerrainData.boundingBox.center);
 
                             for (auto& triangle : _selectedTerrainData.triangles)
                             {
@@ -178,30 +179,26 @@ namespace Editor
                             const MapObjectRenderer::LoadedMapObject& loadedMapObject = loadedMapObjects.ReadGet(instanceLookupData.loadedObjectID);
                             const mat4x4& instanceMatrix = mapObjectRenderer->GetInstances().ReadGet(instanceLookupData.instanceID).instanceMatrix;
 
-                            Geometry::AABoundingBox mapObjectAABB;
-                            mapObjectAABB.min = vec3(Terrain::MAP_SIZE, Terrain::MAP_SIZE, Terrain::MAP_SIZE);
-                            mapObjectAABB.max = vec3(-Terrain::MAP_SIZE, -Terrain::MAP_SIZE, -Terrain::MAP_SIZE);
+                            vec3 min = vec3(Terrain::MAP_SIZE, Terrain::MAP_SIZE, Terrain::MAP_SIZE);
+                            vec3 max = vec3(-Terrain::MAP_SIZE, -Terrain::MAP_SIZE, -Terrain::MAP_SIZE);
 
                             for (const Terrain::CullingData& cullingData : loadedMapObject.cullingData)
                             {
-                                vec3 minBoundingBox = cullingData.minBoundingBox;
-                                vec3 maxBoundingBox = cullingData.maxBoundingBox;
+                                vec3 aabbMin = cullingData.center - cullingData.extents;
+                                vec3 aabbMax = cullingData.center + cullingData.extents;
 
                                 for (u32 j = 0; j < 3; j++)
                                 {
-                                    if (minBoundingBox[j] < mapObjectAABB.min[j])
-                                        mapObjectAABB.min[j] = minBoundingBox[j];
+                                    if (aabbMin[j] < min[j])
+                                        min[j] = aabbMin[j];
 
-                                    if (maxBoundingBox[j] > mapObjectAABB.max[j])
-                                        mapObjectAABB.max[j] = maxBoundingBox[j];
+                                    if (aabbMax[j] > max[j])
+                                        max[j] = aabbMax[j];
                                 }
                             }
 
-                            vec3 minBoundingBox = mapObjectAABB.min;
-                            vec3 maxBoundingBox = mapObjectAABB.max;
-
-                            vec3 center = (minBoundingBox + maxBoundingBox) * 0.5f;
-                            vec3 extents = maxBoundingBox - center;
+                            vec3 center = (min + max) * 0.5f;
+                            vec3 extents = max - center;
 
                             // transform center
                             vec3 transformedCenter = vec3(instanceMatrix * vec4(center, 1.0f));
@@ -211,15 +208,15 @@ namespace Editor
                             vec3 transformedExtents = absMatrix * extents;
 
                             // Transform to min/max box representation
-                            _selectedMapObjectData.boundingBox.min = transformedCenter - transformedExtents;
-                            _selectedMapObjectData.boundingBox.max = transformedCenter + transformedExtents;
+                            _selectedMapObjectData.boundingBox.center = transformedCenter;
+                            _selectedMapObjectData.boundingBox.extents = transformedExtents;
 
                             _selectedMapObjectData.numRenderBatches = static_cast<u32>(loadedMapObject.renderBatches.size());
                             _selectedMapObjectData.selectedRenderBatch = 1;
                         }
 
                         MapObjectSelectionDrawImGui();
-                        debugRenderer->DrawAABB3D(_selectedMapObjectData.boundingBox.min, _selectedMapObjectData.boundingBox.max, 0xFF0000FF);
+                        debugRenderer->DrawAABB3D(_selectedMapObjectData.boundingBox.center, _selectedMapObjectData.boundingBox.extents, 0xFF0000FF);
                     }
                     else if (pixelData.type == QueryObjectType::ComplexModelOpaque || pixelData.type == QueryObjectType::ComplexModelTransparent)
                     {
@@ -241,11 +238,9 @@ namespace Editor
                             const CModelRenderer::LoadedComplexModel& loadedComplexModel = cModelRenderer->GetLoadedComplexModels().ReadGet(modelInstanceData.modelID);
                             const mat4x4& modelInstanceMatrix = cModelRenderer->GetModelInstanceMatrix(drawCallData.instanceID);
                             const CModel::CullingData& cullingData = cModelRenderer->GetCullingData().ReadGet(modelInstanceData.modelID);
-                            vec3 minBoundingBox = cullingData.minBoundingBox;
-                            vec3 maxBoundingBox = cullingData.maxBoundingBox;
 
-                            vec3 center = (minBoundingBox + maxBoundingBox) * 0.5f;
-                            vec3 extents = maxBoundingBox - center;
+                            vec3 center = cullingData.center;
+                            vec3 extents = cullingData.extents;
 
                             // transform center
                             vec3 transformedCenter = vec3(modelInstanceMatrix * vec4(center, 1.0f));
@@ -255,8 +250,8 @@ namespace Editor
                             vec3 transformedExtents = absMatrix * extents;
 
                             // Transform to min/max box representation
-                            _selectedComplexModelData.boundingBox.min = transformedCenter - transformedExtents;
-                            _selectedComplexModelData.boundingBox.max = transformedCenter + transformedExtents;
+                            _selectedComplexModelData.boundingBox.center = transformedCenter;
+                            _selectedComplexModelData.boundingBox.extents = transformedExtents;
 
                             _selectedComplexModelData.numRenderBatches = isOpaque ? loadedComplexModel.numOpaqueDrawCalls : loadedComplexModel.numTransparentDrawCalls;
                             _selectedComplexModelData.selectedRenderBatch = 1;
@@ -298,7 +293,7 @@ namespace Editor
                         }
 
                         ComplexModelSelectionDrawImGui();
-                        debugRenderer->DrawAABB3D(_selectedComplexModelData.boundingBox.min, _selectedComplexModelData.boundingBox.max, 0xFF0000FF);
+                        debugRenderer->DrawAABB3D(_selectedComplexModelData.boundingBox.center, _selectedComplexModelData.boundingBox.extents, 0xFF0000FF);
                     }
                 }
             }
@@ -569,28 +564,6 @@ namespace Editor
                 ImGui::Checkbox("Wireframe Entire Object", &_selectedComplexModelData.wireframeEntireObject);
             }
         }
-    }
-
-    bool Editor::IsRayIntersectingAABB(const vec3& rayOrigin, const vec3& oneOverRayDir, const Geometry::AABoundingBox& aabb, f32& t)
-    {
-        f32 t1 = (aabb.min.x - rayOrigin.x) * oneOverRayDir.x;
-        f32 t2 = (aabb.max.x - rayOrigin.x) * oneOverRayDir.x;
-        f32 t3 = (aabb.min.y - rayOrigin.y) * oneOverRayDir.y;
-        f32 t4 = (aabb.max.y - rayOrigin.y) * oneOverRayDir.y;
-        f32 t5 = (aabb.min.z - rayOrigin.z) * oneOverRayDir.z;
-        f32 t6 = (aabb.max.z - rayOrigin.z) * oneOverRayDir.z;
-
-        f32 tMin = glm::max(glm::max(glm::min(t1, t2), glm::min(t3, t4)), glm::min(t5, t6));
-        f32 tMax = glm::min(glm::min(glm::max(t1, t2), glm::max(t3, t4)), glm::max(t5, t6));
-
-        if (tMax < 0 || tMin > tMax)
-        {
-            t = tMax;
-            return false;
-        }
-
-        t = tMin;
-        return true;
     }
 
     bool Editor::OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier)
