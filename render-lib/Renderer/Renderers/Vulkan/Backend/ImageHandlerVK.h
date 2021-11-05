@@ -33,9 +33,12 @@ namespace Renderer
 
             VkImage GetImage(const ImageID id);
             VkImageView GetColorView(const ImageID id);
+
             VkImageView GetColorView(const ImageID id, u32 mipLevel);
+            VkImageView GetColorArrayView(const ImageID id, u32 mipLevel);
 
             uvec2 GetDimension(const ImageID id, u32 mipLevel);
+            uvec2 GetDimension(const DepthImageID id);
 
             VkImage GetImage(const DepthImageID id);
             VkImageView GetDepthView(const DepthImageID id);

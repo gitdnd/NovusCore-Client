@@ -151,7 +151,7 @@ namespace Renderer
         boundDescriptor.depthImageID = imageID;
     }
 
-    void DescriptorSet::BindStorage(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel /*= 0*/)
+    void DescriptorSet::BindStorage(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel, u32 mipCount)
     {
         for (u32 i = 0; i < _boundDescriptors.size(); i++)
         {
@@ -170,5 +170,28 @@ namespace Renderer
         boundDescriptor.descriptorType = DESCRIPTOR_TYPE_STORAGE_IMAGE;
         boundDescriptor.imageID = imageID;
         boundDescriptor.imageMipLevel = mipLevel;
+        boundDescriptor.count = mipCount;
+    }
+
+    void DescriptorSet::BindStorageArray(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel, u32 mipCount)
+    {
+        for (u32 i = 0; i < _boundDescriptors.size(); i++)
+        {
+            if (nameHash == _boundDescriptors[i].nameHash)
+            {
+                _boundDescriptors[i].descriptorType = DescriptorType::DESCRIPTOR_TYPE_STORAGE_IMAGE_ARRAY;
+                _boundDescriptors[i].imageID = imageID;
+                _boundDescriptors[i].imageMipLevel = mipLevel;
+                return;
+            }
+        }
+
+        u32 newIndex = static_cast<u32>(_boundDescriptors.size());
+        Descriptor& boundDescriptor = _boundDescriptors.emplace_back();
+        boundDescriptor.nameHash = nameHash;
+        boundDescriptor.descriptorType = DESCRIPTOR_TYPE_STORAGE_IMAGE_ARRAY;
+        boundDescriptor.imageID = imageID;
+        boundDescriptor.imageMipLevel = mipLevel;
+        boundDescriptor.count = mipCount;
     }
 }

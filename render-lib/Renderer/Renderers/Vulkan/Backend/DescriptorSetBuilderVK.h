@@ -41,8 +41,11 @@ namespace Renderer
             void BindImage(i32 set, i32 binding, const VkDescriptorImageInfo& imageInfo, bool imageWrite = false);
             void BindImage(u32 nameHash, const VkDescriptorImageInfo& imageInfo);
 
-            void BindStorageImage(i32 set, i32 binding, const VkDescriptorImageInfo& imageInfo);
-            void BindStorageImage(u32 nameHash, const VkDescriptorImageInfo& imageInfo);
+            void BindStorageImage(i32 set, i32 binding, VkDescriptorImageInfo* imageInfos, i32 count);
+            void BindStorageImage(u32 nameHash, VkDescriptorImageInfo* imageInfos, i32 count);
+
+            void BindStorageImageArray(i32 set, i32 binding, VkDescriptorImageInfo* imageInfos, i32 count);
+            void BindStorageImageArray(u32 nameHash, VkDescriptorImageInfo* imageInfos, i32 count);
 
             void BindBuffer(i32 set, i32 binding, const VkDescriptorBufferInfo& bufferInfo, VkDescriptorType bufferType);
             void BindBuffer(u32 nameHash, const VkDescriptorBufferInfo& bufferInfo);

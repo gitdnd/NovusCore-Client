@@ -18,6 +18,7 @@ namespace Renderer
         DESCRIPTOR_TYPE_IMAGE,
         DESCRIPTOR_TYPE_DEPTH_IMAGE,
         DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        DESCRIPTOR_TYPE_STORAGE_IMAGE_ARRAY,
         DESCRIPTOR_TYPE_BUFFER,
     };
 
@@ -25,6 +26,7 @@ namespace Renderer
     {
         u32 nameHash;
         u32 imageMipLevel;
+        u32 count = 1;
         DescriptorType descriptorType;
 
         TextureID textureID;
@@ -68,7 +70,8 @@ namespace Renderer
 
         void Bind(StringUtils::StringHash nameHash, DepthImageID imageID);
 
-        void BindStorage(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel = 0);
+        void BindStorage(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel = 0, u32 mipCount = 1);
+        void BindStorageArray(StringUtils::StringHash nameHash, ImageID imageID, u32 mipLevel = 0, u32 mipCount = 1);
 
         void Bind(const std::string& name, BufferID buffer);
         void Bind(u32 nameHash, BufferID buffer);

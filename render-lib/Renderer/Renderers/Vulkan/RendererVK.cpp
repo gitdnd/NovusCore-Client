@@ -250,9 +250,19 @@ namespace Renderer
         return _imageHandler->GetImageDesc(ID);
     }
 
+    uvec2 RendererVK::GetImageDimension(const ImageID id)
+    {
+        return _imageHandler->GetDimension(id, 0);
+    }
+
     uvec2 RendererVK::GetImageDimension(const ImageID id, u32 mipLevel)
     {
         return _imageHandler->GetDimension(id, mipLevel);
+    }
+
+    uvec2 RendererVK::GetImageDimension(const DepthImageID id)
+    {
+        return _imageHandler->GetDimension(id);
     }
 
     DepthImageDesc RendererVK::GetDepthImageDesc(DepthImageID ID)
@@ -787,11 +797,63 @@ namespace Renderer
         }
         else if (descriptor.descriptorType == DescriptorType::DESCRIPTOR_TYPE_STORAGE_IMAGE)
         {
-            VkDescriptorImageInfo imageInfo = {};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            imageInfo.imageView = _imageHandler->GetColorView(descriptor.imageID, descriptor.imageMipLevel);
+            std::vector<VkDescriptorImageInfo>& imageInfos = imageInfosArrays.emplace_back();
+            imageInfos.reserve(descriptor.count);
 
-            builder->BindStorageImage(descriptor.nameHash, imageInfo);
+            const ImageDesc& imageDesc = _imageHandler->GetImageDesc(descriptor.imageID);
+
+            for (u32 i = 0; i < descriptor.count; i++)
+            {
+                u32 mipLevel = descriptor.imageMipLevel + i;
+
+                if (mipLevel < imageDesc.mipLevels)
+                {
+                    VkDescriptorImageInfo& imageInfo = imageInfos.emplace_back();
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    imageInfo.imageView = _imageHandler->GetColorView(descriptor.imageID, mipLevel);
+                    imageInfo.sampler = VK_NULL_HANDLE;
+                }
+                else
+                {
+                    // Any imageInfos pointing to mips we don't have should point to the last mip
+                    VkDescriptorImageInfo& imageInfo = imageInfos.emplace_back();
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    imageInfo.imageView = _imageHandler->GetColorView(descriptor.imageID, imageDesc.mipLevels - 1);
+                    imageInfo.sampler = VK_NULL_HANDLE;
+                }
+            }
+
+            builder->BindStorageImage(descriptor.nameHash, imageInfos.data(), static_cast<i32>(imageInfos.size()));
+        }
+        else if (descriptor.descriptorType == DescriptorType::DESCRIPTOR_TYPE_STORAGE_IMAGE_ARRAY)
+        {
+            std::vector<VkDescriptorImageInfo>& imageInfos = imageInfosArrays.emplace_back();
+            imageInfos.reserve(descriptor.count);
+
+            const ImageDesc& imageDesc = _imageHandler->GetImageDesc(descriptor.imageID);
+
+            for (u32 i = 0; i < descriptor.count; i++)
+            {
+                u32 mipLevel = descriptor.imageMipLevel + i;
+
+                if (mipLevel < imageDesc.mipLevels)
+                {
+                    VkDescriptorImageInfo& imageInfo = imageInfos.emplace_back();
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    imageInfo.imageView = _imageHandler->GetColorArrayView(descriptor.imageID, mipLevel);
+                    imageInfo.sampler = VK_NULL_HANDLE;
+                }
+                else
+                {
+                    // Any imageInfos pointing to mips we don't have should point to the last mip
+                    VkDescriptorImageInfo& imageInfo = imageInfos.emplace_back();
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    imageInfo.imageView = _imageHandler->GetColorArrayView(descriptor.imageID, imageDesc.mipLevels - 1);
+                    imageInfo.sampler = VK_NULL_HANDLE;
+                }
+            }
+
+            builder->BindStorageImageArray(descriptor.nameHash, imageInfos.data(), static_cast<i32>(imageInfos.size()));
         }
         else if (descriptor.descriptorType == DescriptorType::DESCRIPTOR_TYPE_BUFFER)
         {

@@ -107,6 +107,8 @@ ClientRenderer::ClientRenderer()
     _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _mapObjectRenderer, _cModelRenderer);
     _materialRenderer = new MaterialRenderer(_renderer, _terrainRenderer, _mapObjectRenderer, _cModelRenderer);
     _pixelQuery = new PixelQuery(_renderer);
+
+    DepthPyramidUtils::InitBuffers(_renderer);
 }
 
 bool ClientRenderer::UpdateWindow(f32 deltaTime)
@@ -265,7 +267,7 @@ void ClientRenderer::Render()
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, BuildPyramid);
 
-            DepthPyramidUtils::BuildPyramid(_renderer, graphResources, commandList, _resources, _frameIndex);
+            DepthPyramidUtils::BuildPyramid2(_renderer, graphResources, commandList, _resources, _frameIndex);
         });
 
     _pixelQuery->AddPixelQueryPass(&renderGraph, _resources, _frameIndex);

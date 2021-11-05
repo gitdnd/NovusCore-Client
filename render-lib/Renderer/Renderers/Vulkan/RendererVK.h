@@ -128,7 +128,11 @@ namespace Renderer
 
         [[nodiscard]] ImageDesc GetImageDesc(ImageID ID) override;
         [[nodiscard]] DepthImageDesc GetDepthImageDesc(DepthImageID ID) override;
+
+        [[nodiscard]] uvec2 GetImageDimension(const ImageID id) override;
         [[nodiscard]] uvec2 GetImageDimension(const ImageID id, u32 mipLevel) override;
+
+        [[nodiscard]] uvec2 GetImageDimension(const DepthImageID id) override;
 
         [[nodiscard]] const std::string& GetGPUName() override;
 
