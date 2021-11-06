@@ -2,7 +2,6 @@
 #include "cullingUtils.inc.hlsl"
 #include "globalData.inc.hlsl"
 #include "terrain.inc.hlsl"
-#include "debug.inc.hlsl"
 
 #include "pyramidCulling.inc.hlsl"
 

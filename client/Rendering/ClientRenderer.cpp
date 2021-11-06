@@ -132,6 +132,8 @@ void ClientRenderer::Update(f32 deltaTime)
     _debugRenderer->DrawLine3D(vec3(0.0f, 0.0f, 0.0f), vec3(100.0f, 0.0f, 0.0f), 0xff0000ff);
     _debugRenderer->DrawLine3D(vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 100.0f, 0.0f), 0xff00ff00);
     _debugRenderer->DrawLine3D(vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 100.0f), 0xffff0000);
+
+    _debugRenderer->Update(deltaTime);
 }
 
 void ClientRenderer::Render()
@@ -184,8 +186,6 @@ void ClientRenderer::Render()
 
     _resources.globalDescriptorSet.Bind("_viewData"_h, _resources.viewConstantBuffer->GetBuffer(_frameIndex));
     _resources.globalDescriptorSet.Bind("_lightData"_h, _resources.lightConstantBuffer->GetBuffer(_frameIndex));
-
-    _debugRenderer->AddUploadPass(&renderGraph);
 
     // StartFrame Pass
     {
@@ -272,7 +272,6 @@ void ClientRenderer::Render()
 
     _pixelQuery->AddPixelQueryPass(&renderGraph, _resources, _frameIndex);
 
-    _debugRenderer->AddDrawArgumentPass(&renderGraph, _frameIndex);
     _debugRenderer->Add3DPass(&renderGraph, _resources, _frameIndex);
 
     _uiRenderer->AddUIPass(&renderGraph, _resources, _frameIndex);

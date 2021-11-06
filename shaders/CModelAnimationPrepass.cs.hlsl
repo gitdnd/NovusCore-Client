@@ -1,5 +1,4 @@
 #include "cModel.inc.hlsl"
-#include "debug.inc.hlsl"
 #include "cModelAnimation.inc.hlsl"
 
 struct Constants

@@ -159,21 +159,21 @@ namespace Renderer
         }
 
         // This shadows Clear() in SafeVector
-        void Clear()
+        void Clear(bool shouldSync = true)
         {
             std::unique_lock lock(_mutex);
             _vector.clear();
 
             _allocator.Init(0, 0);
 
-            if (_renderer != nullptr && _buffer != BufferID::Invalid())
+            if (shouldSync && _renderer != nullptr && _buffer != BufferID::Invalid())
             {
                 _renderer->QueueDestroyBuffer(_buffer);
                 _buffer = BufferID::Invalid();
+                _initialized = false;
             }
 
             _dirtyRegions.Clear();
-            _initialized = false;
         }
 
         BufferID GetBuffer() { return _buffer; }

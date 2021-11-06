@@ -1,7 +1,15 @@
+
+struct Vertex2D
+{
+	float2 pos;
+	uint color;
+};
+
+[[vk::binding(0, PER_PASS)]] StructuredBuffer<Vertex2D> _vertices;
+
 struct VSInput
 {
-	float3 position : Position;
-	float4 color : Color;
+	uint vertexID : SV_VertexID;
 };
 
 struct VSOutput
@@ -10,11 +18,24 @@ struct VSOutput
 	float4 color : Color;
 };
 
+float4 GetVertexColor(uint inColor)
+{
+	float4 color;
+
+	color.a = ((inColor & 0xff000000) >> 24) / 255.0f;
+	color.b = ((inColor & 0x00ff0000) >> 16) / 255.0f;
+	color.g = ((inColor & 0x0000ff00) >> 8) / 255.0f;
+	color.r = (inColor & 0x000000ff) / 255.0f;
+
+	return color;
+}
+
 VSOutput main(VSInput input)
 {
+	Vertex2D vertex = _vertices[input.vertexID];
+
 	VSOutput output;
-	float4 pos = float4((input.position.x * 2.0f) - 1.f, (input.position.y * 2.0f) - 1.f, 0.f, 1.0f);
-	output.pos = pos;
-	output.color = input.color;
+	output.pos = float4((vertex.pos.x * 2.0f) - 1.f, (vertex.pos.y * 2.0f) - 1.f, 0.f, 1.0f);
+	output.color = GetVertexColor(vertex.color);
 	return output;
 }

@@ -7,6 +7,7 @@
 #include <Renderer/Descriptors/BufferDesc.h>
 #include <Renderer/Descriptors/ImageDesc.h>
 #include <Renderer/Descriptors/DepthImageDesc.h>
+#include <Renderer/GPUVector.h>
 
 #include "RenderResources.h"
 
@@ -24,33 +25,36 @@ class DebugRenderer
 public:
 	DebugRenderer(Renderer::Renderer* renderer, RenderResources& resources);
 
-	void AddUploadPass(Renderer::RenderGraph* renderGraph);
-	void AddDrawArgumentPass(Renderer::RenderGraph* renderGraph, u8 frameIndex);
+	void Update(f32 deltaTime);
+	
 	void Add2DPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 	void Add3DPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
 
 	void DrawLine2D(const vec2& from, const vec2& to, uint32_t color);
 	void DrawLine3D(const vec3& from, const vec3& to, uint32_t color);
+
 	void DrawAABB3D(const vec3& center, const vec3& extents, uint32_t color);
 	void DrawTriangle2D(const vec2& v0, const vec2& v1, const vec2& v2, uint32_t color);
 	void DrawTriangle3D(const vec3& v0, const vec3& v1, const vec3& v2, uint32_t color);
-	void DrawRectangle2D(const vec2& min, const vec2& max, uint32_t color);
+
 	void DrawFrustum(const mat4x4& viewProjectionMatrix, uint32_t color);
 	void DrawMatrix(const mat4x4& matrix, f32 scale);
 
 	static vec3 UnProject(const vec3& point, const mat4x4& m);
 
-	enum DebugVertexBufferType
-	{
-		DBG_VERTEX_BUFFER_LINES_2D,
-		DBG_VERTEX_BUFFER_LINES_3D,
-		DBG_VERTEX_BUFFER_TRIS_2D,
-		DBG_VERTEX_BUFFER_TRIS_3D,
-		DBG_VERTEX_BUFFER_COUNT,
-	};
+private:
+
+	
 
 private:
-	struct DebugVertex
+
+	struct DebugVertex2D
+	{
+		glm::vec2 pos;
+		uint32_t color;
+	};
+
+	struct DebugVertex3D
 	{
 		glm::vec3 pos;
 		uint32_t color;
@@ -58,15 +62,9 @@ private:
 
 	Renderer::Renderer* _renderer = nullptr;
 
-	std::vector<DebugVertex> _debugVertices[DBG_VERTEX_BUFFER_COUNT];
-	uvec2 _debugVertexRanges[DBG_VERTEX_BUFFER_COUNT]; // offset, count
+	Renderer::GPUVector<DebugVertex2D> _debugVertices2D;
+	Renderer::GPUVector<DebugVertex3D> _debugVertices3D;
 	
-	
-
-	Renderer::DescriptorSet _argumentsDescriptorSet;
-	
-	Renderer::BufferID _debugVertexBuffer;
-	Renderer::BufferID _debugVertexRangeBuffer;
-	Renderer::BufferID _debugVertexCounterBuffer;
-	Renderer::BufferID _drawArgumentBuffer;
+	Renderer::DescriptorSet _draw2DDescriptorSet;
+	Renderer::DescriptorSet _draw3DDescriptorSet;
 };
