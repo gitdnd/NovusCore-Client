@@ -24,6 +24,19 @@ namespace Renderer
         {
             _dirtyRegions.WriteLock([&](std::vector<DirtyRegion>& dirtyRegions)
             {
+                // Check if we can use an existing dirtyRegion
+                for (u32 i = 0; i < dirtyRegions.size(); i++)
+                {
+                    DirtyRegion& dirtyRegion = dirtyRegions[i];
+
+                    if (offset == dirtyRegion.offset)
+                    {
+                        dirtyRegion.size = glm::max(size, dirtyRegion.size);
+                        return;
+                    }
+                }
+
+                // No usable region was found, add a new one
                 DirtyRegion& dirtyRegion = dirtyRegions.emplace_back();
 
                 dirtyRegion.offset = offset;
@@ -176,6 +189,8 @@ namespace Renderer
             _dirtyRegions.Clear();
         }
 
+        bool HasDirtyRegions() { return _dirtyRegions.Size() > 0; }
+
         BufferID GetBuffer() { return _buffer; }
 
     private:
@@ -218,21 +233,47 @@ namespace Renderer
                     return a.offset < b.offset;
                 });
 
-                // Try to merge dirty regions
-                for (i32 i = static_cast<i32>(dirtyRegions.size()) - 2; i >= 0; i--)
+                u32 numDirtyRegions = static_cast<u32>(dirtyRegions.size());
+
+                std::vector<u32> regionIndexToRemove;
+                regionIndexToRemove.reserve(numDirtyRegions);
+
+                i64 lastRegionEnd = -1;
+                u32 lastRegionIndex = 0;
+
+                for (u32 i = 0; i < numDirtyRegions; i++)
                 {
-                    DirtyRegion& curRegion = dirtyRegions[i]; // The currently iterated region
-                    DirtyRegion& nextRegion = dirtyRegions[i + 1]; // Current+1, the one we're trying to remove
+                    DirtyRegion& curRegion = dirtyRegions[i];
+                    i64 curRegionEnd = static_cast<i64>(curRegion.offset + curRegion.size);
 
-                    // TODO: See if there is any overlap between regions
-
-                    // Merge regions that are next to eachother
-                    size_t curRegionEnd = curRegion.offset + curRegion.size;
-                    if (nextRegion.offset == curRegionEnd)
+                    // curRegionEnd exists completely inside of lastRegionEnd
+                    if (lastRegionEnd >= curRegionEnd)
                     {
-                        curRegion.size += nextRegion.size;
-                        dirtyRegions.erase(dirtyRegions.begin() + i + 1);
+                        regionIndexToRemove.push_back(i);
                     }
+                    // Partial Overlap / Merge detected
+                    else if (lastRegionEnd >= static_cast<i64>(curRegion.offset))
+                    {
+                        DirtyRegion& prevRegion = dirtyRegions[lastRegionIndex];
+
+                        i64 sizeDiff = curRegionEnd - lastRegionEnd;
+                        prevRegion.size += sizeDiff;
+
+                        regionIndexToRemove.push_back(i);
+                    }
+                    else
+                    {
+                        lastRegionIndex = i;
+                    }
+
+                    lastRegionEnd = glm::max(lastRegionEnd, curRegionEnd);
+                }
+                
+                i32 numDirtyRegionsToRemove = static_cast<i32>(regionIndexToRemove.size());
+                for (i32 i = numDirtyRegionsToRemove - 1; i >= 0; i--)
+                {
+                    u32 index = regionIndexToRemove[i];
+                    dirtyRegions.erase(dirtyRegions.begin() + index);
                 }
                 
                 // Upload for all remaining dirtyRegions
@@ -240,6 +281,7 @@ namespace Renderer
                 {
                     renderer->UploadToBuffer(_buffer, dirtyRegion.offset, _vector.data(), dirtyRegion.offset, dirtyRegion.size);
                 }
+
                 dirtyRegions.clear();
             });
         }

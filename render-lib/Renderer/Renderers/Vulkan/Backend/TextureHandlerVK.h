@@ -48,6 +48,7 @@ namespace Renderer
             VkImageView GetDebugTextureImageView();
             VkImageView GetDebugOnionTextureImageView();
 
+            size_t GetTextureSize(const TextureID textureID);
             u32 GetTextureArraySize(const TextureArrayID textureArrayID);
 
         private:

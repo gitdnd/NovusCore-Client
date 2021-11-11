@@ -368,6 +368,18 @@ void CModelRenderer::Update(f32 deltaTime)
                     {
                         const AnimationBoneInfo& animationBoneInfo = animationBoneInfos[modelInfo.boneInfoOffset + i];
 
+                        AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
+
+                        if (animationRequest.flags.stopAll)
+                        {
+                            boneInstance.animationProgress = 0;
+                            boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                            boneInstance.sequenceIndex = 0;
+                            continue;
+                        }
+
+                        bool didUpdateBone = false;
+
                         for (u32 j = 0; j < animationBoneInfo.numTranslationSequences; j++)
                         {
                             const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.translationSequenceOffset + j];
@@ -375,7 +387,6 @@ void CModelRenderer::Update(f32 deltaTime)
                             if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
                                 continue;
 
-                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
                             boneInstance.animationProgress = 0;
 
                             if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
@@ -392,8 +403,12 @@ void CModelRenderer::Update(f32 deltaTime)
                             }
 
                             _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
+                            didUpdateBone = true;
                             break;
                         }
+
+                        if (didUpdateBone)
+                            continue;
 
                         for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
                         {
@@ -402,7 +417,6 @@ void CModelRenderer::Update(f32 deltaTime)
                             if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
                                 continue;
 
-                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
                             boneInstance.animationProgress = 0;
 
                             if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
@@ -419,8 +433,12 @@ void CModelRenderer::Update(f32 deltaTime)
                             }
 
                             _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
+                            didUpdateBone = true;
                             break;
                         }
+                        
+                        if (didUpdateBone)
+                            continue;
 
                         for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
                         {
@@ -448,6 +466,11 @@ void CModelRenderer::Update(f32 deltaTime)
                             _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
                             break;
                         }
+                    }
+
+                    if (animationRequest.flags.stopAll)
+                    {
+                        _animationBoneInstances.SetDirtyElements(modelInstanceData.boneInstanceDataOffset, modelInfo.numBones);
                     }
                 }
             });

@@ -22,6 +22,10 @@ namespace Renderer
         class CommandListHandlerVK;
 
         struct StagingBuffer;
+        struct UploadToBufferTask;
+        struct UploadToTextureTask;
+        struct CopyBufferToBufferTask;
+        struct QueueDestroyBufferTask;
 
         struct IUploadBufferHandlerVKData {};
 
@@ -45,6 +49,11 @@ namespace Renderer
             void ExecuteStagingBuffer(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer);
             void ExecuteStagingBuffer(StagingBuffer& stagingBuffer);
             void WaitForStagingBuffer(StagingBuffer& stagingBuffer);
+
+            void HandleUploadToBufferTask(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer, UploadToBufferTask* uploadToBufferTask);
+            void HandleUploadToTextureTask(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer, UploadToTextureTask* uploadToTextureTask);
+            void HandleCopyBufferToBufferTask(VkCommandBuffer commandBuffer, CopyBufferToBufferTask* copyBufferToBufferTask);
+            void HandleQueueDestroyBufferTask(QueueDestroyBufferTask* queueDestroyBufferTask);
 
             void RunSubmitThread();
 

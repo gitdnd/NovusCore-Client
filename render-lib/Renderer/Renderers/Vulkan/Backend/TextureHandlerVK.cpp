@@ -462,6 +462,20 @@ namespace Renderer
             return GetImageView(_debugOnionTexture);
         }
 
+        size_t TextureHandlerVK::GetTextureSize(const TextureID textureID)
+        {
+            TextureHandlerVKData& data = static_cast<TextureHandlerVKData&>(*_data);
+            TextureID::type id = static_cast<TextureID::type>(textureID);
+
+            // Lets make sure this id exists
+            if (data.textures.Size() <= id)
+            {
+                DebugHandler::PrintFatal("Tried to access invalid TextureID: %u", id);
+            }
+
+            return data.textures.ReadGet(id)->fileSize;
+        }
+
         u32 TextureHandlerVK::GetTextureArraySize(const TextureArrayID textureArrayID)
         {
             TextureHandlerVKData& data = static_cast<TextureHandlerVKData&>(*_data);

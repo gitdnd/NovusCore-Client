@@ -23,23 +23,45 @@ namespace Renderer
             SUBMITTED // Has been executed, but hasn't finished executing
         };
 
-        struct UploadToBufferTask
+        enum class UploadTaskType : u8
         {
+            Invalid,
+            UploadToBuffer,
+            UploadToTexture,
+            CopyBufferToBuffer,
+            QueueDestroyBuffer
+        };
+
+        struct UploadTask
+        {
+            UploadTask(UploadTaskType inType) : type(inType) { }
+
+            UploadTaskType type;
+        };
+
+        struct UploadToBufferTask : UploadTask
+        {
+            UploadToBufferTask() : UploadTask(UploadTaskType::UploadToBuffer) { }
+
             BufferID targetBuffer;
             size_t targetOffset;
             size_t stagingBufferOffset;
             size_t copySize;
         };
 
-        struct UploadToTextureTask
+        struct UploadToTextureTask : UploadTask
         {
+            UploadToTextureTask() : UploadTask(UploadTaskType::UploadToTexture) { }
+
             TextureID targetTexture = TextureID::Invalid();
             size_t targetOffset;
             size_t stagingBufferOffset;
         };
 
-        struct CopyBufferToBufferTask
+        struct CopyBufferToBufferTask : UploadTask
         {
+            CopyBufferToBufferTask() : UploadTask(UploadTaskType::CopyBufferToBuffer) { }
+
             BufferID targetBuffer;
             size_t targetOffset;
             BufferID sourceBuffer;
@@ -47,8 +69,10 @@ namespace Renderer
             size_t copySize;
         };
 
-        struct QueueDestroyBufferTask
+        struct QueueDestroyBufferTask : UploadTask
         {
+            QueueDestroyBufferTask() : UploadTask(UploadTaskType::QueueDestroyBuffer) { }
+
             BufferID buffer;
         };
 
@@ -63,10 +87,7 @@ namespace Renderer
             void* mappedMemory = nullptr;
             Memory::StackAllocator allocator;
 
-            moodycamel::ConcurrentQueue<UploadToBufferTask> uploadToBufferTasks;
-            moodycamel::ConcurrentQueue<UploadToTextureTask> uploadToTextureTasks;
-            moodycamel::ConcurrentQueue<CopyBufferToBufferTask> copyBufferToBufferTasks;
-            moodycamel::ConcurrentQueue<QueueDestroyBufferTask> queueDestroyBufferTasks;
+            moodycamel::ConcurrentQueue<UploadTask*> uploadTasks;
 
             std::atomic<BufferStatus> bufferStatus = BufferStatus::READY;
 
@@ -164,6 +185,7 @@ namespace Renderer
                 {
                     ExecuteStagingBuffer(commandBuffer, stagingBuffer);
                     stagingBuffer.totalHandles = 0; // Not sure about this
+                    data->selectedStagingBuffer = (data->selectedStagingBuffer + 1) % data->stagingBuffers.Num;
                 }
             }
 
@@ -198,26 +220,10 @@ namespace Renderer
                 stagingBuffer.allocator.Reset();
 
                 {
-                    UploadToBufferTask task;
-                    while (stagingBuffer.uploadToBufferTasks.try_dequeue(task)) // Just empty the tasks
+                    UploadTask* task;
+                    while (stagingBuffer.uploadTasks.try_dequeue(task))
                     {
-
-                    }
-                }
-
-                {
-                    UploadToTextureTask task;
-                    while (stagingBuffer.uploadToTextureTasks.try_dequeue(task)) // Just empty the tasks
-                    {
-
-                    }
-                }
-
-                {
-                    CopyBufferToBufferTask task;
-                    while (stagingBuffer.copyBufferToBufferTasks.try_dequeue(task)) // Just empty the tasks
-                    {
-
+                        delete task;
                     }
                 }
 
@@ -257,14 +263,20 @@ namespace Renderer
 
             size_t offset = Allocate(size, stagingBufferID, mappedMemory);
 
-            UploadToBufferTask task;
-            task.targetBuffer = targetBuffer;
-            task.targetOffset = targetOffset;
-            task.stagingBufferOffset = offset;
-            task.copySize = size;
+            UploadToBufferTask* task = new UploadToBufferTask();
+            task->targetBuffer = targetBuffer;
+            task->targetOffset = targetOffset;
+            task->stagingBufferOffset = offset;
+            task->copySize = size;
+
+            size_t targetBufferSize = _bufferHandler->GetBufferSize(targetBuffer);
+            if (targetOffset + size > targetBufferSize)
+            {
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Upload Overflowed Target Buffer");
+            }
 
             StagingBuffer& stagingBuffer = data->stagingBuffers.Get(static_cast<StagingBufferID::type>(stagingBufferID));
-            stagingBuffer.uploadToBufferTasks.enqueue(task);
+            stagingBuffer.uploadTasks.enqueue(task);
 
             // Increment number of active handles
             {
@@ -310,13 +322,19 @@ namespace Renderer
             StagingBufferID stagingBufferID;
             size_t offset = Allocate(size, stagingBufferID, mappedMemory);
 
-            UploadToTextureTask task;
-            task.targetTexture = targetTexture;
-            task.targetOffset = targetOffset;
-            task.stagingBufferOffset = offset;
+            UploadToTextureTask* task = new UploadToTextureTask();
+            task->targetTexture = targetTexture;
+            task->targetOffset = targetOffset;
+            task->stagingBufferOffset = offset;
+
+            size_t targetTextureSize = _textureHandler->GetTextureSize(targetTexture);
+            if (targetOffset + size > targetTextureSize)
+            {
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Upload Overflowed Target Buffer");
+            }
 
             StagingBuffer& stagingBuffer = data->stagingBuffers.Get(static_cast<StagingBufferID::type>(stagingBufferID));
-            stagingBuffer.uploadToTextureTasks.enqueue(task);
+            stagingBuffer.uploadTasks.enqueue(task);
 
             // Increment number of active handles
             {
@@ -356,12 +374,18 @@ namespace Renderer
                 DebugHandler::PrintFatal("UploadBufferHandlerVK : Tried to create a CopyBufferToBuffer where the source buffer was invalid");
             }
 
-            CopyBufferToBufferTask task;
-            task.targetBuffer = targetBuffer;
-            task.targetOffset = targetOffset;
-            task.sourceBuffer = sourceBuffer;
-            task.sourceOffset = sourceOffset;
-            task.copySize = size;
+            CopyBufferToBufferTask* task = new CopyBufferToBufferTask();
+            task->targetBuffer = targetBuffer;
+            task->targetOffset = targetOffset;
+            task->sourceBuffer = sourceBuffer;
+            task->sourceOffset = sourceOffset;
+            task->copySize = size;
+
+            size_t targetBufferSize = _bufferHandler->GetBufferSize(targetBuffer);
+            if (targetOffset + size > targetBufferSize)
+            {
+                DebugHandler::PrintFatal("UploadBufferHandlerVK : Upload Overflowed Target Buffer");
+            }
 
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
 
@@ -370,7 +394,7 @@ namespace Renderer
             size_t offset = Allocate(1, stagingBufferID, mappedMemory); // TODO: Figure out a way to not need unnecessary allocate to figure out which staging buffer is "current"
 
             StagingBuffer& stagingBuffer = data->stagingBuffers.Get(static_cast<StagingBufferID::type>(stagingBufferID));
-            stagingBuffer.copyBufferToBufferTasks.enqueue(task);
+            stagingBuffer.uploadTasks.enqueue(task);
         }
 
         void UploadBufferHandlerVK::QueueDestroyBuffer(BufferID buffer)
@@ -380,8 +404,8 @@ namespace Renderer
                 DebugHandler::PrintFatal("UploadBufferHandlerVK : Tried to create a CopyBufferToBuffer where the target buffer was invalid");
             }
 
-            QueueDestroyBufferTask task;
-            task.buffer = buffer;
+            QueueDestroyBufferTask* task = new QueueDestroyBufferTask();
+            task->buffer = buffer;
 
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
 
@@ -390,7 +414,7 @@ namespace Renderer
             size_t offset = Allocate(1, stagingBufferID, mappedMemory); // TODO: Figure out a way to not need unnecessary allocate to figure out which staging buffer is "current"
 
             StagingBuffer& stagingBuffer = data->stagingBuffers.Get(static_cast<StagingBufferID::type>(stagingBufferID));
-            stagingBuffer.queueDestroyBufferTasks.enqueue(task);
+            stagingBuffer.uploadTasks.enqueue(task);
         }
 
         SemaphoreID UploadBufferHandlerVK::GetUploadFinishedSemaphore()
@@ -475,81 +499,39 @@ namespace Renderer
             UploadBufferHandlerVKData* data = static_cast<UploadBufferHandlerVKData*>(_data);
 
             {
-                UploadToBufferTask task;
-                while (stagingBuffer.uploadToBufferTasks.try_dequeue(task))
+                UploadTask* task;
+                while (stagingBuffer.uploadTasks.try_dequeue(task))
                 {
-                    VkBuffer dstBuffer = _bufferHandler->GetBuffer(task.targetBuffer);
-                    VkBuffer srcBuffer = _bufferHandler->GetBuffer(stagingBuffer.buffer);
+                    UploadTaskType uploadType = task->type;
 
-                    VkBufferCopy copyRegion = {};
-                    copyRegion.dstOffset = task.targetOffset;
-                    copyRegion.srcOffset = task.stagingBufferOffset;
-                    copyRegion.size = task.copySize;
-                    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-                    // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
-                    VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-                    bufferBarrier.buffer = dstBuffer;
-                    bufferBarrier.size = VK_WHOLE_SIZE;
-                    bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                    bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-                    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
-                }
-            }
-
-            {
-                UploadToTextureTask task;
-                while (stagingBuffer.uploadToTextureTasks.try_dequeue(task))
-                {
-                    VkBuffer srcBuffer = _bufferHandler->GetBuffer(stagingBuffer.buffer);
-
-                    _textureHandler->CopyBufferToImage(commandBuffer, srcBuffer, task.stagingBufferOffset, task.targetTexture);
-                }
-            }
-
-            {
-                CopyBufferToBufferTask task;
-                while (stagingBuffer.copyBufferToBufferTasks.try_dequeue(task))
-                {
-                    VkBuffer dstBuffer = _bufferHandler->GetBuffer(task.targetBuffer);
-                    VkBuffer srcBuffer = _bufferHandler->GetBuffer(task.sourceBuffer);
-
+                    if (uploadType == UploadTaskType::Invalid)
                     {
-                        // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
-                        VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-                        bufferBarrier.buffer = srcBuffer;
-                        bufferBarrier.size = VK_WHOLE_SIZE;
-                        bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-                        bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                        DebugHandler::PrintFatal("UploadBufferHandlerVK : UploadTask supplied 'UploadTaskType::Invalid'");
+                    }
+                    else if (uploadType == UploadTaskType::UploadToBuffer)
+                    {
+                        UploadToBufferTask* uploadToBufferTask = reinterpret_cast<UploadToBufferTask*>(task);
+                        HandleUploadToBufferTask(commandBuffer, stagingBuffer, uploadToBufferTask);
+                    }
+                    else if (uploadType == UploadTaskType::UploadToTexture)
+                    {
+                        UploadToTextureTask* uploadToTextureTask = reinterpret_cast<UploadToTextureTask*>(task);
+                        HandleUploadToTextureTask(commandBuffer, stagingBuffer, uploadToTextureTask);
+                    }
+                    else if (uploadType == UploadTaskType::CopyBufferToBuffer)
+                    {
+                        CopyBufferToBufferTask* copyBufferToBufferTask = reinterpret_cast<CopyBufferToBufferTask*>(task);
+                        HandleCopyBufferToBufferTask(commandBuffer, copyBufferToBufferTask);
 
-                        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+                        
+                    }
+                    else if (uploadType == UploadTaskType::QueueDestroyBuffer)
+                    {
+                        QueueDestroyBufferTask* queueDestroyBufferTask = reinterpret_cast<QueueDestroyBufferTask*>(task);
+                        HandleQueueDestroyBufferTask(queueDestroyBufferTask);
                     }
 
-                    VkBufferCopy copyRegion = {};
-                    copyRegion.dstOffset = task.targetOffset;
-                    copyRegion.srcOffset = task.sourceOffset;
-                    copyRegion.size = task.copySize;
-                    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-                    {
-                        // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
-                        VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-                        bufferBarrier.buffer = dstBuffer;
-                        bufferBarrier.size = VK_WHOLE_SIZE;
-                        bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                        bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-                        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
-                    }
-                }
-            }
-
-            {
-                QueueDestroyBufferTask task;
-                while (stagingBuffer.queueDestroyBufferTasks.try_dequeue(task))
-                {
-                    _renderer->DestroyBuffer(task.buffer);
+                    delete task;
                 }
             }
         }
@@ -592,6 +574,72 @@ namespace Renderer
 
             // Reset staging buffer
             stagingBuffer.allocator.Reset();
+        }
+
+        void UploadBufferHandlerVK::HandleUploadToBufferTask(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer, UploadToBufferTask* uploadToBufferTask)
+        {
+            VkBuffer dstBuffer = _bufferHandler->GetBuffer(uploadToBufferTask->targetBuffer);
+            VkBuffer srcBuffer = _bufferHandler->GetBuffer(stagingBuffer.buffer);
+
+            VkBufferCopy copyRegion = {};
+            copyRegion.dstOffset = uploadToBufferTask->targetOffset;
+            copyRegion.srcOffset = uploadToBufferTask->stagingBufferOffset;
+            copyRegion.size = uploadToBufferTask->copySize;
+            vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+            // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+            VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+            bufferBarrier.buffer = dstBuffer;
+            bufferBarrier.size = VK_WHOLE_SIZE;
+            bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+        }
+
+        void UploadBufferHandlerVK::HandleUploadToTextureTask(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer, UploadToTextureTask* uploadToTextureTask)
+        {
+            VkBuffer srcBuffer = _bufferHandler->GetBuffer(stagingBuffer.buffer);
+            _textureHandler->CopyBufferToImage(commandBuffer, srcBuffer, uploadToTextureTask->stagingBufferOffset, uploadToTextureTask->targetTexture);
+        }
+
+        void UploadBufferHandlerVK::HandleCopyBufferToBufferTask(VkCommandBuffer commandBuffer, CopyBufferToBufferTask* copyBufferToBufferTask)
+        {
+            VkBuffer dstBuffer = _bufferHandler->GetBuffer(copyBufferToBufferTask->targetBuffer);
+            VkBuffer srcBuffer = _bufferHandler->GetBuffer(copyBufferToBufferTask->sourceBuffer);
+
+            {
+                // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+                VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                bufferBarrier.buffer = srcBuffer;
+                bufferBarrier.size = VK_WHOLE_SIZE;
+                bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+                vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+            }
+
+            VkBufferCopy copyRegion = {};
+            copyRegion.dstOffset = copyBufferToBufferTask->targetOffset;
+            copyRegion.srcOffset = copyBufferToBufferTask->sourceOffset;
+            copyRegion.size = copyBufferToBufferTask->copySize;
+            vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+            {
+                // TODO: Figure out a smarter way to do this so we don't need to add a barrier if it hasn't been written to before
+                VkBufferMemoryBarrier bufferBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                bufferBarrier.buffer = dstBuffer;
+                bufferBarrier.size = VK_WHOLE_SIZE;
+                bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+                vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+            }
+        }
+
+        void UploadBufferHandlerVK::HandleQueueDestroyBufferTask(QueueDestroyBufferTask* queueDestroyBufferTask)
+        {
+            _renderer->DestroyBuffer(queueDestroyBufferTask->buffer);
         }
 
         void UploadBufferHandlerVK::RunSubmitThread()

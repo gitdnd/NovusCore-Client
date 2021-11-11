@@ -104,7 +104,7 @@ void MovementSystem::Update(entt::registry& registry)
     vec3 originalPosition = transform.position;
     f32 originalPitch = transform.pitch;
     f32 originalYaw = transform.yaw;
-    f32 originalYawOffset = 0.0f;// transform.yawOffset;
+    f32 originalYawOffset = transform.yawOffset;
 
     bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
     if (isRightClickDown)
@@ -355,7 +355,7 @@ void MovementSystem::Update(entt::registry& registry)
     if (transform.position  != originalPosition || 
         transform.pitch     != originalPitch    ||
         transform.yaw       != originalYaw      ||
-        transform.yawOffset != originalYaw)
+        transform.yawOffset != originalYawOffset)
     {
         registry.emplace_or_replace<TransformIsDirty>(localplayerSingleton.entity);
     }
