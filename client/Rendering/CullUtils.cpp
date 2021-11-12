@@ -42,6 +42,7 @@ void DepthPyramidUtils::InitBuffers(Renderer::Renderer* renderer)
     copySamplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
     copySamplerDesc.minLOD = 0.f;
     copySamplerDesc.maxLOD = 16.f;
+    copySamplerDesc.mode = Renderer::SamplerReductionMode::MIN;
 
     _copySampler = renderer->CreateSampler(copySamplerDesc);
     _copyDescriptorSet.Bind("_sampler", _copySampler);
