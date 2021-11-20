@@ -4,6 +4,7 @@
 #include "CModelRenderer.h"
 #include "PixelQuery.h"
 #include "SortUtils.h"
+#include "RenderUtils.h"
 #include "../Editor/Editor.h"
 
 #include <filesystem>
@@ -87,34 +88,188 @@ void MapObjectRenderer::Update(f32 deltaTime)
         });
     }
 
-    // Read back from the culling counter
+    // Read back from the culling counters
     u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
-    _numSurvivingDrawCalls = numDrawCalls;
-    _numSurvivingTriangles = _numTriangles;
+    _numSurvivingOccluderDrawCalls = numDrawCalls;
+    _numSurvivingGeometryDrawCalls = numDrawCalls;
+    _numSurvivingOccluderTriangles = _numTriangles;
+    _numSurvivingGeometryTriangles = _numTriangles;
 
     const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
-    if (cullingEnabled && _drawCountReadBackBuffer != Renderer::BufferID::Invalid())
+    if (cullingEnabled && _occluderDrawCountReadBackBuffer != Renderer::BufferID::Invalid())
     {
-        // Drawcalls
+        // Occluder Drawcalls
         {
-            u32* count = static_cast<u32*>(_renderer->MapBuffer(_drawCountReadBackBuffer));
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_occluderDrawCountReadBackBuffer));
             if (count != nullptr)
             {
-                _numSurvivingDrawCalls = *count;
+                _numSurvivingOccluderDrawCalls = *count;
             }
-            _renderer->UnmapBuffer(_drawCountReadBackBuffer);
+            _renderer->UnmapBuffer(_occluderDrawCountReadBackBuffer);
+        }
+
+        // Geometry Drawcalls
+        {
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_geometryDrawCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numSurvivingGeometryDrawCalls = *count;
+            }
+            _renderer->UnmapBuffer(_geometryDrawCountReadBackBuffer);
         }
         
-        // Triangles
+        // Occluder Triangles
         {
-            u32* count = static_cast<u32*>(_renderer->MapBuffer(_triangleCountReadBackBuffer));
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_occluderTriangleCountReadBackBuffer));
             if (count != nullptr)
             {
-                _numSurvivingTriangles = *count;
+                _numSurvivingOccluderTriangles = *count;
             }
-            _renderer->UnmapBuffer(_triangleCountReadBackBuffer);
+            _renderer->UnmapBuffer(_occluderTriangleCountReadBackBuffer);
+        }
+
+        // Geometry Triangles
+        {
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_geometryTriangleCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numSurvivingGeometryTriangles = *count;
+            }
+            _renderer->UnmapBuffer(_geometryTriangleCountReadBackBuffer);
         }
     }
+}
+
+void MapObjectRenderer::AddOccluderPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    u32 drawCount = static_cast<u32>(_drawCalls.Size());
+    if (drawCount == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_MapObjectCullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
+    struct MapObjectOccluderPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<MapObjectOccluderPassData>("MapObject Occluders",
+        [=](MapObjectOccluderPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+        {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](MapObjectOccluderPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, MapObjectOccluders);
+
+            // Reset the counters
+            commandList.FillBuffer(_drawCountBuffer, 0, 4, 0);
+            commandList.FillBuffer(_triangleCountBuffer, 0, 4, 0);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _drawCountBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _triangleCountBuffer);
+
+            // Fill the occluders to draw
+            {
+                commandList.PushMarker("Occlusion Fill", Color::White);
+
+                Renderer::ComputePipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                Renderer::ComputeShaderDesc shaderDesc;
+                shaderDesc.path = "fillDrawCallsFromBitmask.cs.hlsl";
+                pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                commandList.BeginPipeline(pipeline);
+
+                struct FillDrawCallConstants
+                {
+                    u32 numTotalDraws;
+                };
+
+                FillDrawCallConstants* fillConstants = graphResources.FrameNew<FillDrawCallConstants>();
+                fillConstants->numTotalDraws = drawCount;
+                commandList.PushConstant(fillConstants, 0, sizeof(FillDrawCallConstants));
+
+                _occluderFillDescriptorSet.Bind("_culledDrawCallsBitMask"_h, _culledDrawCallsBitMaskBuffer.Get(!frameIndex));
+
+                // Bind descriptorset
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::DEBUG, &resources.debugDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_occluderFillDescriptorSet, frameIndex);
+
+                commandList.Dispatch((drawCount + 31) / 32, 1, 1);
+
+                commandList.EndPipeline(pipeline);
+
+                commandList.PopMarker();
+            }
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledDrawCallsBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _drawCountBuffer);
+
+            // Draw Occluders
+            {
+                commandList.PushMarker("Occlusion Draw", Color::White);
+
+                Renderer::GraphicsPipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                // Shaders
+                Renderer::VertexShaderDesc vertexShaderDesc;
+                vertexShaderDesc.path = "mapObject.vs.hlsl";
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
+
+                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+                Renderer::PixelShaderDesc pixelShaderDesc;
+                pixelShaderDesc.path = "mapObject.ps.hlsl";
+                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+                // Depth state
+                pipelineDesc.states.depthStencilState.depthEnable = true;
+                pipelineDesc.states.depthStencilState.depthWriteEnable = true;
+                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+
+                // Rasterizer state
+                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
+
+                // Render targets
+                pipelineDesc.renderTargets[0] = data.visibilityBuffer;
+
+                pipelineDesc.depthStencil = data.depth;
+
+                // Set pipeline
+                Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                commandList.BeginPipeline(pipeline);
+
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_geometryPassDescriptorSet, frameIndex);
+
+                commandList.SetIndexBuffer(_indices.GetBuffer(), Renderer::IndexFormat::UInt16);
+
+                commandList.DrawIndexedIndirectCount(_culledDrawCallsBuffer, 0, _drawCountBuffer, 0, drawCount);
+
+                commandList.EndPipeline(pipeline);
+
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountBuffer);
+                commandList.CopyBuffer(_occluderDrawCountReadBackBuffer, 0, _drawCountBuffer, 0, 4);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _occluderDrawCountReadBackBuffer);
+
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountBuffer);
+                commandList.CopyBuffer(_occluderTriangleCountReadBackBuffer, 0, _triangleCountBuffer, 0, 4);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _occluderTriangleCountReadBackBuffer);
+
+                commandList.PopMarker();
+            }
+        });
 }
 
 void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
@@ -181,6 +336,8 @@ void MapObjectRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, Rende
 
                 _cullingDescriptorSet.Bind("_constants"_h, _cullingConstantBuffer->GetBuffer(frameIndex));
                 _cullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
+                _cullingDescriptorSet.Bind("_prevCulledDrawCallsBitMask"_h, _culledDrawCallsBitMaskBuffer.Get(!frameIndex));
+                _cullingDescriptorSet.Bind("_culledDrawCallsBitMask"_h, _culledDrawCallsBitMaskBuffer.Get(frameIndex));
 
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::MAPOBJECT, &_cullingDescriptorSet, frameIndex);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
@@ -342,12 +499,12 @@ void MapObjectRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, Rend
             commandList.EndPipeline(pipeline);
 
             commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountBuffer);
-            commandList.CopyBuffer(_drawCountReadBackBuffer, 0, _drawCountBuffer, 0, 4);
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _drawCountReadBackBuffer);
+            commandList.CopyBuffer(_geometryDrawCountReadBackBuffer, 0, _drawCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _geometryDrawCountReadBackBuffer);
 
             commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountBuffer);
-            commandList.CopyBuffer(_triangleCountReadBackBuffer, 0, _triangleCountBuffer, 0, 4);
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _triangleCountReadBackBuffer);
+            commandList.CopyBuffer(_geometryTriangleCountReadBackBuffer, 0, _triangleCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _geometryTriangleCountReadBackBuffer);
         });
 }
 
@@ -721,8 +878,10 @@ void MapObjectRenderer::CreatePermanentResources()
 
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
-        _drawCountReadBackBuffer = _renderer->CreateBuffer(_drawCountReadBackBuffer, desc);
+        _occluderDrawCountReadBackBuffer = _renderer->CreateBuffer(_occluderDrawCountReadBackBuffer, desc);
+        _geometryDrawCountReadBackBuffer = _renderer->CreateBuffer(_geometryDrawCountReadBackBuffer, desc);
 
+        _occluderFillDescriptorSet.Bind("_drawCount"_h, _drawCountBuffer);
         _cullingDescriptorSet.Bind("_drawCount"_h, _drawCountBuffer);
         _sortingDescriptorSet.Bind("_culledDrawCount"_h, _drawCountBuffer);
     }
@@ -737,8 +896,10 @@ void MapObjectRenderer::CreatePermanentResources()
 
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
-        _triangleCountReadBackBuffer = _renderer->CreateBuffer(_triangleCountReadBackBuffer, desc);
+        _occluderTriangleCountReadBackBuffer = _renderer->CreateBuffer(_occluderTriangleCountReadBackBuffer, desc);
+        _geometryTriangleCountReadBackBuffer = _renderer->CreateBuffer(_geometryTriangleCountReadBackBuffer, desc);
 
+        _occluderFillDescriptorSet.Bind("_triangleCount"_h, _triangleCountBuffer);
         _cullingDescriptorSet.Bind("_triangleCount"_h, _triangleCountBuffer);
     }
 
@@ -1294,6 +1455,7 @@ void MapObjectRenderer::CreateBuffers()
         _drawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
         _drawCalls.SyncToGPU(_renderer);
 
+        _occluderFillDescriptorSet.Bind("_draws"_h, _drawCalls.GetBuffer());
         _cullingDescriptorSet.Bind("_draws"_h, _drawCalls.GetBuffer());
         _geometryPassDescriptorSet.Bind("_mapObjectDraws"_h, _drawCalls.GetBuffer());
         _materialPassDescriptorSet.Bind("_mapObjectDraws"_h, _drawCalls.GetBuffer());
@@ -1301,20 +1463,39 @@ void MapObjectRenderer::CreateBuffers()
         _drawCalls.WriteLock([&](std::vector<DrawCall>& drawCalls)
         {
             // Create Culled Indirect Argument buffer
-            Renderer::BufferDesc desc;
-            desc.name = "MapObjectCulledDrawCalls";
-            desc.size = sizeof(DrawCall) * drawCalls.size();
-            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "MapObjectCulledDrawCalls";
+                desc.size = sizeof(DrawCall) * drawCalls.size();
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER;
 
-            _culledDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledDrawCallsBuffer, desc, drawCalls.data(), desc.size);
-            _sortingDescriptorSet.Bind("_culledDrawCalls"_h, _culledDrawCallsBuffer);
-            _cullingDescriptorSet.Bind("_culledDraws"_h, _culledDrawCallsBuffer);
+                _culledDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledDrawCallsBuffer, desc, drawCalls.data(), desc.size);
+                _occluderFillDescriptorSet.Bind("_culledDraws"_h, _culledDrawCallsBuffer);
+                _sortingDescriptorSet.Bind("_culledDrawCalls"_h, _culledDrawCallsBuffer);
+                _cullingDescriptorSet.Bind("_culledDraws"_h, _culledDrawCallsBuffer);
 
-            // Create Culled Sorted Indirect Argument Buffer
-            desc.name = "MapObjectCulledSortedDrawCalls";
-            _culledSortedDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledSortedDrawCallsBuffer, desc, drawCalls.data(), desc.size);
+                // Create Culled Sorted Indirect Argument Buffer
+                desc.name = "MapObjectCulledSortedDrawCalls";
+                _culledSortedDrawCallsBuffer = _renderer->CreateAndFillBuffer(_culledSortedDrawCallsBuffer, desc, drawCalls.data(), desc.size);
 
-            _sortingDescriptorSet.Bind("_sortedCulledDrawCalls"_h, _culledSortedDrawCallsBuffer);
+                _sortingDescriptorSet.Bind("_sortedCulledDrawCalls"_h, _culledSortedDrawCallsBuffer);
+            }
+
+            // Create Culled DrawCall Bitmask buffer
+            {
+                Renderer::BufferDesc desc;
+                desc.name = "MapObjectCulledDrawCallBitMaskBuffer";
+                desc.size = RenderUtils::CalcCullingBitmaskSize(drawCalls.size());
+                desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+                for (u32 i = 0; i < _culledDrawCallsBitMaskBuffer.Num; i++)
+                {
+                    _culledDrawCallsBitMaskBuffer.Get(i) = _renderer->CreateAndFillBuffer(_culledDrawCallsBitMaskBuffer.Get(i), desc, [](void* mappedMemory, size_t size)
+                    {
+                        memset(mappedMemory, 0, size);
+                    });
+                }
+            }
         });
     }
 

@@ -83,6 +83,7 @@ public:
 
     void Update(f32 deltaTime);
 
+    void AddOccluderPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
@@ -93,11 +94,13 @@ public:
 
     // Drawcall stats
     u32 GetNumDrawCalls() { return Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size()); }
+    u32 GetNumOccluderDrawCalls() { return _numOccluderDrawCalls; }
     u32 GetNumSurvivingDrawCalls() { return _numSurvivingDrawCalls; }
 
     // Triangle stats
     u32 GetNumTriangles() { return Terrain::MAP_CELLS_PER_CHUNK * static_cast<u32>(_loadedChunks.Size()) * Terrain::NUM_TRIANGLES_PER_CELL; }
-    u32 GetNumSurvivingTriangles() { return _numSurvivingDrawCalls * Terrain::NUM_TRIANGLES_PER_CELL; }
+    u32 GetNumOccluderTriangles() { return _numOccluderDrawCalls * Terrain::NUM_TRIANGLES_PER_CELL; }
+    u32 GetNumSurvivingGeometryTriangles() { return _numSurvivingDrawCalls * Terrain::NUM_TRIANGLES_PER_CELL; }
 
     u32 GetInstanceIDFromChunkID(u32 chunkID);
 
@@ -120,9 +123,14 @@ private:
     CullingConstants _cullingConstants;
 
     Renderer::BufferID _instanceBuffer;
+
+    FrameResource<Renderer::BufferID, 2> _culledInstanceBitMaskBuffer;
     Renderer::BufferID _culledInstanceBuffer;
     Renderer::BufferID _cellHeightRangeBuffer;
+    Renderer::BufferID _occluderArgumentBuffer;
     Renderer::BufferID _argumentBuffer;
+
+    Renderer::BufferID _occluderDrawCountReadBackBuffer;
     Renderer::BufferID _drawCountReadBackBuffer;
 
     Renderer::BufferID _chunkBuffer;
@@ -142,6 +150,8 @@ private:
 
     Renderer::DescriptorSet _geometryPassDescriptorSet;
 
+    Renderer::DescriptorSet _occluderFillPassDescriptorSet;
+    Renderer::DescriptorSet _occluderDrawPassDescriptorSet;
     Renderer::DescriptorSet _cullingPassDescriptorSet;
     Renderer::DescriptorSet _materialPassDescriptorSet;
     Renderer::DescriptorSet _editorPassDescriptorSet;
@@ -154,6 +164,7 @@ private:
 
     std::mutex _subLoadMutex;
 
+    u32 _numOccluderDrawCalls;
     u32 _numSurvivingDrawCalls;
     
     robin_hood::unordered_map<u32, u32> _chunkIDToInstanceID;

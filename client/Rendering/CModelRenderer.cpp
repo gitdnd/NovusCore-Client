@@ -7,6 +7,7 @@
 #include "../Utils/ServiceLocator.h"
 #include "../Editor/Editor.h"
 #include "SortUtils.h"
+#include "RenderUtils.h"
 
 #include <filesystem>
 #include <GLFW/glfw3.h>
@@ -491,6 +492,16 @@ void CModelRenderer::Update(f32 deltaTime)
     if (cullingEnabled)
     {
         // Drawcalls
+        
+        {
+            u32 * count = static_cast<u32*>(_renderer->MapBuffer(_occluderDrawCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numOccluderSurvivingDrawCalls = *count;
+            }
+            _renderer->UnmapBuffer(_occluderDrawCountReadBackBuffer);
+        }
+
         {
             u32* count = static_cast<u32*>(_renderer->MapBuffer(_opaqueDrawCountReadBackBuffer));
             if (count != nullptr)
@@ -511,6 +522,15 @@ void CModelRenderer::Update(f32 deltaTime)
 
         // Triangles
         {
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_occluderTriangleCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numOccluderSurvivingTriangles = *count;
+            }
+            _renderer->UnmapBuffer(_occluderTriangleCountReadBackBuffer);
+        }
+
+        {
             u32* count = static_cast<u32*>(_renderer->MapBuffer(_opaqueTriangleCountReadBackBuffer));
             if (count != nullptr)
             {
@@ -528,6 +548,153 @@ void CModelRenderer::Update(f32 deltaTime)
             _renderer->UnmapBuffer(_transparentTriangleCountReadBackBuffer);
         }
     }
+}
+
+void CModelRenderer::AddOccluderPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    const u32 numInstances = static_cast<u32>(_modelInstanceDatas.Size());
+    if (numInstances == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_ComplexModelCullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
+    const bool lockFrustum = CVAR_ComplexModelLockCullingFrustum.Get();
+
+    struct CModelOccluderPassData
+    {
+        Renderer::RenderPassMutableResource visibilityBuffer;
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<CModelOccluderPassData>("CModel Occluders",
+        [=](CModelOccluderPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](CModelOccluderPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, CModelOccluderPass);
+
+            // Reset the counters
+            commandList.FillBuffer(_opaqueDrawCountBuffer, 0, 4, 0);
+            commandList.FillBuffer(_opaqueTriangleCountBuffer, 0, 4, 0);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _opaqueDrawCountBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _opaqueTriangleCountBuffer);
+
+            // Fill the occluders to draw
+            {
+                commandList.PushMarker("Occlusion Fill", Color::White);
+
+                Renderer::ComputePipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                Renderer::ComputeShaderDesc shaderDesc;
+                shaderDesc.path = "fillDrawCallsFromBitmask.cs.hlsl";
+                pipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+                Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(pipelineDesc);
+                commandList.BeginPipeline(pipeline);
+
+                u32 numTotalDraws = static_cast<u32>(_opaqueDrawCalls.Size());
+
+                struct FillDrawCallConstants
+                {
+                    u32 numTotalDraws;
+                };
+
+                FillDrawCallConstants* fillConstants = graphResources.FrameNew<FillDrawCallConstants>();
+                fillConstants->numTotalDraws = numTotalDraws;
+                commandList.PushConstant(fillConstants, 0, sizeof(FillDrawCallConstants));
+
+                _occluderFillDescriptorSet.Bind("_culledDrawCallsBitMask"_h, _opaqueCulledDrawCallBitMaskBuffer.Get(!frameIndex));
+
+                // Bind descriptorset
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::DEBUG, &resources.debugDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+                commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_occluderFillDescriptorSet, frameIndex);
+
+                commandList.Dispatch((numTotalDraws + 31) / 32, 1, 1);
+
+                commandList.EndPipeline(pipeline);
+
+                commandList.PopMarker();
+            }
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueCulledDrawCallBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _opaqueDrawCountBuffer);
+
+            // Draw Occluders
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _animationBoneDeformMatrixBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToPixelShaderRead, _animationBoneDeformMatrixBuffer);
+
+                Renderer::GraphicsPipelineDesc pipelineDesc;
+                graphResources.InitializePipelineDesc(pipelineDesc);
+
+                // Shaders
+                Renderer::VertexShaderDesc vertexShaderDesc;
+                vertexShaderDesc.path = "cModel.vs.hlsl";
+                vertexShaderDesc.AddPermutationField("EDITOR_PASS", "0");
+
+                pipelineDesc.states.vertexShader = _renderer->LoadShader(vertexShaderDesc);
+
+                Renderer::PixelShaderDesc pixelShaderDesc;
+                pixelShaderDesc.path = "cModel.ps.hlsl";
+                pipelineDesc.states.pixelShader = _renderer->LoadShader(pixelShaderDesc);
+
+                // Depth state
+                pipelineDesc.states.depthStencilState.depthEnable = true;
+                pipelineDesc.states.depthStencilState.depthWriteEnable = true;
+                pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
+
+                // Rasterizer state
+                pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+                pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
+
+                // Render targets
+                pipelineDesc.renderTargets[0] = data.visibilityBuffer;
+                pipelineDesc.depthStencil = data.depth;
+
+                const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
+
+                // Set Opaque Pipeline
+                if (numOpaqueDrawCalls > 0)
+                {
+                    commandList.PushMarker("Occlusion Draw " + std::to_string(numOpaqueDrawCalls), Color::White);
+
+                    // Draw
+                    Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
+                    commandList.BeginPipeline(pipeline);
+
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+                    commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_geometryPassDescriptorSet, frameIndex);
+
+                    commandList.SetIndexBuffer(_indices.GetBuffer(), Renderer::IndexFormat::UInt16);
+
+                    commandList.DrawIndexedIndirectCount(_opaqueCulledDrawCallBuffer, 0, _opaqueDrawCountBuffer, 0, numOpaqueDrawCalls);
+
+                    commandList.EndPipeline(pipeline);
+
+                    // Copy from our draw count buffer to the readback buffer
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _opaqueDrawCountBuffer);
+                    commandList.CopyBuffer(_occluderDrawCountReadBackBuffer, 0, _opaqueDrawCountBuffer, 0, 4);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _occluderDrawCountReadBackBuffer);
+
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _opaqueTriangleCountBuffer);
+                    commandList.CopyBuffer(_occluderTriangleCountReadBackBuffer, 0, _opaqueTriangleCountBuffer, 0, 4);
+                    commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _occluderTriangleCountReadBackBuffer);
+
+                    commandList.PopMarker();
+                }
+            }
+        });
 }
 
 void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
@@ -599,6 +766,7 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
                 Renderer::ComputeShaderDesc shaderDesc;
                 shaderDesc.path = "cModelCulling.cs.hlsl";
                 shaderDesc.AddPermutationField("PREPARE_SORT", "0");
+                shaderDesc.AddPermutationField("USE_BITMASKS", "1");
                 cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
 
                 // Do culling
@@ -613,6 +781,8 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
                 commandList.PushConstant(cullConstants, 0, sizeof(CullConstants));
 
                 _opaqueCullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
+                _opaqueCullingDescriptorSet.Bind("_prevCulledDrawCallBitMask"_h, _opaqueCulledDrawCallBitMaskBuffer.Get(!frameIndex));
+                _opaqueCullingDescriptorSet.Bind("_culledDrawCallBitMask"_h, _opaqueCulledDrawCallBitMaskBuffer.Get(frameIndex));
 
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::CMODEL, &_opaqueCullingDescriptorSet, frameIndex);
                 commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
@@ -646,6 +816,7 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
                 Renderer::ComputeShaderDesc shaderDesc;
                 shaderDesc.path = "cModelCulling.cs.hlsl";
                 shaderDesc.AddPermutationField("PREPARE_SORT", "0");
+                shaderDesc.AddPermutationField("USE_BITMASKS", "0");
                 cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
 
                 Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(cullingPipelineDesc);
@@ -864,9 +1035,6 @@ void CModelRenderer::AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderR
         [=](CModelGeometryPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, CModelGeometryPass);
-
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToVertexShaderRead, _animationBoneDeformMatrixBuffer);
-            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToPixelShaderRead, _animationBoneDeformMatrixBuffer);
 
             Renderer::GraphicsPipelineDesc pipelineDesc;
             graphResources.InitializePipelineDesc(pipelineDesc);
@@ -1509,12 +1677,18 @@ void CModelRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _opaqueDrawCountBuffer = _renderer->CreateBuffer(_opaqueDrawCountBuffer, desc);
 
+        _occluderFillDescriptorSet.Bind("_drawCount"_h, _opaqueDrawCountBuffer);
         _opaqueCullingDescriptorSet.Bind("_drawCount"_h, _opaqueDrawCountBuffer);
 
         desc.name = "CModelOpaqueDrawCountRBBuffer";
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _opaqueDrawCountReadBackBuffer = _renderer->CreateBuffer(_opaqueDrawCountReadBackBuffer, desc);
+
+        desc.name = "CModelOccluderDrawCountRBBuffer";
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+        desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
+        _occluderDrawCountReadBackBuffer = _renderer->CreateBuffer(_occluderDrawCountReadBackBuffer, desc);
     }
 
     // Create TransparentDrawCountBuffer
@@ -1541,10 +1715,16 @@ void CModelRenderer::CreatePermanentResources()
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
         _opaqueTriangleCountBuffer = _renderer->CreateBuffer(_opaqueTriangleCountBuffer, desc);
 
+        _occluderFillDescriptorSet.Bind("_triangleCount"_h, _opaqueTriangleCountBuffer);
         _opaqueCullingDescriptorSet.Bind("_triangleCount"_h, _opaqueTriangleCountBuffer);
 
+        desc.name = "CModelOpaqueTriangleCountRBBuffer";
         desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
         _opaqueTriangleCountReadBackBuffer = _renderer->CreateBuffer(_opaqueTriangleCountReadBackBuffer, desc);
+
+        desc.name = "CModelOccluderTriangleCountRBBuffer";
+        desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
+        _occluderTriangleCountReadBackBuffer = _renderer->CreateBuffer(_occluderTriangleCountReadBackBuffer, desc);
     }
 
     // Create TransparentTriangleCountReadBackBuffer
@@ -2959,6 +3139,7 @@ void CModelRenderer::CreateBuffers()
             _opaqueDrawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
             _opaqueDrawCalls.SyncToGPU(_renderer);
             
+            _occluderFillDescriptorSet.Bind("_draws"_h, _opaqueDrawCalls.GetBuffer());
             _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCalls.GetBuffer());
             _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
             _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
@@ -2970,6 +3151,7 @@ void CModelRenderer::CreateBuffers()
             
             _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
 
+            _occluderFillDescriptorSet.Bind("_culledDraws"_h, _opaqueCulledDrawCallBuffer);
             _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
         }
 
@@ -2981,6 +3163,22 @@ void CModelRenderer::CreateBuffers()
             _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
             _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
             _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
+        }
+
+        // Create Culled DrawCall Bitmask buffer
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelOpaqueCulledDrawCallBitMaskBuffer";
+            desc.size = RenderUtils::CalcCullingBitmaskSize(_opaqueDrawCalls.Size());
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+            for (u32 i = 0; i < _opaqueCulledDrawCallBitMaskBuffer.Num; i++)
+            {
+                _opaqueCulledDrawCallBitMaskBuffer.Get(i) = _renderer->CreateAndFillBuffer(_opaqueCulledDrawCallBitMaskBuffer.Get(i), desc, [](void* mappedMemory, size_t size)
+                {
+                    memset(mappedMemory, 0, size);
+                });
+            }
         }
     }
     
@@ -3086,6 +3284,7 @@ void CModelRenderer::SyncBuffers()
 
     if (_opaqueDrawCalls.SyncToGPU(_renderer))
     {
+        _occluderFillDescriptorSet.Bind("_draws"_h, _opaqueDrawCalls.GetBuffer());
         _opaqueCullingDescriptorSet.Bind("_drawCalls"_h, _opaqueDrawCalls.GetBuffer());
         _geometryPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
         _materialPassDescriptorSet.Bind("_cModelDraws"_h, _opaqueDrawCalls.GetBuffer());
@@ -3229,6 +3428,7 @@ void CModelRenderer::SyncBuffers()
 
             _opaqueCulledDrawCallBuffer = _renderer->CreateBuffer(_opaqueCulledDrawCallBuffer, desc);
 
+            _occluderFillDescriptorSet.Bind("_culledDraws"_h, _opaqueCulledDrawCallBuffer);
             _opaqueCullingDescriptorSet.Bind("_culledDrawCalls"_h, _opaqueCulledDrawCallBuffer);
         }
 
@@ -3238,6 +3438,22 @@ void CModelRenderer::SyncBuffers()
                 _opaqueCullingDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
                 _geometryPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
                 _materialPassDescriptorSet.Bind("_packedCModelDrawCallDatas"_h, _opaqueDrawCallDatas.GetBuffer());
+            }
+        }
+
+        // Create Culled DrawCall Bitmask buffer
+        {
+            Renderer::BufferDesc desc;
+            desc.name = "CModelOpaqueCulledDrawCallBitMaskBuffer";
+            desc.size = RenderUtils::CalcCullingBitmaskSize(_opaqueDrawCalls.Size());
+            desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
+
+            for (u32 i = 0; i < _opaqueCulledDrawCallBitMaskBuffer.Num; i++)
+            {
+                _opaqueCulledDrawCallBitMaskBuffer.Get(i) = _renderer->CreateAndFillBuffer(_opaqueCulledDrawCallBitMaskBuffer.Get(i), desc, [](void* mappedMemory, size_t size)
+                {
+                    memset(mappedMemory, 0, size);
+                });
             }
         }
     }

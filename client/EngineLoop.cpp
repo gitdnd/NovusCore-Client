@@ -1161,43 +1161,86 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
         // Terrain
         {
             u32 drawCalls = terrainRenderer->GetNumDrawCalls();
-            u32 drawCallsSurvived = terrainRenderer->GetNumSurvivingDrawCalls();
+            totalDrawCalls += drawCalls;
 
-            if (showDrawCalls)
+            // Occluders
             {
-                DrawCullingStatsEntry("Terrain", drawCalls, drawCallsSurvived, !showDrawCalls);
+                u32 drawCallsSurvived = terrainRenderer->GetNumOccluderDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("Terrain Occluders", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
             }
 
-            totalDrawCalls += drawCalls;
-            totalDrawCallsSurvived += drawCallsSurvived;
+            // Geometry
+            {
+                u32 drawCallsSurvived = terrainRenderer->GetNumSurvivingDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("Terrain Geometry", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
+            };
         }
 
         // MapObjects
         {
             u32 drawCalls = mapObjectRenderer->GetNumDrawCalls();
-            u32 drawCallsSurvived = mapObjectRenderer->GetNumSurvivingDrawCalls();
+            totalDrawCalls += drawCalls;
 
-            if (showDrawCalls)
+            // Occluders
             {
-                DrawCullingStatsEntry("MapObjects", drawCalls, drawCallsSurvived, !showDrawCalls);
+                u32 drawCallsSurvived = mapObjectRenderer->GetNumSurvivingOccluderDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("MapObjects Occluders", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
+            }
+            
+            // Geometry
+            {
+                u32 drawCallsSurvived = mapObjectRenderer->GetNumSurvivingGeometryDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("MapObjects Geometry", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
             }
 
-            totalDrawCalls += drawCalls;
-            totalDrawCallsSurvived += drawCallsSurvived;
         }
 
         // Opaque CModels
         {
             u32 drawCalls = cModelRenderer->GetNumOpaqueDrawCalls();
-            u32 drawCallsSurvived = cModelRenderer->GetNumOpaqueSurvivingDrawCalls();
+            totalDrawCalls += drawCalls;
 
-            if (showDrawCalls)
+            // Occluders
             {
-                DrawCullingStatsEntry("CModels (O)", drawCalls, drawCallsSurvived, !showDrawCalls);
+                u32 drawCallsSurvived = cModelRenderer->GetNumOccluderSurvivingDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("CModels (Occluders)", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
             }
 
-            totalDrawCalls += drawCalls;
-            totalDrawCallsSurvived += drawCallsSurvived;
+            // Geometry
+            {
+                u32 drawCallsSurvived = cModelRenderer->GetNumOpaqueSurvivingDrawCalls();
+
+                if (showDrawCalls)
+                {
+                    DrawCullingStatsEntry("CModels (Opaque)", drawCalls, drawCallsSurvived, !showDrawCalls);
+                }
+                totalDrawCallsSurvived += drawCallsSurvived;
+            }
         }
 
         // Transparent CModels
@@ -1207,7 +1250,7 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
 
             if (showDrawCalls)
             {
-                DrawCullingStatsEntry("CModels (T)", drawCalls, drawCallsSurvived, !showDrawCalls);
+                DrawCullingStatsEntry("CModels (Transparent)", drawCalls, drawCallsSurvived, !showDrawCalls);
             }
 
             totalDrawCalls += drawCalls;
@@ -1236,43 +1279,84 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
         // Terrain
         {
             u32 triangles = terrainRenderer->GetNumTriangles();
-            u32 trianglesSurvived = terrainRenderer->GetNumSurvivingTriangles();
+            totalTriangles += triangles;
 
-            if (showTriangles)
+            // Occluders
             {
-                DrawCullingStatsEntry("Terrain", triangles, trianglesSurvived, !showTriangles);
+                u32 trianglesSurvived = terrainRenderer->GetNumOccluderTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("Terrain Occluders", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
             }
 
-            totalTriangles += triangles;
-            totalTrianglesSurvived += trianglesSurvived;
+            // Geometry
+            {
+                u32 trianglesSurvived = terrainRenderer->GetNumSurvivingGeometryTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("Terrain Geometry", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
+            }
         }
 
         // MapObjects
         {
             u32 triangles = mapObjectRenderer->GetNumTriangles();
-            u32 trianglesSurvived = mapObjectRenderer->GetNumSurvivingTriangles();
-
-            if (showTriangles)
+            totalTriangles += triangles;
+            
+            // Occluders
             {
-                DrawCullingStatsEntry("MapObjects", triangles, trianglesSurvived, !showTriangles);
+                u32 trianglesSurvived = mapObjectRenderer->GetNumSurvivingOccluderTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("MapObjects Occluders", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
             }
 
-            totalTriangles += triangles;
-            totalTrianglesSurvived += trianglesSurvived;
+            // Geometry
+            {
+                u32 trianglesSurvived = mapObjectRenderer->GetNumSurvivingGeometryTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("MapObjects Geometry", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
+            }
         }
 
         // Opaque CModels
         {
             u32 triangles = cModelRenderer->GetNumOpaqueTriangles();
-            u32 trianglesSurvived = cModelRenderer->GetNumOpaqueSurvivingTriangles();
-
-            if (showTriangles)
+            totalTriangles += triangles;
+            // Occluders
             {
-                DrawCullingStatsEntry("CModels (O)", triangles, trianglesSurvived, !showTriangles);
+                u32 trianglesSurvived = cModelRenderer->GetNumOccluderSurvivingTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("CModels (Occluders)", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
             }
 
-            totalTriangles += triangles;
-            totalTrianglesSurvived += trianglesSurvived;
+            // Geometry
+            {
+                u32 trianglesSurvived = cModelRenderer->GetNumOpaqueSurvivingTriangles();
+
+                if (showTriangles)
+                {
+                    DrawCullingStatsEntry("CModels (Opaque)", triangles, trianglesSurvived, !showTriangles);
+                }
+                totalTrianglesSurvived += trianglesSurvived;
+            }
         }
 
         // Transparent CModels
@@ -1282,7 +1366,7 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
 
             if (showTriangles)
             {
-                DrawCullingStatsEntry("CModels (T)", triangles, trianglesSurvived, !showTriangles);
+                DrawCullingStatsEntry("CModels (Transparent)", triangles, trianglesSurvived, !showTriangles);
             }
 
             totalTriangles += triangles;

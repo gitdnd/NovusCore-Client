@@ -17,11 +17,14 @@ struct Constants
 [[vk::push_constant]] Constants _constants;
 [[vk::binding(0, TERRAIN)]] StructuredBuffer<CellInstance> _instances;
 [[vk::binding(1, TERRAIN)]] StructuredBuffer<uint> _heightRanges;
-[[vk::binding(2, TERRAIN)]] RWStructuredBuffer<CellInstance> _culledInstances;
-[[vk::binding(3, TERRAIN)]] RWByteAddressBuffer _drawCount;
+[[vk::binding(2, TERRAIN)]] StructuredBuffer<uint> _prevCulledInstancesBitMask;
+[[vk::binding(3, TERRAIN)]] RWStructuredBuffer<uint> _culledInstancesBitMask;
 
-[[vk::binding(4, TERRAIN)]] SamplerState _depthSampler;
-[[vk::binding(5, TERRAIN)]] Texture2D<float> _depthPyramid;
+[[vk::binding(4, TERRAIN)]] RWStructuredBuffer<CellInstance> _culledInstances;
+[[vk::binding(5, TERRAIN)]] RWByteAddressBuffer _drawCount;
+
+[[vk::binding(6, TERRAIN)]] SamplerState _depthSampler;
+[[vk::binding(7, TERRAIN)]] Texture2D<float> _depthPyramid;
 
 float2 ReadHeightRange(uint instanceIndex)
 {
@@ -84,10 +87,17 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
     return true;
 }
 
-[numthreads(32, 1, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+struct CSInput
 {
-	const uint instanceIndex = dispatchThreadId.x;
+    uint3 dispatchThreadID : SV_DispatchThreadID;
+    uint3 groupID : SV_GroupID;
+    uint3 groupThreadID : SV_GroupThreadID;
+};
+
+[numthreads(32, 1, 1)]
+void main(CSInput input)
+{
+    const uint instanceIndex = input.dispatchThreadID.x;
 	CellInstance instance = _instances[instanceIndex];
 
     const uint cellID = instance.packedChunkCellID & 0xffff;
@@ -96,27 +106,40 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float2 heightRange = ReadHeightRange(instanceIndex);
     AABB aabb = GetCellAABB(chunkID, cellID, heightRange);
     
+    bool isVisible = true;
     if (!IsAABBInsideFrustum(_constants.frustumPlanes, aabb))
     {
-        return; 
+        isVisible = false;
     }
-    if (_constants.occlusionCull) 
+    else if (_constants.occlusionCull)
     {
         bool isIntersectingNearZ = IsIntersectingNearZ(aabb.min, aabb.max, _viewData.viewProjectionMatrix);
 
-        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
+        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.viewProjectionMatrix))
         {
-            return;
+            isVisible = false;
         }
     }
 
-    //if (distance(_viewData.eyePosition.xyz, (aabb.min + aabb.max) * 0.5) < 500)
-    //{
-        //debugDrawAABB3D(aabb.min, aabb.max, 0xff0000ff);
-    //}
+    uint bitMask = WaveActiveBallot(isVisible).x;
 
-    uint outInstanceIndex;
-    _drawCount.InterlockedAdd(4, 1, outInstanceIndex);
-      
-    _culledInstances[outInstanceIndex] = instance;
+    // The first thread writes the bitmask
+    if (input.groupThreadID.x == 0)
+    {
+        _culledInstancesBitMask[input.groupID.x] = bitMask;
+    }
+
+    uint occluderBitMask = _prevCulledInstancesBitMask[input.groupID.x];
+    uint renderBitMask = bitMask & ~occluderBitMask; // This should give us all currently visible objects that were not occluders
+
+    // We only want to render objects that are visible and not occluders since they were already rendered this frame
+    bool shouldRender = renderBitMask & (1u << input.groupThreadID.x);
+    if (shouldRender)
+    {
+        uint culledInstanceIndex;
+        _drawCount.InterlockedAdd(4, 1, culledInstanceIndex);
+
+        uint firstInstanceOffset = _drawCount.Load(16);
+        _culledInstances[firstInstanceOffset + culledInstanceIndex] = _instances[instanceIndex];
+    }
 }

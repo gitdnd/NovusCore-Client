@@ -212,6 +212,7 @@ public:
 
     void Update(f32 deltaTime);
 
+    void AddOccluderPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddAnimationPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
@@ -278,12 +279,14 @@ public:
     
     // Drawcall stats
     u32 GetNumOpaqueDrawCalls() { return static_cast<u32>(_opaqueDrawCalls.Size()); }
+    u32 GetNumOccluderSurvivingDrawCalls() { return _numOccluderSurvivingDrawCalls; }
     u32 GetNumOpaqueSurvivingDrawCalls() { return _numOpaqueSurvivingDrawCalls; }
     u32 GetNumTransparentDrawCalls() { return static_cast<u32>(_transparentDrawCalls.Size()); }
     u32 GetNumTransparentSurvivingDrawCalls() { return _numTransparentSurvivingDrawCalls; }
 
     // Triangle stats
     u32 GetNumOpaqueTriangles() { return _numOpaqueTriangles; }
+    u32 GetNumOccluderSurvivingTriangles() { return _numOccluderSurvivingTriangles; }
     u32 GetNumOpaqueSurvivingTriangles() { return _numOpaqueSurvivingTriangles; }
     u32 GetNumTransparentTriangles() { return _numTransparentTriangles; }
     u32 GetNumTransparentSurvivingTriangles() { return _numTransparentSurvivingTriangles; }
@@ -411,6 +414,7 @@ private:
     Renderer::DescriptorSet _animationPrepassDescriptorSet;
     Renderer::DescriptorSet _compactDescriptorSet;
     Renderer::DescriptorSet _visibleInstanceArgumentDescriptorSet;
+    Renderer::DescriptorSet _occluderFillDescriptorSet;
     Renderer::DescriptorSet _opaqueCullingDescriptorSet;
     Renderer::DescriptorSet _transparentCullingDescriptorSet;
     Renderer::DescriptorSet _sortingDescriptorSet;
@@ -481,6 +485,10 @@ private:
     Renderer::BufferID _animatedVertexPositions;
     Renderer::BufferID _animationBoneDeformMatrixBuffer;
 
+    Renderer::BufferID _occluderDrawCountReadBackBuffer;
+    Renderer::BufferID _occluderTriangleCountReadBackBuffer;
+
+    FrameResource<Renderer::BufferID, 2> _opaqueCulledDrawCallBitMaskBuffer;
     Renderer::BufferID _opaqueCulledDrawCallBuffer;
     Renderer::BufferID _opaqueDrawCountBuffer;
     Renderer::BufferID _opaqueDrawCountReadBackBuffer;
@@ -498,10 +506,12 @@ private:
     Renderer::TextureArrayID _cModelTextures;
 
     std::atomic<u32> _numTotalAnimatedVertices;
+    u32 _numOccluderSurvivingDrawCalls;
     u32 _numOpaqueSurvivingDrawCalls;
     u32 _numTransparentSurvivingDrawCalls;
 
     u32 _numOpaqueTriangles;
+    u32 _numOccluderSurvivingTriangles;
     u32 _numOpaqueSurvivingTriangles;
     u32 _numTransparentTriangles;
     u32 _numTransparentSurvivingTriangles;

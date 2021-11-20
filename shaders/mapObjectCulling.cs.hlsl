@@ -33,17 +33,20 @@ struct CullingData
 [[vk::binding(7, MAPOBJECT)]] RWByteAddressBuffer _drawCount;
 [[vk::binding(8, MAPOBJECT)]] RWByteAddressBuffer _triangleCount;
 
-[[vk::binding(9, MAPOBJECT)]] StructuredBuffer<PackedCullingData> _packedCullingData;
+[[vk::binding(9, MAPOBJECT)]] StructuredBuffer<uint> _prevCulledDrawCallsBitMask;
+[[vk::binding(10, MAPOBJECT)]] RWStructuredBuffer<uint> _culledDrawCallsBitMask;
+
+[[vk::binding(11, MAPOBJECT)]] StructuredBuffer<PackedCullingData> _packedCullingData;
 //[[vk::binding(6, MAPOBJECT)]] StructuredBuffer<InstanceData> _instanceData;
 
-[[vk::binding(10, MAPOBJECT)]] ConstantBuffer<Constants> _constants;
+[[vk::binding(12, MAPOBJECT)]] ConstantBuffer<Constants> _constants;
 
-[[vk::binding(11, MAPOBJECT)]] SamplerState _depthSampler;
-[[vk::binding(12, MAPOBJECT)]] Texture2D<float> _depthPyramid;
+[[vk::binding(13, MAPOBJECT)]] SamplerState _depthSampler;
+[[vk::binding(14, MAPOBJECT)]] Texture2D<float> _depthPyramid;
 
 #if DETERMINISTIC_ORDER
-[[vk::binding(13, MAPOBJECT)]] RWStructuredBuffer<uint64_t> _sortKeys;
-[[vk::binding(14, MAPOBJECT)]] RWStructuredBuffer<uint> _sortValues;
+[[vk::binding(15, MAPOBJECT)]] RWStructuredBuffer<uint64_t> _sortKeys;
+[[vk::binding(16, MAPOBJECT)]] RWStructuredBuffer<uint> _sortValues;
 #endif // DETERMINISTIC_ORDER
 
 CullingData LoadCullingData(uint instanceIndex)
@@ -112,15 +115,22 @@ bool IsAABBInsideFrustum(float4 frustum[6], AABB aabb)
     return true;
 }
 
-[numthreads(32, 1, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+struct CSInput
 {
-    if (dispatchThreadId.x >= _constants.maxDrawCount)
+    uint3 dispatchThreadID : SV_DispatchThreadID;
+    uint3 groupID : SV_GroupID;
+    uint3 groupThreadID : SV_GroupThreadID;
+};
+
+[numthreads(32, 1, 1)]
+void main(CSInput input)
+{
+    if (input.dispatchThreadID.x >= _constants.maxDrawCount)
     {
         return;   
     }
     
-    const uint drawIndex = dispatchThreadId.x;
+    const uint drawIndex = input.dispatchThreadID.x;
     
     Draw draw = _draws[drawIndex];
     uint instanceID = draw.firstInstance;
@@ -148,32 +158,48 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     aabb.max = transformedCenter + transformedExtents;
     
     // Cull the AABB
+    bool isVisible = true;
     if (!IsAABBInsideFrustum(_constants.frustumPlanes, aabb))
     {
-        return;
+        isVisible = false;
     }
-    if (_constants.occlusionCull)
+    else if (_constants.occlusionCull)
     { 
         float4x4 mvp = mul(_viewData.viewProjectionMatrix, m);
         bool isIntersectingNearZ = IsIntersectingNearZ(aabb.min, aabb.max, mvp);
 
-        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
+        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.viewProjectionMatrix))
         { 
-            return;
+            isVisible = false;
         }
     }
 
-    uint outTriangles;
-    _triangleCount.InterlockedAdd(0, draw.indexCount/3, outTriangles);
+    uint bitMask = WaveActiveBallot(isVisible).x;
 
-    uint outIndex;
-	_drawCount.InterlockedAdd(0, 1, outIndex);
-    
-	_culledDraws[outIndex] = draw;
+    // The first thread writes the bitmask
+    if (input.groupThreadID.x == 0)
+    {
+        _culledDrawCallsBitMask[input.groupID.x] = bitMask;
+    }
+
+    uint occluderBitMask = _prevCulledDrawCallsBitMask[input.groupID.x];
+    uint renderBitMask = bitMask & ~occluderBitMask; // This should give us all currently visible objects that were not occluders
+
+    bool shouldRender = renderBitMask & (1u << input.groupThreadID.x);
+    if (shouldRender)
+    {
+        uint outTriangles;
+        _triangleCount.InterlockedAdd(0, draw.indexCount / 3, outTriangles);
+
+        uint outIndex;
+        _drawCount.InterlockedAdd(0, 1, outIndex);
+
+        _culledDraws[outIndex] = draw;
 
 #if DETERMINISTIC_ORDER
-    // We want to set up sort keys and values so we can sort our drawcalls by firstInstance
-    _sortKeys[outIndex] = draw.firstInstance;
-    _sortValues[outIndex] = outIndex;
+        // We want to set up sort keys and values so we can sort our drawcalls by firstInstance
+        _sortKeys[outIndex] = draw.firstInstance;
+        _sortValues[outIndex] = outIndex;
 #endif // DETERMINISTIC_ORDER
+    }
 }

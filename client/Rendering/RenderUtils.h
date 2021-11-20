@@ -66,6 +66,15 @@ public:
     };
     static void DepthOverlay(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, u32 frameIndex, const DepthOverlayParams& params);
 
+    static u32 CalcCullingBitmaskSize(size_t numObjects)
+    {
+        u32 numBytesNeeded = static_cast<u32>(((numObjects + 7) / 8));
+
+        // We store these as uints, so we have to pad it to the next multiple of 4 as well
+        numBytesNeeded = Math::NextMultipleOf(numBytesNeeded, 4);
+
+        return numBytesNeeded;
+    }
 private:
 
 private:

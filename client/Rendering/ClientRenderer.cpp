@@ -216,13 +216,38 @@ void ClientRenderer::Render()
         });
     }
 
+    // Animation Pass
+    _cModelRenderer->AddAnimationPass(&renderGraph, _resources, _frameIndex);
+
+    // Occluder Pass
+    _terrainRenderer->AddOccluderPass(&renderGraph, _resources, _frameIndex);
+    _mapObjectRenderer->AddOccluderPass(&renderGraph, _resources, _frameIndex);
+    _cModelRenderer->AddOccluderPass(&renderGraph, _resources, _frameIndex);
+
+    // Depth Pyramid Pass
+    struct PyramidPassData
+    {
+        Renderer::RenderPassResource depth;
+    };
+
+    renderGraph.AddPass<PyramidPassData>("PyramidPass",
+        [=](PyramidPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
+        {
+            data.depth = builder.Read(_resources.depth, Renderer::RenderGraphBuilder::ShaderStage::PIXEL);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](PyramidPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, BuildPyramid);
+
+            DepthPyramidUtils::BuildPyramid2(_renderer, graphResources, commandList, _resources, _frameIndex);
+        });
+
     // Culling Pass
     _terrainRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
     _mapObjectRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
     _cModelRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
-
-    // Animation Pass
-    _cModelRenderer->AddAnimationPass(&renderGraph, _resources, _frameIndex);
 
     // Geometry Pass
     _terrainRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
@@ -249,26 +274,6 @@ void ClientRenderer::Render()
     // Postprocessing
     _postProcessRenderer->AddPostProcessPass(&renderGraph, _resources, _frameIndex);
     _rendertargetVisualizer->AddVisualizerPass(&renderGraph, _resources, _frameIndex);
-
-    // Depth Pyramid Pass
-    struct PyramidPassData
-    {
-        Renderer::RenderPassResource depth;
-    };
-
-    renderGraph.AddPass<PyramidPassData>("PyramidPass",
-        [=](PyramidPassData& data, Renderer::RenderGraphBuilder& builder) // Setup
-        {
-            data.depth = builder.Read(_resources.depth, Renderer::RenderGraphBuilder::ShaderStage::PIXEL);
-
-            return true; // Return true from setup to enable this pass, return false to disable it
-        },
-        [=](PyramidPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList) // Execute
-        {
-            GPU_SCOPED_PROFILER_ZONE(commandList, BuildPyramid);
-
-            DepthPyramidUtils::BuildPyramid2(_renderer, graphResources, commandList, _resources, _frameIndex);
-        });
 
     _pixelQuery->AddPixelQueryPass(&renderGraph, _resources, _frameIndex);
 

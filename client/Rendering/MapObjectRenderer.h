@@ -195,6 +195,7 @@ public:
 
     void Update(f32 deltaTime);
 
+    void AddOccluderPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddGeometryPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
     void AddEditorPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex);
@@ -215,11 +216,13 @@ public:
 
     // Drawcall stats
     u32 GetNumDrawCalls() { return static_cast<u32>(_drawCalls.Size()); }
-    u32 GetNumSurvivingDrawCalls() { return _numSurvivingDrawCalls; }
+    u32 GetNumSurvivingOccluderDrawCalls() { return _numSurvivingOccluderDrawCalls; }
+    u32 GetNumSurvivingGeometryDrawCalls() { return _numSurvivingGeometryDrawCalls; }
 
     // Triangle stats
     u32 GetNumTriangles() { return _numTriangles; }
-    u32 GetNumSurvivingTriangles() { return _numSurvivingTriangles; }
+    u32 GetNumSurvivingOccluderTriangles() { return _numSurvivingOccluderTriangles; }
+    u32 GetNumSurvivingGeometryTriangles() { return _numSurvivingGeometryTriangles; }
 
     Renderer::DescriptorSet& GetMaterialPassDescriptorSet() { return _materialPassDescriptorSet; };
 
@@ -269,6 +272,8 @@ private:
 
     Renderer::SamplerID _sampler;
     Renderer::SamplerID _occlusionSampler;
+
+    Renderer::DescriptorSet _occluderFillDescriptorSet;
     Renderer::DescriptorSet _cullingDescriptorSet;
     Renderer::DescriptorSet _geometryPassDescriptorSet;
     Renderer::DescriptorSet _materialPassDescriptorSet;
@@ -290,15 +295,19 @@ private:
     Renderer::GPUVector<Terrain::CullingData> _cullingData;
 
     // GPU-only workbuffers
+    FrameResource<Renderer::BufferID, 2> _culledDrawCallsBitMaskBuffer;
     Renderer::BufferID _culledDrawCallsBuffer;
     Renderer::BufferID _culledSortedDrawCallsBuffer;
     Renderer::BufferID _sortKeysBuffer;
     Renderer::BufferID _sortValuesBuffer;
 
     Renderer::BufferID _drawCountBuffer;
-    Renderer::BufferID _drawCountReadBackBuffer;
+    Renderer::BufferID _occluderDrawCountReadBackBuffer;
+    Renderer::BufferID _geometryDrawCountReadBackBuffer;
+
     Renderer::BufferID _triangleCountBuffer;
-    Renderer::BufferID _triangleCountReadBackBuffer;
+    Renderer::BufferID _occluderTriangleCountReadBackBuffer;
+    Renderer::BufferID _geometryTriangleCountReadBackBuffer;
 
     Renderer::TextureArrayID _mapObjectTextures;
 
@@ -306,9 +315,12 @@ private:
 
     SafeVector<Terrain::PlacementDetails> _mapObjectPlacementDetails;
 
-    u32 _numSurvivingDrawCalls;
+    u32 _numSurvivingOccluderDrawCalls;
+    u32 _numSurvivingGeometryDrawCalls;
+
     u32 _numTriangles;
-    u32 _numSurvivingTriangles;
+    u32 _numSurvivingOccluderTriangles;
+    u32 _numSurvivingGeometryTriangles;
 
     SafeVector<MapObjectToBeLoaded> _mapObjectsToBeLoaded;
 };

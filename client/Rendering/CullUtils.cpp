@@ -29,9 +29,9 @@ void DepthPyramidUtils::InitBuffers(Renderer::Renderer* renderer)
     desc.size = sizeof(u32) * 6;
     desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
     
-    _atomicBuffer = renderer->CreateAndFillBuffer(_atomicBuffer, desc, [desc](void* mappedMemory) 
+    _atomicBuffer = renderer->CreateAndFillBuffer(_atomicBuffer, desc, [](void* mappedMemory, size_t size)
     {
-        memset(mappedMemory, 0, desc.size);
+        memset(mappedMemory, 0, size);
     });
     _pyramidDescriptorSet.Bind("spdGlobalAtomic", _atomicBuffer);
 
@@ -170,10 +170,10 @@ void DepthPyramidUtils::BuildPyramid2(Renderer::Renderer* renderer, Renderer::Re
         commandList.BindDescriptorSet(Renderer::GLOBAL, &_copyDescriptorSet, frameIndex);
         commandList.Dispatch(GetGroupCount(pyramidSize.x, 32), GetGroupCount(pyramidSize.y, 32), 1);
 
-        commandList.ImageBarrier(resources.depthPyramid);
-
         commandList.EndPipeline(pipeline);
     }
+
+    commandList.ImageBarrier(resources.depthPyramid);
 
     // Downsample
     {
@@ -222,10 +222,10 @@ void DepthPyramidUtils::BuildPyramid2(Renderer::Renderer* renderer, Renderer::Re
         const Renderer::ImageDesc& pyramidDesc = renderer->GetImageDesc(resources.depthPyramid);
         commandList.Dispatch(dispatchThreadGroupCountXY[0], dispatchThreadGroupCountXY[1], 1);
 
-        commandList.ImageBarrier(resources.depthPyramid);
-
         commandList.EndPipeline(pipeline);
     }
+
+    //commandList.ImageBarrier(resources.depthPyramid);
     
     commandList.PopMarker();
 }

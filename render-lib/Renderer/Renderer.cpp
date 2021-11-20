@@ -72,7 +72,7 @@ namespace Renderer
         return bufferID;
     }
 
-    BufferID Renderer::CreateAndFillBuffer(BufferID bufferID, BufferDesc desc, const std::function<void(void*)>& callback)
+    BufferID Renderer::CreateAndFillBuffer(BufferID bufferID, BufferDesc desc, const std::function<void(void*, size_t)>& callback)
     {
         if (bufferID != BufferID::Invalid())
         {
@@ -82,14 +82,16 @@ namespace Renderer
         return CreateAndFillBuffer(desc, callback);
     }
 
-    BufferID Renderer::CreateAndFillBuffer(BufferDesc desc, const std::function<void(void*)>& callback)
+    BufferID Renderer::CreateAndFillBuffer(BufferDesc desc, const std::function<void(void*, size_t)>& callback)
     {
         // Create actual buffer
         desc.usage |= BufferUsage::TRANSFER_DESTINATION; // If we're supposed to stage into it, we have to make sure it's a transfer destination
         BufferID bufferID = CreateBuffer(desc);
 
-        auto uploadBuffer = CreateUploadBuffer(bufferID, 0, desc.size);
-        callback(uploadBuffer->mappedMemory);
+        u64 descSize = Math::Max(desc.size, 1ul);
+
+        auto uploadBuffer = CreateUploadBuffer(bufferID, 0, descSize);
+        callback(uploadBuffer->mappedMemory, descSize);
 
         return bufferID;
     }

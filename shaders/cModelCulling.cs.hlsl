@@ -1,4 +1,5 @@
 permutation PREPARE_SORT = [0, 1];
+permutation USE_BITMASKS = [0, 1];
 #include "common.inc.hlsl"
 #include "cullingUtils.inc.hlsl"
 #include "globalData.inc.hlsl"
@@ -34,14 +35,20 @@ struct CullingData
 [[vk::binding(6, CMODEL)]] SamplerState _depthSampler;
 [[vk::binding(7, CMODEL)]] Texture2D<float> _depthPyramid;
 
+#if USE_BITMASKS
+[[vk::binding(8, CMODEL)]] StructuredBuffer<uint> _prevCulledDrawCallBitMask;
+
 // Outputs
-[[vk::binding(8, CMODEL)]] RWByteAddressBuffer _drawCount;
-[[vk::binding(9, CMODEL)]] RWByteAddressBuffer _triangleCount;
-[[vk::binding(10, CMODEL)]] RWStructuredBuffer<Draw> _culledDrawCalls;
-[[vk::binding(11, CMODEL)]] RWByteAddressBuffer _visibleInstanceMask;
+[[vk::binding(9, CMODEL)]] RWStructuredBuffer<uint> _culledDrawCallBitMask;
+#endif
+
+[[vk::binding(10, CMODEL)]] RWByteAddressBuffer _drawCount;
+[[vk::binding(11, CMODEL)]] RWByteAddressBuffer _triangleCount;
+[[vk::binding(12, CMODEL)]] RWStructuredBuffer<Draw> _culledDrawCalls;
+[[vk::binding(13, CMODEL)]] RWByteAddressBuffer _visibleInstanceMask;
 #if PREPARE_SORT
-[[vk::binding(12, CMODEL)]] RWStructuredBuffer<uint64_t> _sortKeys; // OPTIONAL, only needed if _constants.shouldPrepareSort
-[[vk::binding(13, CMODEL)]] RWStructuredBuffer<uint> _sortValues; // OPTIONAL, only needed if _constants.shouldPrepareSort
+[[vk::binding(14, CMODEL)]] RWStructuredBuffer<uint64_t> _sortKeys; // OPTIONAL, only needed if _constants.shouldPrepareSort
+[[vk::binding(15, CMODEL)]] RWStructuredBuffer<uint> _sortValues; // OPTIONAL, only needed if _constants.shouldPrepareSort
 #endif
 
 CullingData LoadCullingData(uint instanceIndex)
@@ -144,16 +151,23 @@ uint64_t CalculateSortKey(Draw drawCall, CModelDrawCallData drawCallData, float4
     return sortKey;
 }
 
-[numthreads(32, 1, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+struct CSInput
 {
-    if (dispatchThreadId.x >= _constants.maxDrawCount)
+    uint3 dispatchThreadID : SV_DispatchThreadID;
+    uint3 groupID : SV_GroupID;
+    uint3 groupThreadID : SV_GroupThreadID;
+};
+
+[numthreads(32, 1, 1)]
+void main(CSInput input)
+{
+    if (input.dispatchThreadID.x >= _constants.maxDrawCount)
     {
         return;
     }
     
     // Load DrawCall
-    const uint drawCallIndex = dispatchThreadId.x;
+    const uint drawCallIndex = input.dispatchThreadID.x;
     
     Draw drawCall = _drawCalls[drawCallIndex];
     
@@ -183,42 +197,65 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     aabb.max = transformedCenter + transformedExtents;
     
     // Cull the AABB
+    bool isVisible = true;
     if (!IsAABBInsideFrustum(_constants.frustumPlanes, aabb))
     {
-        return;
+        isVisible = false;
     }
-
-    if (_constants.occlusionCull)
+    else if (_constants.occlusionCull)
     {
         float4x4 mvp = mul(_viewData.viewProjectionMatrix, m);
         bool isIntersectingNearZ = IsIntersectingNearZ(aabb.min, aabb.max, mvp);
 
-        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.lastViewProjectionMatrix))
+        if (!isIntersectingNearZ && !IsVisible(aabb.min, aabb.max, _viewData.eyePosition.xyz, _depthPyramid, _depthSampler, _viewData.viewProjectionMatrix))
         {
-            return;
+            isVisible = false;
         }
-    } 
+    }
 
-    // Update triangle count
-    uint outTriangles;
-    _triangleCount.InterlockedAdd(0, drawCall.indexCount/3, outTriangles);
-    
-    // Store DrawCall
-    uint outIndex;
-	_drawCount.InterlockedAdd(0, 1, outIndex);
-    _culledDrawCalls[outIndex] = drawCall;
+#if USE_BITMASKS
+    uint bitMask = WaveActiveBallot(isVisible).x;
 
-    //uint visibleInstanceIndex;
-    //_visibleInstanceCount.InterlockedAdd(0, 1, visibleInstanceIndex);
-    //_visibleInstanceIndices[visibleInstanceIndex] = drawCallData.instanceID;
+    // The first thread writes the bitmask
+    if (input.groupThreadID.x == 0)
+    {
+        _culledDrawCallBitMask[input.groupID.x] = bitMask;
+    }
 
-    const uint maskOffset = drawCallData.instanceID / 32;
-    const uint mask = (uint)1 << (drawCallData.instanceID % 32);
-    _visibleInstanceMask.InterlockedOr(maskOffset * SIZEOF_UINT, mask);
+    uint occluderBitMask = _prevCulledDrawCallBitMask[input.groupID.x];
+    uint renderBitMask = bitMask &~occluderBitMask; // This should give us all currently visible objects that were not occluders
 
-    // If we expect to sort afterwards, output the data needed for it
-#if PREPARE_SORT
-    _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instanceMatrix);
-    _sortValues[outIndex] = outIndex;
+    bool shouldRender = renderBitMask & (1u << input.groupThreadID.x);
+#else
+    bool shouldRender = isVisible;
 #endif
+
+    if (isVisible)
+    {
+        const uint maskOffset = drawCallData.instanceID / 32;
+        const uint mask = (uint)1 << (drawCallData.instanceID % 32);
+        _visibleInstanceMask.InterlockedOr(maskOffset * SIZEOF_UINT, mask);
+    }
+    
+    if (shouldRender)
+    {
+        // Update triangle count
+        uint outTriangles;
+        _triangleCount.InterlockedAdd(0, drawCall.indexCount / 3, outTriangles);
+
+        // Store DrawCall
+        uint outIndex;
+        _drawCount.InterlockedAdd(0, 1, outIndex);
+        _culledDrawCalls[outIndex] = drawCall;
+
+        //uint visibleInstanceIndex;
+        //_visibleInstanceCount.InterlockedAdd(0, 1, visibleInstanceIndex);
+        //_visibleInstanceIndices[visibleInstanceIndex] = drawCallData.instanceID;
+
+        // If we expect to sort afterwards, output the data needed for it
+#if PREPARE_SORT
+        _sortKeys[outIndex] = CalculateSortKey(drawCall, drawCallData, instanceMatrix);
+        _sortValues[outIndex] = outIndex;
+#endif
+    }
 }
