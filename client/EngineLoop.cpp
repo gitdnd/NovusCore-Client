@@ -1,7 +1,7 @@
 #include "EngineLoop.h"
 #include <entt.hpp>
-#include <Networking/InputQueue.h>
-#include <Networking/MessageHandler.h>
+#include <Networking/NetClient.h>
+#include <Networking/NetPacketHandler.h>
 #include <Memory/MemoryTracker.h>
 #include <Utils/CPUInfo.h>
 
@@ -31,9 +31,9 @@
 #include "ECS/Components/Singletons/ScriptSingleton.h"
 #include "ECS/Components/Singletons/ConfigSingleton.h"
 #include "ECS/Components/Singletons/LocalplayerSingleton.h"
+#include "ECS/Components/Network/ConnectionSingleton.h"
 
 // Components
-#include "ECS/Components/Transform.h"
 #include "ECS/Components/Physics/Rigidbody.h"
 #include "ECS/Components/Rendering/DebugBox.h"
 #include "ECS/Components/Rendering/CModelInfo.h"
@@ -86,7 +86,6 @@ AutoCVar_Int CVAR_FramerateTarget("framerate.target", "target framerate", 60);
 
 EngineLoop::EngineLoop() : _isRunning(false), _inputQueue(256), _outputQueue(256)
 {
-    _asioService = std::make_shared<asio::io_service>(2);
 }
 
 EngineLoop::~EngineLoop()
@@ -103,9 +102,7 @@ void EngineLoop::Start()
     ServiceLocator::SetMainInputQueue(&_inputQueue);
 
     std::thread threadRun = std::thread(&EngineLoop::Run, this);
-    std::thread threadRunIoService = std::thread(&EngineLoop::RunIoService, this);
     threadRun.detach();
-    threadRunIoService.detach();
 }
 
 void EngineLoop::Stop()
@@ -215,7 +212,11 @@ bool EngineLoop::Init()
     }
 
     // Initialize Networking
-    NetworkUtils::InitNetwork(&_updateFramework.gameRegistry, _asioService);
+    NetworkUtils::InitNetwork(&_updateFramework.gameRegistry);
+
+    ConnectionSingleton& connectionSingleton = _updateFramework.gameRegistry.ctx<ConnectionSingleton>();
+    bool didConnect = connectionSingleton.gameConnection->Connect("127.0.0.1", 4500);
+    ConnectionUpdateSystem::GameSocket_HandleConnect(connectionSingleton.gameConnection, didConnect);
 
     // Setup SceneManager (Must happen before ScriptLoader::Init)
     SceneManager* sceneManager = new SceneManager();
@@ -337,15 +338,10 @@ void EngineLoop::Run()
     exitMessage.code = MSG_OUT_EXIT_CONFIRM;
     _outputQueue.enqueue(exitMessage);
 }
-void EngineLoop::RunIoService()
-{
-    asio::io_service::work ioWork(*_asioService.get());
-    _asioService->run();
-}
 void EngineLoop::Cleanup()
 {
     // Cleanup Network
-    NetworkUtils::DeInitNetwork(&_updateFramework.gameRegistry, _asioService);
+    NetworkUtils::DeInitNetwork(&_updateFramework.gameRegistry);
 }
 
 bool EngineLoop::Update(f32 deltaTime)
@@ -589,14 +585,14 @@ void EngineLoop::SetupUpdateFramework()
 void EngineLoop::SetupMessageHandler()
 {
     // Setup Auth Message Handler
-    MessageHandler* authSocketMessageHandler = new MessageHandler();
-    AuthSocket::AuthHandlers::Setup(authSocketMessageHandler);
-    ServiceLocator::SetAuthSocketMessageHandler(authSocketMessageHandler);
+    NetPacketHandler* authNetPacketHandler = new NetPacketHandler();
+    ServiceLocator::SetAuthNetPacketHandler(authNetPacketHandler);
+    AuthSocket::AuthHandlers::Setup(authNetPacketHandler);
 
     // Setup Game Message Handler
-    MessageHandler* gameSocketMessageHandler = new MessageHandler();
-    ServiceLocator::SetGameSocketMessageHandler(gameSocketMessageHandler);
-    GameSocket::GameHandlers::Setup(gameSocketMessageHandler);
+    NetPacketHandler* gameNetPacketHandler = new NetPacketHandler();
+    ServiceLocator::SetGameNetPacketHandler(gameNetPacketHandler);
+    GameSocket::GameHandlers::Setup(gameNetPacketHandler);
 }
 
 void EngineLoop::ImguiNewFrame()

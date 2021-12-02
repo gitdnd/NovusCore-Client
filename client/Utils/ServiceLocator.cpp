@@ -4,8 +4,8 @@
 
 entt::registry* ServiceLocator::_gameRegistry = nullptr;
 entt::registry* ServiceLocator::_uiRegistry = nullptr;
-MessageHandler* ServiceLocator::_authSocketMessageHandler = nullptr;
-MessageHandler* ServiceLocator::_gameSocketMessageHandler = nullptr;
+NetPacketHandler* ServiceLocator::_authNetPacketHandler = nullptr;
+NetPacketHandler* ServiceLocator::_gameNetPacketHandler = nullptr;
 Window* ServiceLocator::_window = nullptr;
 InputManager* ServiceLocator::_inputManager = nullptr;
 ClientRenderer* ServiceLocator::_clientRenderer = nullptr;
@@ -31,15 +31,15 @@ void ServiceLocator::SetUIRegistry(entt::registry* registry)
     assert(_uiRegistry == nullptr);
     _uiRegistry = registry;
 }
-void ServiceLocator::SetAuthSocketMessageHandler(MessageHandler* messageHandler)
+void ServiceLocator::SetAuthNetPacketHandler(NetPacketHandler* netPacketHandler)
 {
-    assert(_authSocketMessageHandler == nullptr);
-    _authSocketMessageHandler = messageHandler;
+    assert(_authNetPacketHandler == nullptr);
+    _authNetPacketHandler = netPacketHandler;
 }
-void ServiceLocator::SetGameSocketMessageHandler(MessageHandler* messageHandler)
+void ServiceLocator::SetGameNetPacketHandler(NetPacketHandler* netPacketHandler)
 {
-    assert(_gameSocketMessageHandler == nullptr);
-    _gameSocketMessageHandler = messageHandler;
+    assert(_gameNetPacketHandler == nullptr);
+    _gameNetPacketHandler = netPacketHandler;
 }
 void ServiceLocator::SetWindow(Window* window)
 {

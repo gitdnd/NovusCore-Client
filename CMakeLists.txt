@@ -37,6 +37,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(ROOT_FOLDER ${PROJECT_NAME})
 
 add_subdirectory(NovusCore/NovusCore-Common)
+add_subdirectory(NovusCore/NovusCore-Gameplay)
 include(${COMMON_ROOT}/cmake/Configuration.cmake)
 include(${COMMON_ROOT}/cmake/FindFiles.cmake)
 

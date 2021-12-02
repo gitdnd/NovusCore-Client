@@ -30,11 +30,12 @@
 #include "../ECS/Components/Singletons/TimeSingleton.h"
 #include "../ECS/Components/Singletons/NDBCSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
+
+#include <Gameplay/ECS/Components/Transform.h>
 #include "../ECS/Components/Rendering/ModelDisplayInfo.h"
 #include "../ECS/Components/Rendering/VisibleModel.h"
 #include "../ECS/Components/Rendering/CModelInfo.h"
 #include "../ECS/Components/Rendering/Collidable.h"
-#include "../ECS/Components/Transform.h"
 
 #include "Camera.h"
 #include "../Gameplay/Map/Map.h"

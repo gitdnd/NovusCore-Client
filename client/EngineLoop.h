@@ -28,7 +28,6 @@
 #include <Utils/ConcurrentQueue.h>
 #include <taskflow/taskflow.hpp>
 #include <entity/fwd.hpp>
-#include <asio/io_service.hpp>
 
 
 namespace tf
@@ -78,7 +77,6 @@ public:
 private:
     bool Init();
     void Run();
-    void RunIoService();
     void Cleanup();
 
     bool Update(f32 deltaTime);
@@ -108,5 +106,4 @@ private:
 
     ClientRenderer* _clientRenderer;
     Editor::Editor* _editor;
-    std::shared_ptr<asio::io_service> _asioService;
 };

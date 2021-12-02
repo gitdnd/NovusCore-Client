@@ -8,7 +8,8 @@
 
 #include "../../../Rendering/ClientRenderer.h"
 #include "../../../Rendering/CModelRenderer.h"
-#include "../../Components/Transform.h"
+
+#include <Gameplay/ECS/Components/Transform.h>
 #include "../../Components/Rendering/CModelInfo.h"
 #include "../../Components/Rendering/Collidable.h"
 #include "../../Components/Singletons/MapSingleton.h"

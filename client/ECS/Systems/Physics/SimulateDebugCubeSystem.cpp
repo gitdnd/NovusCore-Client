@@ -11,9 +11,9 @@
 #include "../../../Rendering/DebugRenderer.h"
 #include "../../../Rendering/Camera.h"
 
+#include <Gameplay/ECS/Components/Transform.h>
 #include "../../Components/Singletons/TimeSingleton.h"
 #include "../../Components/Singletons/NDBCSingleton.h"
-#include "../../Components/Transform.h"
 #include "../../Components/Physics/Rigidbody.h"
 #include "../../Components/Rendering/DebugBox.h"
 #include "../../Components/Rendering/ModelDisplayInfo.h"
@@ -49,7 +49,6 @@ void SimulateDebugCubeSystem::Init(entt::registry& registry)
             transform.position += vec3((i % 10) * 10.0f, (i / 10) * 10.0f, 0);
 
             //transform.scale = vec3(0.5f, 0.5f, 2.f); // "Ish" scale for humans
-            transform.UpdateDirectionVectors();
 
             registry.emplace<TransformIsDirty>(entity);
             registry.emplace<Rigidbody>(entity);

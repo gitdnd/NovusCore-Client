@@ -1,17 +1,17 @@
 #pragma once
 #include <memory>
 
-class MessageHandler;
-class NetworkClient;
-struct NetworkPacket;
+class NetPacketHandler;
+struct NetPacket;
+class NetClient;
 namespace AuthSocket
 {
     class AuthHandlers
     {
     public:
-        static void Setup(MessageHandler*);
-        static bool HandleSendAddress(std::shared_ptr<NetworkClient>, std::shared_ptr<NetworkPacket>&);
-        static bool HandshakeHandler(std::shared_ptr<NetworkClient>, std::shared_ptr<NetworkPacket>&);
-        static bool HandshakeResponseHandler(std::shared_ptr<NetworkClient>, std::shared_ptr<NetworkPacket>&);
+        static void Setup(NetPacketHandler*);
+        static bool HandleSendAddress(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
+        static bool HandshakeHandler(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
+        static bool HandshakeResponseHandler(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
     };
 }

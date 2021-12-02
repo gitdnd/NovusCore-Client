@@ -2,7 +2,7 @@
 #include <Math/Geometry.h>
 #include <Utils/ByteBuffer.h>
 #include <Utils/StringUtils.h>
-#include <Networking/Opcode.h>
+#include <Networking/NetStructures.h>
 #include "../../Utils/ServiceLocator.h"
 #include "../../Utils/MapUtils.h"
 #include "../../Utils/PhysicsUtils.h"
@@ -17,7 +17,9 @@
 #include "../Components/Rendering/DebugBox.h"
 #include "../Components/Rendering/CModelInfo.h"
 #include "../Components/Rendering/ModelDisplayInfo.h"
-#include "../Components/Transform.h"
+
+#include <Gameplay/ECS/Components/Transform.h>
+#include <Gameplay/ECS/Components/Movement.h>
 
 #include <InputManager.h>
 #include <entt.hpp>
@@ -42,8 +44,8 @@ void MovementSystem::Init(entt::registry& registry)
         if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
             return false;
     
-        Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
-        transform.moveSpeed += 7.1111f;
+        Movement& movement = registry.get<Movement>(localplayerSingleton.entity);
+        movement.moveSpeed += 7.1111f;
     
         return true;
     });
@@ -52,9 +54,9 @@ void MovementSystem::Init(entt::registry& registry)
         CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
         if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
             return false;
-    
-        Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
-        transform.moveSpeed = glm::max(transform.moveSpeed - 7.1111f, 7.1111f);
+
+        Movement& movement = registry.get<Movement>(localplayerSingleton.entity);
+        movement.moveSpeed = glm::max(movement.moveSpeed - 7.1111f, 7.1111f);
         return true;
     });
     keybindGroup->AddKeyboardCallback("Auto Run", GLFW_KEY_HOME, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
@@ -94,29 +96,29 @@ void MovementSystem::Update(entt::registry& registry)
     KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
     KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
+    Movement& movement = registry.get<Movement>(localplayerSingleton.entity);
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(localplayerSingleton.entity);
 
     // Here we save our original movement flags to know if we have "changed" direction, and have to update the server, otherwise we can continue sending heartbeats
-    Transform::MovementFlags& movementFlags = transform.movementFlags;
-    Transform::MovementFlags originalFlags = transform.movementFlags;
+    Movement::Flags& movementFlags = movement.flags;
+    Movement::Flags originalFlags = movement.flags;
     movementFlags.value = 0;
 
     vec3 originalPosition = transform.position;
-    f32 originalPitch = transform.pitch;
-    f32 originalYaw = transform.yaw;
+    f32 originalPitch = transform.rotation.y;
+    f32 originalYaw = transform.rotation.z;
     f32 originalYawOffset = transform.yawOffset;
 
     bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
     if (isRightClickDown)
     {
-        // Update Direction Vectors to properly align with movement (Does not include yawOffset)
-        transform.yawBase = camera->GetYaw();
-        transform.yaw = transform.yawBase + transform.yawOffset;
+        transform.rotation.z = camera->GetYaw();
 
         // Only set Pitch if we are flying
         //transform.pitch = camera->GetPitch();
     }
-    transform.UpdateDirectionVectors();
+    vec3 front, up, left;
+    mat4x4 rotationMatrix = transform.GetRotationMatrix(front, up, left);
 
     {
         vec3 moveDirection = vec3(0.f, 0.f, 0.f);
@@ -136,23 +138,23 @@ void MovementSystem::Update(entt::registry& registry)
             // FORWARD
             if (moveAlongVerticalAxis == 1)
             {
-                moveDirection += transform.front;
+                moveDirection += front;
             }
             // BACKWARD
             else if (moveAlongVerticalAxis == -1)
             {
-                moveDirection -= transform.front;
+                moveDirection -= front;
             }
 
             // LEFT
             if (moveAlongHorizontalAxis == 1)
             {
-                moveDirection += transform.left;
+                moveDirection += left;
             }
             // RIGHT
             else if (moveAlongHorizontalAxis == -1)
             {
-                moveDirection -= transform.left;
+                moveDirection -= left;
             }
 
             // JUMP
@@ -175,11 +177,11 @@ void MovementSystem::Update(entt::registry& registry)
                 movementFlags.LEFT = moveAlongHorizontalAxis == 1;
                 movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
 
-                transform.velocity = moveDirection * transform.moveSpeed;
+                movement.velocity = moveDirection * movement.moveSpeed;
 
                 if (isJumping)
                 {
-                    transform.velocity += transform.up * 30.f; // 8 is decent value
+                    movement.velocity += up * 8.0f; // 8 is decent value
 
                     // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
                     localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
@@ -192,7 +194,7 @@ void MovementSystem::Update(entt::registry& registry)
                 {
                     localplayerSingleton.movement.flags.canChangeDirection = false;
 
-                    f32 moveSpeed = transform.moveSpeed;
+                    f32 moveSpeed = movement.moveSpeed;
 
                     // If we were previously standing still reduce our moveSpeed by 66 percent
                     if (originalFlags.value == 0 || originalFlags.value == 0x16)
@@ -204,8 +206,8 @@ void MovementSystem::Update(entt::registry& registry)
                     movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
 
                     vec3 newVelocity = moveDirection * moveSpeed;
-                    transform.velocity.x = newVelocity.x;
-                    transform.velocity.y = newVelocity.y;
+                    movement.velocity.x = newVelocity.x;
+                    movement.velocity.y = newVelocity.y;
                 }
                 else
                 {
@@ -216,8 +218,8 @@ void MovementSystem::Update(entt::registry& registry)
                     movementFlags.RIGHT = originalFlags.RIGHT;
                 }
 
-                transform.fallSpeed += transform.fallAcceleration * timeSingleton.deltaTime;
-                transform.velocity -= transform.up * transform.fallSpeed * timeSingleton.deltaTime;
+                movement.fallSpeed += movement.fallAcceleration * timeSingleton.deltaTime;
+                movement.velocity -= up * movement.fallSpeed * timeSingleton.deltaTime;
             }
         }
 
@@ -228,18 +230,18 @@ void MovementSystem::Update(entt::registry& registry)
 
         vec3 triangleNormal;
         f32 triangleSteepness = 0;
-        bool willCollide = PhysicsUtils::CheckCollisionForCModels(currentMap, transform, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
+        bool willCollide = PhysicsUtils::CheckCollisionForCModels(currentMap, movement, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
         if (willCollide)
         {
-            transform.position += (transform.velocity * timeToCollide) * timeSingleton.deltaTime;
+            transform.position += (movement.velocity * timeToCollide) * timeSingleton.deltaTime;
             isGrounded = triangleSteepness <= 50;
         }
         else
         {
-            f32 sqrVelocity = glm::length2(transform.velocity);
+            f32 sqrVelocity = glm::length2(movement.velocity);
             if (sqrVelocity != 0)
             {
-                vec3 newPosition = transform.position + (transform.velocity * timeSingleton.deltaTime);
+                vec3 newPosition = transform.position + (movement.velocity * timeSingleton.deltaTime);
                 transform.position = newPosition;
             }
         }
@@ -257,8 +259,8 @@ void MovementSystem::Update(entt::registry& registry)
         if (isGrounded)
         {
             localplayerSingleton.movement.flags.canChangeDirection = true;
-            transform.velocity.z = 0.0f;
-            transform.fallSpeed = 19.5f;
+            movement.velocity.z = 0.0f;
+            movement.fallSpeed = 19.5f;
 
             // Clip to Terrain
             if (isStandingOnTerrain)
@@ -300,14 +302,12 @@ void MovementSystem::Update(entt::registry& registry)
         {
             transform.yawOffset = 0.0f;
         }
-
-        transform.yaw = transform.yawBase + transform.yawOffset;
     }
 
     vec3 cameraTransformPos = transform.position + vec3(0.0f, 0.0f, 1.3f);
     camera->SetPosition(cameraTransformPos);
 
-    mat4x4 transformMatrix = transform.GetMatrix();
+    mat4x4 transformMatrix = transform.GetInstanceMatrix();
     debugRenderer->DrawMatrix(transformMatrix, 1.0f);
 
     // If our movement flags changed, lets see what animations we should play
@@ -352,11 +352,24 @@ void MovementSystem::Update(entt::registry& registry)
         }
     }
 
-    if (transform.position  != originalPosition || 
-        transform.pitch     != originalPitch    ||
-        transform.yaw       != originalYaw      ||
-        transform.yawOffset != originalYawOffset)
+    if (transform.position      != originalPosition || 
+        transform.rotation.y    != originalPitch    ||
+        transform.rotation.z    != originalYaw      ||
+        transform.yawOffset     != originalYawOffset)
     {
+        ConnectionSingleton& connectionSingleton = registry.ctx<ConnectionSingleton>();
+
+        // Send Packet if connection is setup
+        if (connectionSingleton.gameConnection && connectionSingleton.gameConnection->IsConnected())
+        {
+            std::shared_ptr<Bytebuffer> entityUpdate = Bytebuffer::Borrow<128>();
+            entityUpdate->Put(Opcode::MSG_MOVE_ENTITY);
+            entityUpdate->PutU16(sizeof(vec3) * 3);
+            entityUpdate->Serialize(transform);
+
+            connectionSingleton.gameConnection->Send(entityUpdate);
+        }
+
         registry.emplace_or_replace<TransformIsDirty>(localplayerSingleton.entity);
     }
 }

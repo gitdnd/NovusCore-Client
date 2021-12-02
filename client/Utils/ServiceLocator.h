@@ -4,7 +4,7 @@
 #include <entity/registry.hpp>
 #include <cassert>
 
-class MessageHandler;
+class NetPacketHandler;
 class Window;
 class InputManager;
 class ClientRenderer;
@@ -40,18 +40,18 @@ public:
         return _uiRegistry; 
     }
     static void SetUIRegistry(entt::registry* registry);
-    static MessageHandler* GetAuthSocketMessageHandler() 
+    static NetPacketHandler* GetAuthNetPacketHandler()
     {
-        assert(_authSocketMessageHandler != nullptr);
-        return _authSocketMessageHandler;
+        assert(_authNetPacketHandler != nullptr);
+        return _authNetPacketHandler;
     }
-    static void SetAuthSocketMessageHandler(MessageHandler* messageHandler);
-    static MessageHandler* GetGameSocketMessageHandler() 
+    static void SetAuthNetPacketHandler(NetPacketHandler* netPacketHandler);
+    static NetPacketHandler* GetGameNetPacketHandler()
     {
-        assert(_gameSocketMessageHandler != nullptr);
-        return _gameSocketMessageHandler; 
+        assert(_gameNetPacketHandler != nullptr);
+        return _gameNetPacketHandler; 
     }
-    static void SetGameSocketMessageHandler(MessageHandler* messageHandler);
+    static void SetGameNetPacketHandler(NetPacketHandler* netPacketHandler);
     static Window* GetWindow() 
     {
         assert(_window != nullptr);
@@ -136,8 +136,8 @@ private:
     ServiceLocator() { }
     static entt::registry* _gameRegistry;
     static entt::registry* _uiRegistry;
-    static MessageHandler* _authSocketMessageHandler;
-    static MessageHandler* _gameSocketMessageHandler;
+    static NetPacketHandler* _authNetPacketHandler;
+    static NetPacketHandler* _gameNetPacketHandler;
     static Window* _window;
     static InputManager* _inputManager;
     static ClientRenderer* _clientRenderer;

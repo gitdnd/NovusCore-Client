@@ -5,7 +5,8 @@
 #include "../../../Utils/ServiceLocator.h"
 #include "../../../Rendering/ClientRenderer.h"
 #include "../../../Rendering/CModelRenderer.h"
-#include "../../Components/Transform.h"
+
+#include <Gameplay/ECS/Components/Transform.h>
 #include "../../Components/Rendering/ModelDisplayInfo.h"
 #include "../../Components/Rendering/VisibleModel.h"
 
@@ -29,11 +30,11 @@ void UpdateModelTransformSystem::Update(entt::registry& registry)
             mat4x4& instanceMatrix = instanceMatrices[modelDisplayInfo.instanceID];
 
             // Update the instance
-            instanceMatrix = transform.GetMatrix();
+            transform.rotation.z += transform.yawOffset;
+            instanceMatrix = transform.GetInstanceMatrix();
+            transform.rotation.z -= transform.yawOffset;
 
             modelInstanceMatrices.SetDirtyElement(modelDisplayInfo.instanceID);
         });
     });
-
-    registry.clear<TransformIsDirty>();
 }

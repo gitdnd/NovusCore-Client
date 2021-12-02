@@ -10,11 +10,13 @@
 #include "../Utils/MapUtils.h"
 #include "../Editor/Editor.h"
 
-#include "../ECS/Components/Transform.h"
+#include <Gameplay/ECS/Components/Transform.h>
+#include <Gameplay/ECS/Components/Movement.h>
 #include "../ECS/Components/Rendering/DebugBox.h"
 #include "../ECS/Components/Rendering/VisibleModel.h"
 #include "../ECS/Components/Rendering/ModelDisplayInfo.h"
 
+#include "../ECS/Components/Network/ConnectionSingleton.h"
 #include "../ECS/Components/Singletons/MapSingleton.h"
 #include "../ECS/Components/Singletons/TextureSingleton.h"
 #include "../ECS/Components/Singletons/ConfigSingleton.h"
@@ -104,19 +106,28 @@ void TerrainRenderer::Update(f32 deltaTime)
 
         // This allows us to move around in the world "offline" (The server will automatically override this when connecting
         {
+            ConnectionSingleton& connectionSingleton = registry->ctx<ConnectionSingleton>();
             LocalplayerSingleton& localplayerSingleton = registry->ctx_or_set<LocalplayerSingleton>();
-            localplayerSingleton.entity = registry->create();
 
-            //registry->emplace<DebugBox>(localplayerSingleton.entity);
-            Transform& transform = registry->emplace<Transform>(localplayerSingleton.entity);
-            transform.position = vec3(-9249.f, 87.f, 79.f);
-            transform.scale = vec3(1.0f, 1.0f, 1.0f);
-            transform.UpdateDirectionVectors();
+            if (!connectionSingleton.gameConnection->IsConnected())
+            {
+                localplayerSingleton.entity = registry->create();
 
-            registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
+                //registry->emplace<DebugBox>(localplayerSingleton.entity);
+                Transform& transform = registry->emplace<Transform>(localplayerSingleton.entity);
+                transform.position = vec3(-9249.f, 87.f, 79.f);
+                transform.scale = vec3(1.0f, 1.0f, 1.0f);
 
-            registry->emplace<VisibleModel>(localplayerSingleton.entity);
-            ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 797);
+                registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
+
+                registry->emplace<Movement>(localplayerSingleton.entity);
+                registry->emplace<VisibleModel>(localplayerSingleton.entity);
+                ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 65);
+            }
+            else
+            {
+                localplayerSingleton.entity = entt::null;
+            }
         }
     }
 

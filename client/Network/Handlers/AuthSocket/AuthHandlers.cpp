@@ -1,7 +1,7 @@
 #include "AuthHandlers.h"
-#include <Networking/NetworkPacket.h>
-#include <Networking/MessageHandler.h>
-#include <Networking/NetworkClient.h>
+#include <Networking/NetPacket.h>
+#include <Networking/NetClient.h>
+#include <Networking/NetPacketHandler.h>
 #include <Utils/ByteBuffer.h>
 #include "../../../Utils/ServiceLocator.h"
 #include "../../../ECS/Components/Network/AuthenticationSingleton.h"
@@ -12,13 +12,13 @@
 
 namespace AuthSocket
 {
-    void AuthHandlers::Setup(MessageHandler* messageHandler)
+    void AuthHandlers::Setup(NetPacketHandler* netPacketHandler)
     {
-        messageHandler->SetMessageHandler(Opcode::SMSG_LOGON_CHALLENGE, { ConnectionStatus::AUTH_CHALLENGE, sizeof(ServerLogonChallenge), AuthHandlers::HandshakeHandler });
-        messageHandler->SetMessageHandler(Opcode::SMSG_LOGON_HANDSHAKE, { ConnectionStatus::AUTH_HANDSHAKE, sizeof(ServerLogonHandshake), AuthHandlers::HandshakeResponseHandler });
-        messageHandler->SetMessageHandler(Opcode::SMSG_SEND_ADDRESS, { ConnectionStatus::AUTH_NONE, sizeof(u8), sizeof(u8) + sizeof(u32) + sizeof(u16), AuthHandlers::HandleSendAddress });
+        netPacketHandler->SetMessageHandler(Opcode::SMSG_LOGON_CHALLENGE, { ConnectionStatus::AUTH_CHALLENGE, sizeof(ServerLogonChallenge), AuthHandlers::HandshakeHandler });
+        netPacketHandler->SetMessageHandler(Opcode::SMSG_LOGON_HANDSHAKE, { ConnectionStatus::AUTH_HANDSHAKE, sizeof(ServerLogonHandshake), AuthHandlers::HandshakeResponseHandler });
+        netPacketHandler->SetMessageHandler(Opcode::SMSG_SEND_ADDRESS, { ConnectionStatus::AUTH_NONE, sizeof(u8), sizeof(u8) + sizeof(u32) + sizeof(u16), AuthHandlers::HandleSendAddress });
     }
-    bool AuthHandlers::HandshakeHandler(std::shared_ptr<NetworkClient> authSocket, std::shared_ptr<NetworkPacket>& packet)
+    bool AuthHandlers::HandshakeHandler(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         ServerLogonChallenge logonChallenge;
         logonChallenge.Deserialize(packet->payload);
@@ -40,12 +40,12 @@ namespace AuthSocket
 
         u16 payloadSize = clientResponse.Serialize(buffer);
         buffer->Put<u16>(payloadSize, 2);
-        authSocket->Send(buffer);
+        netClient->Send(buffer);
 
-        authSocket->SetStatus(ConnectionStatus::AUTH_HANDSHAKE);
+        netClient->SetConnectionStatus(ConnectionStatus::AUTH_HANDSHAKE);
         return true;
     }
-    bool AuthHandlers::HandshakeResponseHandler(std::shared_ptr<NetworkClient> authSocket, std::shared_ptr<NetworkPacket>& packet)
+    bool AuthHandlers::HandshakeResponseHandler(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         // Handle handshake response
         ServerLogonHandshake logonResponse;
@@ -68,12 +68,12 @@ namespace AuthSocket
         std::shared_ptr<Bytebuffer> buffer = Bytebuffer::Borrow<128>();
         buffer->Put(Opcode::CMSG_CONNECTED);
         buffer->PutU16(0);
-        authSocket->Send(buffer);
+        netClient->Send(buffer);
 
-        authSocket->SetStatus(ConnectionStatus::AUTH_SUCCESS);
+        netClient->SetConnectionStatus(ConnectionStatus::AUTH_SUCCESS);
         return true;
     }
-    bool AuthHandlers::HandleSendAddress(std::shared_ptr<NetworkClient> authSocket, std::shared_ptr<NetworkPacket>& packet)
+    bool AuthHandlers::HandleSendAddress(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         u8 status = 0;
         u32 address = 0;
@@ -90,13 +90,9 @@ namespace AuthSocket
             if (!packet->payload->GetU16(port))
                 return false;
 
-            // Here we set our authSocket's connect handler to the "HandleConnect" method, this is because we reuse the
-            // AuthSocket for connecting to the region server and the auth server. Both servers expect different packets
-            // upon connecting, therefore we use this simple trick.
-            authSocket->Close(asio::error::shut_down);
-            authSocket->SetConnectHandler(nullptr);
+            netClient->Close();
 
-            if (authSocket->Connect(address, port))
+            if (netClient->Connect(address, port))
             {
                 entt::registry* gameRegistry = ServiceLocator::GetGameRegistry();
                 AuthenticationSingleton& authentication = gameRegistry->ctx<AuthenticationSingleton>();
@@ -132,22 +128,14 @@ namespace AuthSocket
                 u16 payloadSize = logonChallenge.Serialize(buffer, authentication.srp.aBuffer);
 
                 buffer->Put<u16>(payloadSize, 2);
-                authSocket->Send(buffer);
+                netClient->Send(buffer);
 
-                authSocket->SetStatus(ConnectionStatus::AUTH_CHALLENGE);
+                netClient->SetConnectionStatus(ConnectionStatus::AUTH_CHALLENGE);
                 return true;
             }
         }
 
-        // The client initially will connect to a region server, from there on the client receives
-        // an IP address / port from that region server to the proper authentication server.
-        // In case the connection to the auth server fails, we need to set the ConnectHandler
-        // back to the "Initial" version, this is because we reuse the same socket for connecting
-        // to the region server and the auth server, and both expect different packets upon connecting
-
-        authSocket->SetStatus(ConnectionStatus::AUTH_NONE);
-        authSocket->SetConnectHandler(std::bind(&ConnectionUpdateSystem::AuthSocket_HandleConnect, std::placeholders::_1, std::placeholders::_2));
-
+        netClient->SetConnectionStatus(ConnectionStatus::AUTH_NONE);
         return true;
     }
 }

@@ -5,7 +5,7 @@
 #include "../Rendering/DebugRenderer.h"
 #include "../Rendering/CModelRenderer.h"
 
-#include "../ECS/Components/Transform.h"
+#include <Gameplay/ECS/Components/Movement.h>
 #include "../ECS/Components/Rendering/CModelInfo.h"
 #include "../ECS/Components/Singletons/TimeSingleton.h"
 
@@ -429,9 +429,9 @@ namespace PhysicsUtils
         bool seperated = sep1 || sep2 || sep3 || sep4 || sep5 || sep6 || sep7;
         return !seperated;
     }
-    bool CheckCollisionForCModels(Terrain::Map& currentMap, const Transform& srcTransform, const CModelInfo& srcCModelInfo, vec3& triangleNormal, f32& triangleAngle, f32& timeToCollide)
+    bool CheckCollisionForCModels(Terrain::Map& currentMap, const Movement& srcMovement, const CModelInfo& srcCModelInfo, vec3& triangleNormal, f32& triangleAngle, f32& timeToCollide)
     {
-        if (srcTransform.velocity.x == 0.0f && srcTransform.velocity.y == 0.0f && srcTransform.velocity.z == 0.0f)
+        if (srcMovement.velocity.x == 0.0f && srcMovement.velocity.y == 0.0f && srcMovement.velocity.z == 0.0f)
             return false;
 
         SafeVector<entt::entity>* collidableEntityList = currentMap.GetCollidableEntityListByChunkID(srcCModelInfo.currentChunkID);
@@ -466,7 +466,7 @@ namespace PhysicsUtils
             const CModelRenderer::ModelInstanceData& srcInstanceData = cmodelInstanceDatas[srcCModelInfo.instanceID];
             const CModelRenderer::LoadedComplexModel& srcLoadedComplexModel = loadedComplexModels[srcInstanceData.modelID];
 
-            vec3 velocityThisFrame = srcTransform.velocity * timeSingleton.deltaTime;
+            vec3 velocityThisFrame = static_cast<vec3>(srcMovement.velocity) * timeSingleton.deltaTime;
             Geometry::AABoundingBox srcAABB;
             {
                 vec3 center = srcLoadedComplexModel.collisionAABB.center;
@@ -494,7 +494,6 @@ namespace PhysicsUtils
             for (u32 i = 0; i < numCollidableEntities; i++)
             {
                 entt::entity entityID = collidableEntities[i];
-                Transform& cmodelTransform = registry->get<Transform>(entityID);
                 CModelInfo& cmodelInfo = registry->get<CModelInfo>(entityID);
 
                 u32 instanceID = cmodelInfo.instanceID;

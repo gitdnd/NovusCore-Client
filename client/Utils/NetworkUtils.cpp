@@ -5,41 +5,35 @@
 
 namespace NetworkUtils
 {
-    void InitNetwork(entt::registry* registry, std::shared_ptr<asio::io_service> asioService)
+    void InitNetwork(entt::registry* registry)
     {
         ConnectionSingleton& connectionSingleton = registry->set<ConnectionSingleton>();
         AuthenticationSingleton& authenticationSingleton = registry->set<AuthenticationSingleton>();
 
         // Init Auth Socket
         {
-            connectionSingleton.authConnection = std::make_shared<NetworkClient>(new asio::ip::tcp::socket(*asioService.get()));
-            connectionSingleton.authConnection->SetReadHandler(std::bind(&ConnectionUpdateSystem::AuthSocket_HandleRead, std::placeholders::_1));
-            connectionSingleton.authConnection->SetConnectHandler(std::bind(&ConnectionUpdateSystem::AuthSocket_HandleConnect, std::placeholders::_1, std::placeholders::_2));
-            connectionSingleton.authConnection->SetDisconnectHandler(std::bind(&ConnectionUpdateSystem::AuthSocket_HandleDisconnect, std::placeholders::_1));
+            connectionSingleton.authConnection = std::make_shared<NetClient>();
+            connectionSingleton.authConnection->Init(NetSocket::Mode::TCP);
         }
 
         // Init Game Socket
         {
-            connectionSingleton.gameConnection = std::make_shared<NetworkClient>(new asio::ip::tcp::socket(*asioService.get()));
-            connectionSingleton.gameConnection->SetReadHandler(std::bind(&ConnectionUpdateSystem::GameSocket_HandleRead, std::placeholders::_1));
-            connectionSingleton.gameConnection->SetConnectHandler(std::bind(&ConnectionUpdateSystem::GameSocket_HandleConnect, std::placeholders::_1, std::placeholders::_2));
-            connectionSingleton.gameConnection->SetDisconnectHandler(std::bind(&ConnectionUpdateSystem::GameSocket_HandleDisconnect, std::placeholders::_1));
+            connectionSingleton.gameConnection = std::make_shared<NetClient>();
+            connectionSingleton.gameConnection->Init(NetSocket::Mode::TCP);
         }
         
     }
-    void DeInitNetwork(entt::registry* registry, std::shared_ptr<asio::io_service> asioService)
+    void DeInitNetwork(entt::registry* registry)
     {
         ConnectionSingleton& connectionSingleton = registry->ctx<ConnectionSingleton>();
-        if (!connectionSingleton.authConnection->IsClosed())
+        if (connectionSingleton.authConnection->IsConnected())
         {
-            connectionSingleton.authConnection->Close(asio::error::shut_down);
+            connectionSingleton.authConnection->Close();
         }
 
-        if (!connectionSingleton.gameConnection->IsClosed())
+        if (connectionSingleton.gameConnection->IsConnected())
         {
-            connectionSingleton.gameConnection->Close(asio::error::shut_down);
+            connectionSingleton.gameConnection->Close();
         }
-
-        asioService->stop();
     }
 }

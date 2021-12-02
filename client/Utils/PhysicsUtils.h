@@ -12,7 +12,7 @@ namespace Terrain
     struct Map;
 }
 
-struct Transform;
+struct Movement;
 struct CModelInfo;
 
 namespace PhysicsUtils
@@ -34,5 +34,5 @@ namespace PhysicsUtils
     bool Intersect_AABB_SWEEP(const Geometry::AABoundingBox& aabb, const Geometry::AABoundingBox& aabbToCollideWith, const vec3& velocity, f32& t);
     bool Intersect_SPHERE_TRIANGLE(const vec3& spherePos, const f32 sphereRadius, const Geometry::Triangle& triangle);
 
-    bool CheckCollisionForCModels(Terrain::Map& currentMap, const Transform& srcTransform, const CModelInfo& srcCModelInfo, vec3& triangleNormal, f32& triangleAngle, f32& timeToCollide);
+    bool CheckCollisionForCModels(Terrain::Map& currentMap, const Movement& srcTransform, const CModelInfo& srcCModelInfo, vec3& triangleNormal, f32& triangleAngle, f32& timeToCollide);
 }

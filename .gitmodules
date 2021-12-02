@@ -1,3 +1,6 @@
 [submodule "NovusCore/NovusCore-Common"]
 	path = NovusCore/NovusCore-Common
 	url = https://github.com/novuscore/NovusCore-Common.git
+[submodule "NovusCore/NovusCore-Gameplay"]
+	path = NovusCore/NovusCore-Gameplay
+	url = https://github.com/novuscore/NovusCore-Gameplay.git

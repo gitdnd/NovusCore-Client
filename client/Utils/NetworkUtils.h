@@ -5,6 +5,6 @@
 struct ConnectionSingleton;
 namespace NetworkUtils
 {
-    void InitNetwork(entt::registry* registry, std::shared_ptr<asio::io_service> asioService);
-    void DeInitNetwork(entt::registry* registry, std::shared_ptr<asio::io_service> asioService);
+    void InitNetwork(entt::registry* registry);
+    void DeInitNetwork(entt::registry* registry);
 }
