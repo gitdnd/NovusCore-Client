@@ -1,4 +1,9 @@
 #include "EngineLoop.h"
+
+#ifdef WIN32
+#include "Winsock.h"
+#endif
+
 #include <entt.hpp>
 #include <Networking/NetClient.h>
 #include <Networking/NetPacketHandler.h>
@@ -84,8 +89,18 @@
 AutoCVar_Int CVAR_FramerateLock("framerate.lock", "enable locking framerate", 1, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_FramerateTarget("framerate.target", "target framerate", 60);
 
-EngineLoop::EngineLoop() : _isRunning(false), _inputQueue(256), _outputQueue(256)
+
+EngineLoop::EngineLoop() : 
+    _isRunning(false), _inputQueue(256), _outputQueue(256)
 {
+#ifdef WIN32
+    WSADATA data;
+    i32 code = WSAStartup(MAKEWORD(2, 2), &data);
+    if (code != 0)
+    {
+        DebugHandler::PrintFatal("[Network] Failed to initialize WinSock");
+    }
+#endif
 }
 
 EngineLoop::~EngineLoop()
