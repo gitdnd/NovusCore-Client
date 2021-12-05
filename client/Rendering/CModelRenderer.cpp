@@ -196,6 +196,44 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
         AddInstance(*complexModel, *modelToBeLoaded.placement, modelToBeLoaded.entityID, placementDetails.instanceIndex);
         modelDisplayInfo.instanceID = placementDetails.instanceIndex;
     }
+    else
+    {
+        if (complexModel->isAnimated)
+        {
+            AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+            animationSystem->AddInstance(modelDisplayInfo.instanceID, AnimationSystem::AnimationInstanceData());
+
+            const AnimationModelInfo& animationModelInfo = _animationModelInfo.ReadGet(complexModel->modelID);
+
+            _animationSequences.ReadLock([&](const std::vector<AnimationSequence>& animationSequences)
+            {
+                for (u32 i = 0; i < animationModelInfo.numSequences; i++)
+                {
+                    const AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
+
+                    if (animationSequence.flags.isAlwaysPlaying)
+                    {
+                        AnimationRequest animationRequest;
+                        {
+                            animationRequest.instanceId = modelDisplayInfo.instanceID;
+                            animationRequest.sequenceId = i;
+                            animationRequest.flags.isPlaying = true;
+                            animationRequest.flags.isLooping = true;
+                            animationRequest.flags.stopAll = false;
+                        }
+
+                        _animationRequests.enqueue(animationRequest);
+                    }
+                }
+            });
+
+            // Play Stand By Default
+            if (!animationSystem->TryPlayAnimationID(modelDisplayInfo.instanceID, 0, true, true))
+            {
+                DebugHandler::PrintError("CModelRenderer : Failed to play animation 'Stand' for '%s'", complexModel->debugName.c_str());
+            }
+        }
+    }
 
     if (registry.all_of<VisibleModel>(entity))
     {
@@ -219,6 +257,7 @@ void CModelRenderer::OnModelDestroyed(entt::registry& registry, entt::entity ent
     const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(instanceID);
 
     AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+    animationSystem->TryStopAllAnimations(instanceID);
     animationSystem->RemoveInstance(instanceID);
 
     _freedModelIDInstances.WriteLock([&](robin_hood::unordered_map<u32, std::queue<u32>>& freedModelIDInstances)
