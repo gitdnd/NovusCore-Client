@@ -228,13 +228,13 @@ void MovementSystem::Update(entt::registry& registry)
         bool isGrounded = false;
         f32 timeToCollide = 0;
 
-        vec3 triangleNormal;
-        f32 triangleSteepness = 0;
-        bool willCollide = PhysicsUtils::CheckCollisionForCModels(currentMap, movement, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
+        //vec3 triangleNormal;
+        //f32 triangleSteepness = 0;
+        bool willCollide = false;// PhysicsUtils::CheckCollisionForCModels(currentMap, movement, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
         if (willCollide)
         {
-            transform.position += (movement.velocity * timeToCollide) * timeSingleton.deltaTime;
-            isGrounded = triangleSteepness <= 50;
+            //transform.position += (movement.velocity * timeToCollide) * timeSingleton.deltaTime;
+            //isGrounded = triangleSteepness <= 50;
         }
         else
         {

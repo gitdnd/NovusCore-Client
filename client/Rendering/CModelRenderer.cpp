@@ -179,12 +179,12 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
             {
                 entt::registry* registry = ServiceLocator::GetGameRegistry();
                 CModelInfo& cmodelInfo = registry->get_or_emplace<CModelInfo>(entity, modelDisplayInfo.instanceID, false);
-
+            
                 if (complexModel->numCollisionTriangles > 0)
                 {
                     registry->emplace_or_replace<Collidable>(entity);
                 }
-
+            
                 instanceIDToEntityID[modelDisplayInfo.instanceID] = entity;
             });
         }
@@ -1388,7 +1388,7 @@ void CModelRenderer::RegisterLoadFromChunk(u16 chunkID, const Terrain::Chunk& ch
                     modelToBeLoaded.placement = &placement;
                     modelToBeLoaded.name = &stringTable.GetString(placement.nameID);
                     modelToBeLoaded.nameHash = stringTable.GetStringHash(placement.nameID);
-                    modelToBeLoaded.entityID = registry->create();
+                    modelToBeLoaded.entityID = entt::null;// registry->create();
                 });
             }
         }

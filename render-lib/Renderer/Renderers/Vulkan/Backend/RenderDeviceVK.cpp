@@ -43,9 +43,10 @@ namespace Renderer
             //"VK_KHR_get_physical_device_properties2",
             "VK_KHR_maintenance1",
             "VK_KHR_maintenance3",
-            "VK_EXT_descriptor_indexing",
             "VK_KHR_draw_indirect_count",
-            "VK_KHR_shader_subgroup_extended_types"
+            "VK_KHR_shader_subgroup_extended_types",
+            "VK_EXT_descriptor_indexing",
+            "VK_EXT_sampler_filter_minmax"
         };
 
         struct ImguiContext

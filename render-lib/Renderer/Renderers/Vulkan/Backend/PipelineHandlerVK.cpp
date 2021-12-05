@@ -232,16 +232,29 @@ NOVUS_NO_PADDING_END;
                 subpass.pDepthStencilAttachment = &depthDescriptionRef;
             }
 
-            VkSubpassDependency dependency;
+            std::vector<VkSubpassDependency> dependencies;
+
+            VkSubpassDependency& dependency = dependencies.emplace_back();
             dependency.srcSubpass = 0;
             dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
             dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
             dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
             dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             dependency.dependencyFlags = 0;
+
+            VkSubpassDependency& dependency2 = dependencies.emplace_back();
+            dependency2.srcSubpass = VK_SUBPASS_EXTERNAL;
+            dependency2.dstSubpass = 0;
+            dependency2.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            dependency2.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            dependency2.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            dependency2.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            dependency2.dependencyFlags = 0;
 
             VkRenderPassCreateInfo renderPassInfo = {};
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -249,8 +262,8 @@ NOVUS_NO_PADDING_END;
             renderPassInfo.pAttachments = attachments.data();
             renderPassInfo.subpassCount = 1;
             renderPassInfo.pSubpasses = &subpass;
-            renderPassInfo.dependencyCount = 1;
-            renderPassInfo.pDependencies = &dependency;
+            renderPassInfo.dependencyCount = static_cast<u32>(dependencies.size());
+            renderPassInfo.pDependencies = dependencies.data();
 
             if (vkCreateRenderPass(_device->_device, &renderPassInfo, nullptr, &pipeline.renderPass) != VK_SUCCESS)
             {

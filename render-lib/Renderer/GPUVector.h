@@ -24,19 +24,6 @@ namespace Renderer
         {
             _dirtyRegions.WriteLock([&](std::vector<DirtyRegion>& dirtyRegions)
             {
-                // Check if we can use an existing dirtyRegion
-                for (u32 i = 0; i < dirtyRegions.size(); i++)
-                {
-                    DirtyRegion& dirtyRegion = dirtyRegions[i];
-
-                    if (offset == dirtyRegion.offset)
-                    {
-                        dirtyRegion.size = glm::max(size, dirtyRegion.size);
-                        return;
-                    }
-                }
-
-                // No usable region was found, add a new one
                 DirtyRegion& dirtyRegion = dirtyRegions.emplace_back();
 
                 dirtyRegion.offset = offset;

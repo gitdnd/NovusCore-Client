@@ -91,7 +91,7 @@ namespace Renderer
 
             std::atomic<BufferStatus> bufferStatus = BufferStatus::READY;
 
-            std::mutex mutex;
+            std::mutex handleMutex;
             i32 activeHandles = 0;
             i32 totalHandles = 0;
 
@@ -108,6 +108,7 @@ namespace Renderer
 
             bool isDirty = true;
             bool needsWait = false;
+            std::mutex submitMutex;
             SemaphoreID uploadFinishedSemaphore;
         };
 
@@ -166,6 +167,7 @@ namespace Renderer
                 return;
 
             ZoneScoped;
+            std::scoped_lock lock(data->submitMutex);
 
             CommandListID commandListID = _commandListHandler->BeginCommandList(QueueType::Graphics);
 
@@ -280,7 +282,7 @@ namespace Renderer
 
             // Increment number of active handles
             {
-                std::scoped_lock lock(stagingBuffer.mutex);
+                std::scoped_lock lock(stagingBuffer.handleMutex);
                 stagingBuffer.activeHandles++;
                 stagingBuffer.totalHandles++;
             }
@@ -290,7 +292,7 @@ namespace Renderer
                 [&, stagingBufferIDInt](UploadBuffer* buffer)
                 {
                     {
-                        std::scoped_lock lock(stagingBuffer.mutex);
+                        std::scoped_lock lock(stagingBuffer.handleMutex);
                         // Decrement the number of active handles into this staging buffer
                         stagingBuffer.activeHandles--;
                     }
@@ -338,7 +340,7 @@ namespace Renderer
 
             // Increment number of active handles
             {
-                std::scoped_lock lock(stagingBuffer.mutex);
+                std::scoped_lock lock(stagingBuffer.handleMutex);
                 stagingBuffer.activeHandles++;
                 stagingBuffer.totalHandles++;
             }
@@ -348,7 +350,7 @@ namespace Renderer
                 [&, stagingBufferIDInt](UploadBuffer* buffer)
                 {
                     {
-                        std::scoped_lock lock(stagingBuffer.mutex);
+                        std::scoped_lock lock(stagingBuffer.handleMutex);
                         // Decrement the number of active handles into this staging buffer
                         stagingBuffer.activeHandles--;
                     }
@@ -446,7 +448,7 @@ namespace Renderer
                 u32 selectedStagingBuffer = data->selectedStagingBuffer;
 
                 StagingBuffer* stagingBuffer = &data->stagingBuffers.Get(selectedStagingBuffer);
-                std::scoped_lock lock(stagingBuffer->mutex);
+                std::scoped_lock lock(stagingBuffer->handleMutex);
 
                 if (stagingBuffer->bufferStatus == BufferStatus::READY)
                 {
@@ -480,7 +482,7 @@ namespace Renderer
                 std::this_thread::yield();
             }
 
-            std::scoped_lock lock(stagingBuffer->mutex);
+            std::scoped_lock lock(stagingBuffer->handleMutex);
 
             // Try to allocate in the currently selected stagingbuffer
             if (stagingBuffer->allocator.TryAllocateOffset(size, 16, offset))
@@ -654,7 +656,7 @@ namespace Renderer
                 while (data->submitTasks.try_dequeue(submitTask))
                 {
                     StagingBuffer& stagingBuffer = data->stagingBuffers.Get(submitTask.stagingBufferID);
-                    std::scoped_lock lock(stagingBuffer.mutex);
+                    std::scoped_lock lock(stagingBuffer.handleMutex);
 
                     // If there are still open handles to this staging buffer, delay it until the next time we check
                     if (stagingBuffer.activeHandles > 0)
@@ -663,6 +665,7 @@ namespace Renderer
                         continue;
                     }
 
+                    std::scoped_lock submitLock(data->submitMutex);
                     stagingBuffer.bufferStatus = BufferStatus::SUBMITTED;
 
                     ExecuteStagingBuffer(stagingBuffer);
