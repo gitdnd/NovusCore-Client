@@ -177,9 +177,9 @@ namespace Renderer
         return _textureHandler->LoadTexture(desc);
     }
 
-    TextureID RendererVK::LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex)
+    TextureID RendererVK::LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex, bool allowDuplicates)
     {
-        return _textureHandler->LoadTextureIntoArray(desc, textureArray, arrayIndex);
+        return _textureHandler->LoadTextureIntoArray(desc, textureArray, arrayIndex, allowDuplicates);
     }
 
     VertexShaderID RendererVK::LoadShader(VertexShaderDesc& desc)
@@ -1050,6 +1050,41 @@ namespace Renderer
         imageCopy.extent.depth = 1;
         
         vkCmdCopyImage(commandBuffer, srcImage, VK_IMAGE_LAYOUT_GENERAL, dstImage, VK_IMAGE_LAYOUT_GENERAL, 1, &imageCopy);
+    }
+
+    void RendererVK::CopyDepthImage(CommandListID commandListID, DepthImageID dstImageID, uvec2 dstPos, DepthImageID srcImageID, uvec2 srcPos, uvec2 size)
+    {
+        VkCommandBuffer commandBuffer = _commandListHandler->GetCommandBuffer(commandListID);
+
+        VkImage dstImage = _imageHandler->GetImage(dstImageID);
+        VkImage srcImage = _imageHandler->GetImage(srcImageID);
+
+        VkImageCopy imageCopy = {};
+        imageCopy.dstOffset.x = dstPos.x;
+        imageCopy.dstOffset.y = dstPos.y;
+        imageCopy.dstSubresource.mipLevel = 0;
+        imageCopy.dstSubresource.layerCount = 1;
+        imageCopy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        imageCopy.srcOffset.x = srcPos.x;
+        imageCopy.srcOffset.y = srcPos.y;
+        imageCopy.srcSubresource.mipLevel = 0;
+        imageCopy.srcSubresource.layerCount = 1;
+        imageCopy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        imageCopy.extent.width = size.x;
+        imageCopy.extent.height = size.y;
+        imageCopy.extent.depth = 1;
+
+        // Transition images to TRANSFER_(DST/SRC)_OPTIMAL
+        _device->TransitionImageLayout(commandBuffer, dstImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 1);
+        _device->TransitionImageLayout(commandBuffer, srcImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 1);
+
+        vkCmdCopyImage(commandBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageCopy);
+
+        // Transition images back to GENERAL
+        _device->TransitionImageLayout(commandBuffer, dstImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1, 1);
+        _device->TransitionImageLayout(commandBuffer, srcImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, 1, 1);
     }
 
     void RendererVK::CopyBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range)

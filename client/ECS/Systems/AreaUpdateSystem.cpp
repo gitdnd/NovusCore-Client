@@ -127,20 +127,32 @@ void AreaUpdateSystem::Update(entt::registry& registry)
 
                 lightColor.ambientColor = glm::mix(lightColor.ambientColor, lightData.colorData.ambientColor, val);
                 lightColor.diffuseColor = glm::mix(lightColor.diffuseColor, lightData.colorData.diffuseColor, val);
+
                 lightColor.skybandTopColor = glm::mix(lightColor.skybandTopColor, lightData.colorData.skybandTopColor, val);
                 lightColor.skybandMiddleColor = glm::mix(lightColor.skybandMiddleColor, lightData.colorData.skybandMiddleColor, val);
                 lightColor.skybandBottomColor = glm::mix(lightColor.skybandBottomColor, lightData.colorData.skybandBottomColor, val);
                 lightColor.skybandAboveHorizonColor = glm::mix(lightColor.skybandAboveHorizonColor, lightData.colorData.skybandAboveHorizonColor, val);
                 lightColor.skybandHorizonColor = glm::mix(lightColor.skybandHorizonColor, lightData.colorData.skybandHorizonColor, val);
+
+                lightColor.shallowOceanColor = glm::mix(lightColor.shallowOceanColor, lightData.colorData.shallowOceanColor, val);
+                lightColor.deepOceanColor = glm::mix(lightColor.deepOceanColor, lightData.colorData.deepOceanColor, val);
+                lightColor.shallowRiverColor = glm::mix(lightColor.shallowRiverColor, lightData.colorData.shallowRiverColor, val);
+                lightColor.deepRiverColor = glm::mix(lightColor.deepRiverColor, lightData.colorData.deepRiverColor, val);
             }
 
             finalColorData.ambientColor = lightColor.ambientColor;
             finalColorData.diffuseColor = lightColor.diffuseColor;
+
             finalColorData.skybandTopColor = lightColor.skybandTopColor;
             finalColorData.skybandMiddleColor = lightColor.skybandMiddleColor;
             finalColorData.skybandBottomColor = lightColor.skybandBottomColor;
             finalColorData.skybandAboveHorizonColor = lightColor.skybandAboveHorizonColor;
             finalColorData.skybandHorizonColor = lightColor.skybandHorizonColor;
+
+            finalColorData.shallowOceanColor = lightColor.shallowOceanColor;
+            finalColorData.deepOceanColor = lightColor.deepOceanColor;
+            finalColorData.shallowRiverColor = lightColor.shallowRiverColor;
+            finalColorData.deepRiverColor = lightColor.deepRiverColor;
         }
 
         mapSingleton.SetLightColorData(finalColorData);
@@ -273,6 +285,30 @@ AreaUpdateLightColorData AreaUpdateSystem::GetLightColorData(NDBCSingleton& ndbc
     {
         NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 6);
         colorData.skybandHorizonColor = GetColorValueFromLightIntBand(lightIntBand, timeInSeconds);
+    }
+
+    // Get Shallow Ocean Color
+    {
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 14);
+        colorData.shallowOceanColor = vec4(GetColorValueFromLightIntBand(lightIntBand, timeInSeconds), lightParams->oceanShallowAlpha);
+    }
+
+    // Get Deep Ocean Color
+    {
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 15);
+        colorData.deepOceanColor = vec4(GetColorValueFromLightIntBand(lightIntBand, timeInSeconds), lightParams->oceanDeepAlpha);
+    }
+
+    // Get Shallow River Color
+    {
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 16);
+        colorData.shallowRiverColor = vec4(GetColorValueFromLightIntBand(lightIntBand, timeInSeconds), lightParams->waterShallowAlpha);
+    }
+
+    // Get Deep River Color
+    {
+        NDBC::LightIntBand* lightIntBand = lightIntBandNDBC->GetRowById<NDBC::LightIntBand>(lightIntBandStartId + 17);
+        colorData.deepRiverColor = vec4(GetColorValueFromLightIntBand(lightIntBand, timeInSeconds), lightParams->waterDeepAlpha);
     }
 
     return colorData;

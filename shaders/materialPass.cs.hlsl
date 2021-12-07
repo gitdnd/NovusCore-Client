@@ -308,7 +308,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 transparencyColor = transparency.rgb / max(transparency.a, 1e-5);
 
 	// Src: ONE_MINUS_SRC_ALPHA, Dst: SRC_ALPHA
-	color.rgb = (transparencyColor.rgb * (1.0f - transparencyWeight)) + (color.rgb /** transparencyWeight*/);
+	color.rgb = (transparencyColor.rgb * (1.0f - transparencyWeight)) + (color.rgb * transparencyWeight);
 
 	_resolvedColor[pixelPos] = color;
 }

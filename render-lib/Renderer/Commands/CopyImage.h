@@ -19,5 +19,16 @@ namespace Renderer
             u32 srcMipLevel = 0;
             uvec2 size = uvec2(0, 0);
         };
+
+        struct CopyDepthImage
+        {
+            static const BackendDispatchFunction DISPATCH_FUNCTION;
+
+            DepthImageID dstImage = DepthImageID::Invalid();
+            uvec2 dstPos = uvec2(0, 0);
+            DepthImageID srcImage = DepthImageID::Invalid();
+            uvec2 srcPos = uvec2(0, 0);
+            uvec2 size = uvec2(0, 0);
+        };
     }
 }

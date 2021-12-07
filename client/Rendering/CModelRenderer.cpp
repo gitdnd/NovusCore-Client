@@ -751,14 +751,12 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
 
     struct CModelCullingPassData
     {
-        Renderer::RenderPassMutableResource visibilityBuffer;
         Renderer::RenderPassMutableResource depth;
     };
 
     renderGraph->AddPass<CModelCullingPassData>("CModel Culling",
         [=](CModelCullingPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.visibilityBuffer = builder.Write(resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -767,15 +765,15 @@ void CModelRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderRe
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, CModelCullingPass);
 
-            Renderer::ComputePipelineDesc cullingPipelineDesc;
-            graphResources.InitializePipelineDesc(cullingPipelineDesc);
-
-            if (cullingEnabled && !lockFrustum)
+            if (!lockFrustum)
             {
                 Camera* camera = ServiceLocator::GetCamera();
                 memcpy(_cullConstants.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
                 _cullConstants.cameraPos = camera->GetPosition();
             }
+
+            Renderer::ComputePipelineDesc cullingPipelineDesc;
+            graphResources.InitializePipelineDesc(cullingPipelineDesc);
 
             const u32 numOpaqueDrawCalls = static_cast<u32>(_opaqueDrawCalls.Size());
             const u32 numTransparentDrawCalls = static_cast<u32>(_transparentDrawCalls.Size());
@@ -1308,7 +1306,7 @@ void CModelRenderer::AddTransparencyPass(Renderer::RenderGraph* renderGraph, Ren
         [=](CModelTransparencyPassData& data, Renderer::RenderGraphBuilder& builder)
         {
             data.transparency = builder.Write(resources.transparency, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
-            data.transparencyWeights = builder.Write(resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.transparencyWeights = builder.Write(resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -1650,6 +1648,13 @@ void CModelRenderer::Clear()
     _animationTrackTimestamps.clear();
     _animationTrackValues.clear();
     _animationBoneInstances.Clear();
+
+    // This clears _animationRequests, stupid moodycamel :(
+    AnimationRequest animationRequest;
+    while (_animationRequests.try_dequeue(animationRequest))
+    {
+
+    }
 
     _opaqueDrawCalls.Clear();
     _opaqueDrawCallDatas.Clear();

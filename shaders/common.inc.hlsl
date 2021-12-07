@@ -40,6 +40,12 @@ float3 OctNormalDecode(float2 f)
     return normalize(n);
 }
 
+float LinearizeDepth(float d, float zNear, float zFar)
+{
+    float z_n = 2.0 * d - 1.0;
+    return 2.0 * zNear * zFar / (zFar + zNear - z_n * (zFar - zNear));
+}
+
 float Map(float value, float originalMin, float originalMax, float newMin, float newMax)
 {
     return (value - originalMin) / (originalMax - originalMin) * (newMax - newMin) + newMin;

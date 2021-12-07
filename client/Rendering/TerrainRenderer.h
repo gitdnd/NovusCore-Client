@@ -78,7 +78,7 @@ class TerrainRenderer
 #pragma pack(pop)
 
 public:
-    TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer);
+    TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer, WaterRenderer* waterRenderer);
     ~TerrainRenderer();
 
     void Update(f32 deltaTime);

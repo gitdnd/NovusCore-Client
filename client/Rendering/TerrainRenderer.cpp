@@ -75,13 +75,13 @@ struct TerrainCellHeightRange
 #endif
 };
 
-TerrainRenderer::TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer)
+TerrainRenderer::TerrainRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer, MapObjectRenderer* mapObjectRenderer, CModelRenderer* cModelRenderer, WaterRenderer* waterRenderer)
     : _renderer(renderer)
     , _debugRenderer(debugRenderer)
     , _mapObjectRenderer(mapObjectRenderer)
     , _cModelRenderer(cModelRenderer)
+    , _waterRenderer(waterRenderer)
 {
-    _waterRenderer = new WaterRenderer(renderer); // Needs to be created before CreatePermanentResources
     CreatePermanentResources();
 }
 
@@ -201,9 +201,6 @@ void TerrainRenderer::Update(f32 deltaTime)
         }
         _renderer->UnmapBuffer(_drawCountReadBackBuffer);
     }
-
-    // Subrenderers
-    _waterRenderer->Update(deltaTime);
 }
 
 void TerrainRenderer::DebugRenderCellTriangles(const Camera* camera)
@@ -1099,7 +1096,7 @@ bool TerrainRenderer::LoadMap(const NDBC::Map* map)
     _cModelRenderer->ExecuteLoad();
 
     // Load Water
-    //_waterRenderer->LoadWater(_loadedChunks);
+    _waterRenderer->LoadWater(_loadedChunks);
 
     return true;
 }

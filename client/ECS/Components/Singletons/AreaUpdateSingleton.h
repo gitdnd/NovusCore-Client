@@ -20,6 +20,11 @@ struct AreaUpdateLightColorData
     vec3 skybandAboveHorizonColor = vec3(0.69f, 0.85f, 0.88f); 
     vec3 skybandHorizonColor = vec3(0.71f, 0.71f, 0.71f);
 
+    vec4 shallowOceanColor = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    vec4 deepOceanColor = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    vec4 shallowRiverColor = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    vec4 deepRiverColor = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
     AreaUpdateLightColorData operator+(const AreaUpdateLightColorData& other) const
     {
         AreaUpdateLightColorData colorData;
@@ -32,6 +37,11 @@ struct AreaUpdateLightColorData
         colorData.skybandBottomColor = skybandBottomColor + other.skybandBottomColor;
         colorData.skybandAboveHorizonColor = skybandAboveHorizonColor + other.skybandAboveHorizonColor;
         colorData.skybandHorizonColor = skybandHorizonColor + other.skybandHorizonColor;
+
+        colorData.shallowOceanColor = shallowOceanColor + other.shallowOceanColor;
+        colorData.deepOceanColor = deepOceanColor + other.deepOceanColor;
+        colorData.shallowRiverColor = shallowRiverColor + other.shallowRiverColor;
+        colorData.deepRiverColor = deepRiverColor + other.deepRiverColor;
 
         return colorData;
     }
@@ -48,6 +58,11 @@ struct AreaUpdateLightColorData
         colorData.skybandAboveHorizonColor = skybandAboveHorizonColor / scalar;
         colorData.skybandHorizonColor = skybandHorizonColor / scalar;
 
+        colorData.shallowOceanColor = shallowOceanColor / scalar;
+        colorData.deepOceanColor = deepOceanColor / scalar;
+        colorData.shallowRiverColor = shallowRiverColor / scalar;
+        colorData.deepRiverColor = deepRiverColor / scalar;
+
         return colorData;
     }
     void operator+=(const AreaUpdateLightColorData& other)
@@ -60,6 +75,11 @@ struct AreaUpdateLightColorData
         skybandBottomColor += other.skybandBottomColor;
         skybandAboveHorizonColor += other.skybandAboveHorizonColor;
         skybandHorizonColor += other.skybandHorizonColor;
+
+        shallowOceanColor += other.shallowOceanColor;
+        deepOceanColor += other.deepOceanColor;
+        shallowRiverColor += other.shallowRiverColor;
+        deepRiverColor += other.deepRiverColor;
     }
 };
 

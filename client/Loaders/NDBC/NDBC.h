@@ -325,6 +325,9 @@ namespace NDBC
         u32 particleMovement;
         u32 particleTextureSlots;
         u32 liquidMaterialId;
+        u32 texture;
+        u32 numTextureFrames;
+        u32 hasDepthEnabled;
 
         // TODO: Not reading everything
     };

@@ -24,6 +24,7 @@ class UIRenderer;
 class TerrainRenderer;
 class MapObjectRenderer;
 class CModelRenderer;
+class WaterRenderer;
 class MaterialRenderer;
 class SkyboxRenderer;
 class PostProcessRenderer;
@@ -49,6 +50,7 @@ public:
     TerrainRenderer* GetTerrainRenderer() { return _terrainRenderer; }
     MapObjectRenderer* GetMapObjectRenderer() { return _mapObjectRenderer; }
     CModelRenderer* GetCModelRenderer() { return _cModelRenderer; }
+    WaterRenderer* GetWaterRenderer() { return _waterRenderer; }
     DebugRenderer* GetDebugRenderer() { return _debugRenderer; }
     RendertargetVisualizer* GetRendertargetVisualizer() { return _rendertargetVisualizer; }
     PixelQuery* GetPixelQuery() { return _pixelQuery; }
@@ -82,6 +84,7 @@ private:
     TerrainRenderer* _terrainRenderer;
     MapObjectRenderer* _mapObjectRenderer;
     CModelRenderer* _cModelRenderer;
+    WaterRenderer* _waterRenderer;
     MaterialRenderer* _materialRenderer;
     SkyboxRenderer* _skyboxRenderer;
     PostProcessRenderer* _postProcessRenderer;

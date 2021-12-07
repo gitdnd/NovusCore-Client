@@ -16,6 +16,7 @@
 #include "Rendering/TerrainRenderer.h"
 #include "Rendering/MapObjectRenderer.h"
 #include "Rendering/CModelRenderer.h"
+#include "Rendering/WaterRenderer.h"
 #include "Rendering/RendertargetVisualizer.h"
 #include "Rendering/CameraFreelook.h"
 #include "Rendering/CameraOrbital.h"
@@ -989,6 +990,9 @@ void EngineLoop::DrawPositionStats()
     ImGui::Text("Camera Location : (%f, %f, %f)", cameraLocation.x, cameraLocation.y, cameraLocation.z);
     ImGui::Text("Camera Rotation : (%f, %f, %f)", cameraRotation.x, cameraRotation.y, cameraRotation.z);
 
+    vec4 heightBoxPosition = *CVarSystem::Get()->GetVecFloatCVar("terrain.heightBox.Position");
+    ImGui::Text("Heightbox Position : (%f, %f, %f)", heightBoxPosition.x, heightBoxPosition.y, heightBoxPosition.z);
+
     ImGui::Spacing();
     ImGui::Spacing();
 
@@ -1136,6 +1140,7 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
     TerrainRenderer* terrainRenderer = _clientRenderer->GetTerrainRenderer();
     MapObjectRenderer* mapObjectRenderer = _clientRenderer->GetMapObjectRenderer();
     CModelRenderer* cModelRenderer = _clientRenderer->GetCModelRenderer();
+    WaterRenderer* waterRenderer = _clientRenderer->GetWaterRenderer();
 
     // Draw hardware info
     CPUInfo cpuInfo = CPUInfo::Get();
@@ -1268,6 +1273,20 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
             totalDrawCallsSurvived += drawCallsSurvived;
         }
 
+        // Water
+        {
+            u32 drawCalls = waterRenderer->GetNumDrawCalls();
+            u32 drawCallsSurvived = waterRenderer->GetNumSurvivingDrawCalls();
+            
+            if (showDrawCalls)
+            {
+                DrawCullingStatsEntry("Water", drawCalls, drawCallsSurvived, !showDrawCalls);
+            }
+            
+            totalDrawCalls += drawCalls;
+            totalDrawCallsSurvived += drawCallsSurvived;
+        }
+
         // Always draw Total, if we are collapsed it will go on the collapsable header
         DrawCullingStatsEntry("Total", totalDrawCalls, totalDrawCallsSurvived, !showDrawCalls);
     }
@@ -1380,6 +1399,20 @@ void EngineLoop::DrawPerformance(EngineStatsSingleton* stats)
                 DrawCullingStatsEntry("CModels (Transparent)", triangles, trianglesSurvived, !showTriangles);
             }
 
+            totalTriangles += triangles;
+            totalTrianglesSurvived += trianglesSurvived;
+        }
+
+        // Water
+        {
+            u32 triangles = waterRenderer->GetNumTriangles();
+            u32 trianglesSurvived = waterRenderer->GetNumSurvivingTriangles();
+        
+            if (showTriangles)
+            {
+                DrawCullingStatsEntry("Water", triangles, trianglesSurvived, !showTriangles);
+            }
+         
             totalTriangles += triangles;
             totalTrianglesSurvived += trianglesSurvived;
         }

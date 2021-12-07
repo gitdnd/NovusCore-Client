@@ -5,6 +5,7 @@
 #include "CModelRenderer.h"
 #include "MaterialRenderer.h"
 #include "SkyboxRenderer.h"
+#include "WaterRenderer.h"
 #include "PostProcessRenderer.h"
 #include "RendertargetVisualizer.h"
 #include "DebugRenderer.h"
@@ -104,7 +105,8 @@ ClientRenderer::ClientRenderer()
     _postProcessRenderer = new PostProcessRenderer(_renderer);
     _rendertargetVisualizer = new RendertargetVisualizer(_renderer);
     _mapObjectRenderer = new MapObjectRenderer(_renderer, _debugRenderer);
-    _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _mapObjectRenderer, _cModelRenderer);
+    _waterRenderer = new WaterRenderer(_renderer, _debugRenderer);
+    _terrainRenderer = new TerrainRenderer(_renderer, _debugRenderer, _mapObjectRenderer, _cModelRenderer, _waterRenderer);
     _materialRenderer = new MaterialRenderer(_renderer, _terrainRenderer, _mapObjectRenderer, _cModelRenderer);
     _pixelQuery = new PixelQuery(_renderer);
 
@@ -122,6 +124,7 @@ void ClientRenderer::Update(f32 deltaTime)
     _frameAllocator->Reset();
 
     _terrainRenderer->Update(deltaTime);
+    _waterRenderer->Update(deltaTime);
     _mapObjectRenderer->Update(deltaTime);
     _cModelRenderer->Update(deltaTime);
     _postProcessRenderer->Update(deltaTime);
@@ -193,6 +196,7 @@ void ClientRenderer::Render()
         {
             Renderer::RenderPassMutableResource visibilityBuffer;
             Renderer::RenderPassMutableResource resolvedColor;
+            Renderer::RenderPassMutableResource transparencyWeights;
             Renderer::RenderPassMutableResource depth;
         };
 
@@ -201,6 +205,7 @@ void ClientRenderer::Render()
         {
             data.visibilityBuffer = builder.Write(_resources.visibilityBuffer, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
             data.resolvedColor = builder.Write(_resources.resolvedColor, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
+            data.transparencyWeights = builder.Write(_resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
             data.depth = builder.Write(_resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::CLEAR);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -248,6 +253,7 @@ void ClientRenderer::Render()
     _terrainRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
     _mapObjectRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
     _cModelRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
+    _waterRenderer->AddCullingPass(&renderGraph, _resources, _frameIndex);
 
     // Geometry Pass
     _terrainRenderer->AddGeometryPass(&renderGraph, _resources, _frameIndex);
@@ -259,6 +265,9 @@ void ClientRenderer::Render()
 
     // Transparency pass
     _cModelRenderer->AddTransparencyPass(&renderGraph, _resources, _frameIndex);
+
+    // Water Pass
+    _waterRenderer->AddWaterPass(&renderGraph, _resources, _frameIndex);
 
     // Calculate SAO
     _postProcessRenderer->AddCalculateSAOPass(&renderGraph, _resources, _frameIndex);
@@ -415,6 +424,17 @@ void ClientRenderer::CreatePermanentResources()
     mainDepthDesc.depthClearValue = 0.0f;
 
     _resources.depth = _renderer->CreateDepthImage(mainDepthDesc);
+
+    // Copy of the depth, taken after we render opaque
+    Renderer::DepthImageDesc opaqueDepthCopyDesc;
+    opaqueDepthCopyDesc.debugName = "OpaqueDepthCopy";
+    opaqueDepthCopyDesc.dimensions = vec2(1.0f, 1.0f);
+    opaqueDepthCopyDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    opaqueDepthCopyDesc.format = Renderer::DepthImageFormat::D32_FLOAT;
+    opaqueDepthCopyDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    opaqueDepthCopyDesc.depthClearValue = 0.0f;
+
+    _resources.opaqueDepthCopy = _renderer->CreateDepthImage(opaqueDepthCopyDesc);
 
     // View Constant Buffer (for camera data)
     _resources.viewConstantBuffer = new Renderer::Buffer<ViewConstantBuffer>(_renderer, "ViewConstantBuffer", Renderer::BufferUsage::UNIFORM_BUFFER, Renderer::BufferCPUAccess::WriteOnly);

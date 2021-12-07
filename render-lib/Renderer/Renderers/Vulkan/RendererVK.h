@@ -58,7 +58,7 @@ namespace Renderer
 
         // Loading
         [[nodiscard]] TextureID LoadTexture(TextureDesc& desc) override;
-        [[nodiscard]] TextureID LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex) override;
+        [[nodiscard]] TextureID LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex, bool allowDuplicates = false) override;
 
         [[nodiscard]] VertexShaderID LoadShader(VertexShaderDesc& desc) override;
         [[nodiscard]] PixelShaderID LoadShader(PixelShaderDesc& desc) override;
@@ -100,6 +100,7 @@ namespace Renderer
         void AddSignalSemaphore(CommandListID commandListID, SemaphoreID semaphoreID) override;
         void AddWaitSemaphore(CommandListID commandListID, SemaphoreID semaphoreID) override;
         void CopyImage(CommandListID commandListID, ImageID dstImageID, uvec2 dstPos, u32 dstMipLevel, ImageID srcImageID, uvec2 srcPos, u32 srcMipLevel, uvec2 size) override;
+        void CopyDepthImage(CommandListID commandListID, DepthImageID dstImageID, uvec2 dstPos, DepthImageID srcImageID, uvec2 srcPos, uvec2 size) override;
         void CopyBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range) override;
         void PipelineBarrier(CommandListID commandListID, PipelineBarrierType type, BufferID buffer) override;
         void ImageBarrier(CommandListID commandListID, ImageID image) override;

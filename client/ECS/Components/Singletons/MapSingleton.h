@@ -34,7 +34,7 @@ struct MapSingleton
 
 	Terrain::Map& GetCurrentMap() { return _currentMap; }
 
-	AreaUpdateLightColorData GetLightColorData() { return _lightColorData; }
+	const AreaUpdateLightColorData& GetLightColorData() { return _lightColorData; }
 	void SetLightColorData(AreaUpdateLightColorData lightColorData) { _lightColorData = lightColorData; }
 
 	vec3 GetLightDirection() { return _lightDirection; }

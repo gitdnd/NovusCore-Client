@@ -238,6 +238,13 @@ namespace Renderer
         renderer->CopyImage(commandList, actualData->dstImage, actualData->dstPos, actualData->dstMipLevel, actualData->srcImage, actualData->srcPos, actualData->srcMipLevel, actualData->size);
     }
 
+    void BackendDispatch::CopyDepthImage(Renderer* renderer, CommandListID commandList, const void* data)
+    {
+        ZoneScopedC(tracy::Color::Red3);
+        const Commands::CopyDepthImage* actualData = static_cast<const Commands::CopyDepthImage*>(data);
+        renderer->CopyDepthImage(commandList, actualData->dstImage, actualData->dstPos, actualData->srcImage, actualData->srcPos, actualData->size);
+    }
+
     void BackendDispatch::CopyBuffer(Renderer* renderer, CommandListID commandList, const void* data)
     {
         ZoneScopedC(tracy::Color::Red3);

@@ -24,4 +24,5 @@ struct RenderResources
     Renderer::ImageID ambientObscurance;
 
     Renderer::DepthImageID depth;
+    Renderer::DepthImageID opaqueDepthCopy;
 };

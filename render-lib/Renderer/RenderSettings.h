@@ -1,5 +1,6 @@
 #pragma once
 #include <NovusTypes.h>
+#include "RenderStates.h"
 
 namespace Renderer
 {

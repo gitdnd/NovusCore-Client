@@ -3,6 +3,8 @@
 #include "../Utils/ServiceLocator.h"
 #include "../Utils/MapUtils.h"
 #include "RenderResources.h"
+#include "CVar/CVarSystem.h"
+#include "Camera.h"
 
 #include <filesystem>
 #include <GLFW/glfw3.h>
@@ -15,11 +17,20 @@
 #include <tracy/TracyVulkan.hpp>
 
 #include "../ECS/Components/Singletons/MapSingleton.h"
+#include "../ECS/Components/Singletons/NDBCSingleton.h"
+#include "../ECS/Components/Singletons/TextureSingleton.h"
 
 namespace fs = std::filesystem;
 
-WaterRenderer::WaterRenderer(Renderer::Renderer* renderer)
+AutoCVar_Int CVAR_WaterCullingEnabled("water.cullEnable", "enable culling of water", 1, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_WaterLockCullingFrustum("water.lockCullingFrustum", "lock frustrum for water culling", 0, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_WaterDrawBoundingBoxes("water.drawBoundingBoxes", "draw bounding boxes for water", 0, CVarFlags::EditCheckbox);
+AutoCVar_Int CVAR_WaterOcclusionCullEnabled("water.occlusionCullEnable", "enable culling of water", 1, CVarFlags::EditCheckbox);
+AutoCVar_Float CVAR_WaterVisibilityRange("water.visibilityRange", "How far underwater you should see", 10.0f, CVarFlags::EditFloatDrag);
+
+WaterRenderer::WaterRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
     : _renderer(renderer)
+    , _debugRenderer(debugRenderer)
 {
     CreatePermanentResources();
 }
@@ -31,23 +42,74 @@ WaterRenderer::~WaterRenderer()
 
 void WaterRenderer::Update(f32 deltaTime)
 {
-    _constants.currentTime += deltaTime;
-    /*static f32 updateTimer = 0;
+    f32 waterProgress = deltaTime * 30.0f;
+    _drawConstants.currentTime = std::fmodf(_drawConstants.currentTime + waterProgress, 30.0f);
 
-    if (updateTimer >= 1 / 30.f)
+    // Update arealight water color
     {
-        if (++_textureIndex == 30)
+        entt::registry* registry = ServiceLocator::GetGameRegistry();
+        MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+
+        i32 lockLight = *CVarSystem::Get()->GetIntCVar("lights.lock");
+        if (!lockLight)
         {
-            _textureIndex = 0;
+            const AreaUpdateLightColorData& lightColor = mapSingleton.GetLightColorData();
+
+            _drawConstants.shallowOceanColor = lightColor.shallowOceanColor;
+            _drawConstants.deepOceanColor = lightColor.deepOceanColor;
+            _drawConstants.shallowRiverColor = lightColor.shallowRiverColor;
+            _drawConstants.deepRiverColor = lightColor.deepRiverColor;
+        }
+    }
+
+    _drawConstants.waterVisibilityRange = Math::Max(CVAR_WaterVisibilityRange.GetFloat(), 1.0f);
+
+    bool drawBoundingBoxes = CVAR_WaterDrawBoundingBoxes.Get() == 1;
+    if (drawBoundingBoxes)
+    {
+        _boundingBoxes.ReadLock([&](const std::vector<AABB>& boundingBoxes)
+        {
+            for (const AABB& boundingBox : boundingBoxes)
+            {
+                vec3 center = (vec3(boundingBox.min) + vec3(boundingBox.max)) * 0.5f;
+                vec3 extents = vec3(boundingBox.max) - center;
+
+                _debugRenderer->DrawAABB3D(center, extents, 0xff00ffff);
+            }
+        });
+    }
+
+    u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
+
+    _numSurvivingDrawCalls = numDrawCalls;
+    _numSurvivingTriangles = _numTriangles;
+
+    const bool cullingEnabled = CVAR_WaterCullingEnabled.Get();
+    if (cullingEnabled && numDrawCalls > 0)
+    {
+        // Drawcalls
+        {
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_culledDrawCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numSurvivingDrawCalls = *count;
+            }
+            _renderer->UnmapBuffer(_culledDrawCountReadBackBuffer);
         }
 
-        updateTimer -= 1 / 30.f;
+        // Triangles
+        {
+            u32* count = static_cast<u32*>(_renderer->MapBuffer(_culledTriangleCountReadBackBuffer));
+            if (count != nullptr)
+            {
+                _numSurvivingTriangles = *count;
+            }
+            _renderer->UnmapBuffer(_culledTriangleCountReadBackBuffer);
+        }
     }
-    else
-        updateTimer += deltaTime;*/
 }
 
-void WaterRenderer::LoadWater(const std::vector<u16>& chunkIDs)
+void WaterRenderer::LoadWater(SafeVector<u16>& chunkIDs)
 {
     RegisterChunksToBeLoaded(chunkIDs);
     ExecuteLoad();
@@ -55,24 +117,109 @@ void WaterRenderer::LoadWater(const std::vector<u16>& chunkIDs)
 
 void WaterRenderer::Clear()
 {
-    _vertices.clear();
-    _indices.clear();
+    _drawCalls.Clear();
+    _drawCallDatas.Clear();
 
-    //_renderer->UnloadTexturesInArray(_waterTextures, 0);
+    _vertices.Clear();
+    _indices.Clear();
+    
+    _boundingBoxes.Clear();
+    _waterTextureInfos.clear();
+
+    _renderer->UnloadTexturesInArray(_waterTextures, 0);
+}
+
+void WaterRenderer::AddCullingPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
+{
+    u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
+    if (numDrawCalls == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_WaterCullingEnabled.Get();
+    if (!cullingEnabled)
+        return;
+
+    const bool lockFrustum = CVAR_WaterLockCullingFrustum.Get();
+
+    struct WaterCullingPassData
+    {
+        Renderer::RenderPassMutableResource depth;
+    };
+
+    renderGraph->AddPass<WaterCullingPassData>("Water Culling",
+        [=](WaterCullingPassData& data, Renderer::RenderGraphBuilder& builder)
+        {
+            data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+
+            return true; // Return true from setup to enable this pass, return false to disable it
+        },
+        [=](WaterCullingPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
+        {
+            GPU_SCOPED_PROFILER_ZONE(commandList, WaterCullingPass);
+
+            // Update constants
+            if (!lockFrustum)
+            {
+                Camera* camera = ServiceLocator::GetCamera();
+                memcpy(_cullConstants.frustumPlanes, camera->GetFrustumPlanes(), sizeof(vec4[6]));
+                _cullConstants.cameraPos = camera->GetPosition();
+            }
+
+            // Reset the counters
+            commandList.FillBuffer(_culledDrawCountBuffer, 0, 4, 0);
+            commandList.FillBuffer(_culledTriangleCountBuffer, 0, 4, 0);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _culledDrawCountBuffer);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToComputeShaderRW, _culledTriangleCountBuffer);
+
+            Renderer::ComputePipelineDesc cullingPipelineDesc;
+            graphResources.InitializePipelineDesc(cullingPipelineDesc);
+
+            Renderer::ComputeShaderDesc shaderDesc;
+            shaderDesc.path = "waterCulling.cs.hlsl";
+            cullingPipelineDesc.computeShader = _renderer->LoadShader(shaderDesc);
+
+            Renderer::ComputePipelineID pipeline = _renderer->CreatePipeline(cullingPipelineDesc);
+            commandList.BeginPipeline(pipeline);
+
+            // Make a framelocal copy of our cull constants
+            CullConstants* cullConstants = graphResources.FrameNew<CullConstants>();
+            memcpy(cullConstants, &_cullConstants, sizeof(CullConstants));
+            cullConstants->maxDrawCount = numDrawCalls;
+            cullConstants->occlusionCull = CVAR_WaterOcclusionCullEnabled.Get();
+            commandList.PushConstant(cullConstants, 0, sizeof(CullConstants));
+
+            _cullingDescriptorSet.Bind("_depthPyramid"_h, resources.depthPyramid);
+
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_cullingDescriptorSet, frameIndex);
+            commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
+
+            commandList.Dispatch((numDrawCalls + 31) / 32, 1, 1);
+
+            commandList.EndPipeline(pipeline);
+        });
 }
 
 void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResources& resources, u8 frameIndex)
 {
-    /*struct WaterPassData
+    u32 numDrawCalls = static_cast<u32>(_drawCalls.Size());
+    if (numDrawCalls == 0)
+        return;
+
+    const bool cullingEnabled = CVAR_WaterCullingEnabled.Get();
+
+    struct WaterPassData
     {
-        Renderer::RenderPassMutableResource color;
+        Renderer::RenderPassMutableResource transparency;
+        Renderer::RenderPassMutableResource transparencyWeights;
         Renderer::RenderPassMutableResource depth;
     };
 
-    renderGraph->AddPass<WaterPassData>("Water Pass", 
+    renderGraph->AddPass<WaterPassData>("Water OIT Pass", 
         [=](WaterPassData& data, Renderer::RenderGraphBuilder& builder)
         {
-            data.color = builder.Write(resources.color, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.transparency = builder.Write(resources.transparency, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
+            data.transparencyWeights = builder.Write(resources.transparencyWeights, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
             data.depth = builder.Write(resources.depth, Renderer::RenderGraphBuilder::WriteMode::RENDERTARGET, Renderer::RenderGraphBuilder::LoadMode::LOAD);
 
             return true; // Return true from setup to enable this pass, return false to disable it
@@ -80,6 +227,21 @@ void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResou
         [=](WaterPassData& data, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList)
         {
             GPU_SCOPED_PROFILER_ZONE(commandList, WaterPass);
+
+            commandList.PushMarker("Water", Color::White);
+
+            uvec2 depthSize = _renderer->GetImageDimension(resources.depth);
+            commandList.CopyDepthImage(resources.opaqueDepthCopy, uvec2(0, 0), resources.depth, uvec2(0, 0), depthSize);
+
+            commandList.ImageBarrier(resources.opaqueDepthCopy);
+            commandList.ImageBarrier(resources.transparency);
+            commandList.ImageBarrier(resources.transparencyWeights);
+
+            if (cullingEnabled)
+            {
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledDrawCallsBuffer);
+                commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToIndirectArguments, _culledDrawCountBuffer);
+            }
 
             Renderer::GraphicsPipelineDesc pipelineDesc;
             graphResources.InitializePipelineDesc(pipelineDesc);
@@ -95,57 +257,83 @@ void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResou
 
             // Depth state
             pipelineDesc.states.depthStencilState.depthEnable = true;
-            pipelineDesc.states.depthStencilState.depthWriteEnable = true;
             pipelineDesc.states.depthStencilState.depthFunc = Renderer::ComparisonFunc::GREATER;
 
             // Rasterizer state
-            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::NONE; //Renderer::CullMode::BACK;
-            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::FrontFaceState::COUNTERCLOCKWISE;
+            pipelineDesc.states.rasterizerState.cullMode = Renderer::CullMode::BACK;
+            pipelineDesc.states.rasterizerState.frontFaceMode = Renderer::Settings::FRONT_FACE_STATE;
 
-            // Blending state
+            // Blend state
+            pipelineDesc.states.blendState.independentBlendEnable = true;
+
             pipelineDesc.states.blendState.renderTargets[0].blendEnable = true;
             pipelineDesc.states.blendState.renderTargets[0].blendOp = Renderer::BlendOp::ADD;
-            pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::SRC_ALPHA;
-            pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::INV_SRC_ALPHA;
+            pipelineDesc.states.blendState.renderTargets[0].srcBlend = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].destBlend = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].srcBlendAlpha = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].destBlendAlpha = Renderer::BlendMode::ONE;
+            pipelineDesc.states.blendState.renderTargets[0].blendOpAlpha = Renderer::BlendOp::ADD;
+
+            pipelineDesc.states.blendState.renderTargets[1].blendEnable = true;
+            pipelineDesc.states.blendState.renderTargets[1].blendOp = Renderer::BlendOp::ADD;
+            pipelineDesc.states.blendState.renderTargets[1].srcBlend = Renderer::BlendMode::ZERO;
+            pipelineDesc.states.blendState.renderTargets[1].destBlend = Renderer::BlendMode::INV_SRC_COLOR;
+            pipelineDesc.states.blendState.renderTargets[1].srcBlendAlpha = Renderer::BlendMode::ZERO;
+            pipelineDesc.states.blendState.renderTargets[1].destBlendAlpha = Renderer::BlendMode::INV_SRC_ALPHA;
+            pipelineDesc.states.blendState.renderTargets[1].blendOpAlpha = Renderer::BlendOp::ADD;
 
             // Render targets
-            pipelineDesc.renderTargets[0] = data.color;
+            pipelineDesc.renderTargets[0] = data.transparency;
+            pipelineDesc.renderTargets[1] = data.transparencyWeights;
             pipelineDesc.depthStencil = data.depth;
 
             // Set pipeline
             Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
             commandList.BeginPipeline(pipeline);
 
+            _passDescriptorSet.Bind("_depthRT"_h, resources.opaqueDepthCopy);
+
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
-
-            commandList.PushMarker("Water", Color::White);
-
-            _passDescriptorSet.Bind("_drawCallDatas", _drawCallDatasBuffer);
-            _passDescriptorSet.Bind("_vertices", _vertexBuffer);
-            _passDescriptorSet.Bind("_textures", _waterTextures);
-
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);
 
-            {
-                //commandList.PushConstant(&_constants, 0, sizeof(Constants));
-                commandList.SetIndexBuffer(_indexBuffer, Renderer::IndexFormat::UInt16);
+            DrawConstants* constants = graphResources.FrameNew<DrawConstants>();
+            memcpy(constants, &_drawConstants, sizeof(DrawConstants));
 
-                u32 numDrawCalls = static_cast<u32>(_drawCalls.size());
-                commandList.DrawIndexedIndirect(_drawCallsBuffer, 0, numDrawCalls);
+            commandList.PushConstant(constants, 0, sizeof(DrawConstants));
+
+            commandList.SetIndexBuffer(_indices.GetBuffer(), Renderer::IndexFormat::UInt16);
+
+            if (cullingEnabled)
+            {
+                commandList.DrawIndexedIndirectCount(_culledDrawCallsBuffer, 0, _culledDrawCountBuffer, 0, numDrawCalls);
+            }
+            else
+            {
+                commandList.DrawIndexedIndirect(_drawCalls.GetBuffer(), 0, numDrawCalls);
             }
 
             commandList.PopMarker();
 
             commandList.EndPipeline(pipeline);
-        });*/
+
+            // Copy from our draw count buffer to the readback buffer
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _culledDrawCountBuffer);
+            commandList.CopyBuffer(_culledDrawCountReadBackBuffer, 0, _culledDrawCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::TransferDestToTransferSrc, _culledDrawCountReadBackBuffer);
+
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _culledTriangleCountBuffer);
+            commandList.CopyBuffer(_culledTriangleCountReadBackBuffer, 0, _culledTriangleCountBuffer, 0, 4);
+            commandList.PipelineBarrier(Renderer::PipelineBarrierType::ComputeWriteToTransferSrc, _culledTriangleCountReadBackBuffer);
+        });
 }
 
 void WaterRenderer::CreatePermanentResources()
 {
     Renderer::TextureArrayDesc textureArrayDesc;
-    textureArrayDesc.size = 128;
+    textureArrayDesc.size = 1024;
 
     _waterTextures = _renderer->CreateTextureArray(textureArrayDesc);
+    _passDescriptorSet.Bind("_textures"_h, _waterTextures);
 
     Renderer::SamplerDesc samplerDesc;
     samplerDesc.enabled = true;
@@ -157,320 +345,357 @@ void WaterRenderer::CreatePermanentResources()
     samplerDesc.maxAnisotropy = 8;
 
     _sampler = _renderer->CreateSampler(samplerDesc);
-    _passDescriptorSet.Bind("_sampler", _sampler);
+    _passDescriptorSet.Bind("_sampler"_h, _sampler);
 
-    std::string oceanTextureFolder = "Data/extracted/Textures/xtextures/ocean/";
+    Renderer::SamplerDesc occlusionSamplerDesc;
+    occlusionSamplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
 
-    for (u32 i = 1; i <= 30; i++)
-    {
-        Renderer::TextureDesc textureDesc;
-        textureDesc.path = oceanTextureFolder + "ocean_h." + std::to_string(i) + ".dds";
+    occlusionSamplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+    occlusionSamplerDesc.minLOD = 0.f;
+    occlusionSamplerDesc.maxLOD = 16.f;
+    occlusionSamplerDesc.mode = Renderer::SamplerReductionMode::MIN;
 
-        u32 textureId = 0;
-        _renderer->LoadTextureIntoArray(textureDesc, _waterTextures, textureId);
-    }
+    _occlusionSampler = _renderer->CreateSampler(occlusionSamplerDesc);
+    _cullingDescriptorSet.Bind("_depthSampler"_h, _occlusionSampler);
 }
 
-bool WaterRenderer::RegisterChunksToBeLoaded(const std::vector<u16>& chunkIDs)
+bool WaterRenderer::RegisterChunksToBeLoaded(SafeVector<u16>& chunkIDs)
 {
     DebugHandler::Print("Loading Water");
 
     entt::registry* registry = ServiceLocator::GetGameRegistry();
     MapSingleton& mapSingleton = registry->ctx<MapSingleton>();
+    NDBCSingleton& ndbcSingleton = registry->ctx<NDBCSingleton>();
+
+    NDBC::File* liquidTypesNDBC = ndbcSingleton.GetNDBCFile("LiquidTypes"_h);
+    StringTable*& liquidTypesStringTable = liquidTypesNDBC->GetStringTable();
 
     Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
 
-    for (const u16& chunkID : chunkIDs)
-    {
-        Terrain::Chunk& chunk = currentMap.chunks[chunkID];
+    _numTriangles = 0;
 
-        u16 chunkX = chunkID % Terrain::MAP_CHUNKS_PER_MAP_STRIDE;
-        u16 chunkY = chunkID / Terrain::MAP_CHUNKS_PER_MAP_STRIDE;
-
-        vec2 chunkPos = Terrain::MapUtils::GetChunkPosition(chunkID);
-
-        vec3 chunkBasePos = Terrain::MAP_HALF_SIZE - vec3(Terrain::MAP_CHUNK_SIZE * chunkY, Terrain::MAP_CHUNK_SIZE * chunkX, Terrain::MAP_HALF_SIZE);
-
-        if (chunk.liquidHeaders.size() == 0)
-            continue;
-
-        u32 liquidInfoOffset = 0;
-        //u32 liquidDataOffset = 0;
-
-        for (u32 i = 0; i < chunk.liquidHeaders.size(); i++)
+    chunkIDs.ReadLock([&](const std::vector<u16>& chunkIDsVector)
         {
-            Terrain::CellLiquidHeader& liquidHeader = chunk.liquidHeaders[i];
+            SafeVectorScopedWriteLock verticesLock(_vertices);
+            std::vector<WaterVertex>& vertices = verticesLock.Get();
 
-            bool hasAttributes = liquidHeader.attributesOffset > 0; // liquidHeader.packedData >> 7;
-            u8 numInstances = liquidHeader.layerCount; // liquidHeader.packedData & 0x7F;
+            SafeVectorScopedWriteLock indicesLock(_indices);
+            std::vector<u16>& indices = indicesLock.Get();
 
-            if (numInstances == 0)
-                continue;
+            SafeVectorScopedWriteLock drawCallsLock(_drawCalls);
+            std::vector<DrawCall>& drawCalls = drawCallsLock.Get();
 
-            u16 cellX = i % Terrain::MAP_CELLS_PER_CHUNK_SIDE;
-            u16 cellY = i / Terrain::MAP_CELLS_PER_CHUNK_SIDE;
-            vec3 liquidBasePos = chunkBasePos - vec3(Terrain::MAP_CELL_SIZE * cellY, Terrain::MAP_CELL_SIZE * cellX, 0);
+            SafeVectorScopedWriteLock drawCallDatasLock(_drawCallDatas);
+            std::vector<DrawCallData>& drawCallDatas = drawCallDatasLock.Get();
 
-            const vec2 cellPos = Terrain::MapUtils::GetCellPosition(chunkPos, i);
+            SafeVectorScopedWriteLock boundingBoxesLock(_boundingBoxes);
+            std::vector<AABB>& boundingBoxes = boundingBoxesLock.Get();
 
-            for (u32 j = 0; j < numInstances; j++)
+            for (const u16& chunkID : chunkIDsVector)
             {
-                Terrain::CellLiquidInstance& liquidInstance = chunk.liquidInstances[liquidInfoOffset + j];
+                Terrain::Chunk& chunk = currentMap.chunks[chunkID];
 
-                // Packed Format
-                // Bit 1-6 (liquidVertexFormat)
-                // Bit 7 (hasBitMaskForPatches)
-                // Bit 8 (hasVertexData)
+                u16 chunkX = chunkID % Terrain::MAP_CHUNKS_PER_MAP_STRIDE;
+                u16 chunkY = chunkID / Terrain::MAP_CHUNKS_PER_MAP_STRIDE;
 
-                bool hasVertexData = liquidInstance.vertexDataOffset > 0; // liquidInstance.packedData >> 7;
-                bool hasBitMaskForPatches = liquidInstance.bitmapExistsOffset > 0; // (liquidInstance.packedData >> 6) & 0x1;
-                u16 liquidVertexFormat = liquidInstance.liquidVertexFormat; // liquidInstance.packedData & 0x3F;
+                vec2 chunkPos = Terrain::MapUtils::GetChunkPosition(chunkID);
 
-                u8 posY = liquidInstance.yOffset; //liquidInstance.packedOffset & 0xf;
-                u8 posX = liquidInstance.xOffset; //liquidInstance.packedOffset >> 4;
+                vec3 chunkBasePos = Terrain::MAP_HALF_SIZE - vec3(Terrain::MAP_CHUNK_SIZE * chunkY, Terrain::MAP_CHUNK_SIZE * chunkX, Terrain::MAP_HALF_SIZE);
 
-                u8 height = liquidInstance.height; // liquidInstance.packedSize & 0xf;
-                u8 width = liquidInstance.width; // liquidInstance.packedSize >> 4;
+                if (chunk.liquidHeaders.size() == 0)
+                    continue;
 
-                u32 vertexCount = (width + 1) * (height + 1);
+                u32 liquidInfoOffset = 0;
 
-                f32* heightMap = nullptr;
-                if (hasVertexData)
+                for (u32 i = 0; i < chunk.liquidHeaders.size(); i++)
                 {
-                    if (liquidVertexFormat == 0 || liquidVertexFormat == 1 || liquidVertexFormat == 3)
+                    Terrain::CellLiquidHeader& liquidHeader = chunk.liquidHeaders[i];
+
+                    bool hasAttributes = liquidHeader.attributesOffset > 0; // liquidHeader.packedData >> 7;
+                    u8 numInstances = liquidHeader.layerCount; // liquidHeader.packedData & 0x7F;
+
+                    if (numInstances == 0)
+                        continue;
+
+                    u16 cellX = i % Terrain::MAP_CELLS_PER_CHUNK_SIDE;
+                    u16 cellY = i / Terrain::MAP_CELLS_PER_CHUNK_SIDE;
+                    vec3 liquidBasePos = chunkBasePos - vec3(Terrain::MAP_CELL_SIZE * cellY, Terrain::MAP_CELL_SIZE * cellX, 0);
+
+                    const vec2 cellPos = Terrain::MapUtils::GetCellPosition(chunkPos, i);
+
+                    for (u32 j = 0; j < numInstances; j++)
                     {
-                        heightMap = reinterpret_cast<f32*>(&chunk.liquidBytes[liquidInstance.vertexDataOffset]); //reinterpret_cast<f32*>(&chunk.liquidBytes[liquidDataOffset]);
-                    }
+                        Terrain::CellLiquidInstance& liquidInstance = chunk.liquidInstances[liquidInfoOffset + j];
 
-                    u32 vertexDataBytes = 0;
+                        // Packed Format
+                        // Bit 1-6 (liquidVertexFormat)
+                        // Bit 7 (hasBitMaskForPatches)
+                        // Bit 8 (hasVertexData)
 
-                    // If LiquidVertexFormat == 0
-                    vertexDataBytes += (vertexCount * sizeof(Terrain::LiquidVertexFormat_Height_Depth)) * (liquidVertexFormat == 0);
+                        bool hasVertexData = liquidInstance.vertexDataOffset > 0; // liquidInstance.packedData >> 7;
+                        bool hasBitMaskForPatches = liquidInstance.bitmapExistsOffset > 0; // (liquidInstance.packedData >> 6) & 0x1;
+                        u16 liquidVertexFormat = liquidInstance.liquidVertexFormat; // liquidInstance.packedData & 0x3F;
 
-                    // If LiquidVertexFormat == 1
-                    vertexDataBytes += (vertexCount * sizeof(Terrain::LiquidVertexFormat_Height_UV)) * (liquidVertexFormat == 1);
+                        u8 posY = liquidInstance.yOffset; //liquidInstance.packedOffset & 0xf;
+                        u8 posX = liquidInstance.xOffset; //liquidInstance.packedOffset >> 4;
 
-                    // If LiquidVertexFormat == 2
-                    vertexDataBytes += (vertexCount * sizeof(Terrain::LiquidVertexFormat_Depth)) * (liquidVertexFormat == 2);
+                        u8 height = liquidInstance.height; // liquidInstance.packedSize & 0xf;
+                        u8 width = liquidInstance.width; // liquidInstance.packedSize >> 4;
 
-                    // If LiquidVertexFormat == 3
-                    vertexDataBytes += (vertexCount * sizeof(Terrain::LiquidVertexFormat_Height_UV_Depth)) * (liquidVertexFormat == 3);
+                        u32 vertexCount = (width + 1) * (height + 1);
 
-                    //liquidDataOffset += vertexDataBytes;
-                }
-
-                DrawCall& drawCall = _drawCalls.emplace_back();
-                DrawCallData& drawCallData = _drawCallDatas.emplace_back();
-
-                drawCall.instanceCount = 1;
-                drawCall.vertexOffset = static_cast<u32>(_vertices.size());
-                drawCall.firstIndex = static_cast<u32>(_indices.size());
-                drawCall.firstInstance = static_cast<u32>(_drawCalls.size()) - 1;
-
-                // TODO: We should check if textureCount is always 30
-                drawCallData.textureStartIndex = 0;
-                drawCallData.textureCount = 30;
-
-                for (u8 y = 0; y <= height; y++)
-                {
-                    // This represents World (Forward/Backward) in other words, our X axis
-                    f32 offsetY = -(static_cast<f32>(posY + y) * Terrain::MAP_PATCH_SIZE);
-
-                    for (u8 x = 0; x <= width; x++)
-                    {
-                        // This represents World (West/East) in other words, our Y axis
-                        f32 offsetX = -(static_cast<f32>(posX + x) * Terrain::MAP_PATCH_SIZE);
-
-                        //vec4 pos = vec4(cellPos.x + offsetX, cellPos.y + offsetY, liquidInstance.minHeightLevel, 1.0f); // vec4(cellPos.x + offsetX, cellPos.y + offsetY, liquidInstance.heightLevel.x, 1.0f);
-                        vec4 pos = vec4(liquidBasePos, 1.0f) - vec4(Terrain::MAP_PATCH_SIZE * (y + liquidInstance.yOffset), Terrain::MAP_PATCH_SIZE * (x + liquidInstance.xOffset), liquidInstance.minHeightLevel, 0.0f);
-
-                        if (heightMap && liquidInstance.liquidType != 2 && liquidVertexFormat != 2)
+                        f32* heightMap = nullptr;
+                        if (hasVertexData)
                         {
-                            u32 vertexIndex = x + (y * (width + 1));
-                            pos.z = heightMap[vertexIndex];
+                            if (liquidVertexFormat == 0) // LiquidVertexFormat_Height_Depth
+                            {
+                                heightMap = reinterpret_cast<f32*>(&chunk.liquidBytes[liquidInstance.vertexDataOffset]);
+                            }
+                            else if (liquidVertexFormat == 1) // LiquidVertexFormat_Height_UV
+                            {
+                                heightMap = reinterpret_cast<f32*>(&chunk.liquidBytes[liquidInstance.vertexDataOffset]);
+                            }
+                            else if (liquidVertexFormat == 3) // LiquidVertexFormat_Height_UV_Depth
+                            {
+                                heightMap = reinterpret_cast<f32*>(&chunk.liquidBytes[liquidInstance.vertexDataOffset]);
+                            }
                         }
 
-                        _vertices.push_back(pos);
-                    }
+                        DrawCall& drawCall = drawCalls.emplace_back();
+                        drawCall.instanceCount = 1;
+                        drawCall.vertexOffset = static_cast<u32>(vertices.size());
+                        drawCall.firstIndex = static_cast<u32>(indices.size());
+                        drawCall.firstInstance = static_cast<u32>(drawCalls.size()) - 1;
+
+                        DrawCallData& drawCallData = drawCallDatas.emplace_back();
+                        drawCallData.chunkID = chunkID;
+                        drawCallData.cellID = i;
+
+                        NDBC::LiquidType* liquidType = liquidTypesNDBC->GetRowById<NDBC::LiquidType>(liquidInstance.liquidType);
+                        const std::string& liquidTexture = liquidTypesStringTable->GetString(liquidType->texture);
+                        u32 liquidTextureHash = liquidTypesStringTable->GetStringHash(liquidType->texture);
+
+                        u32 textureIndex;
+                        if (!TryLoadTexture(liquidTexture, liquidTextureHash, liquidType->numTextureFrames, textureIndex))
+                        {
+                            DebugHandler::PrintFatal("WaterRenderer::RegisterChunksToBeLoaded : failed to load texture %s", liquidTexture.c_str());
+                        }
+
+                        drawCallData.textureStartIndex = static_cast<u16>(textureIndex);
+                        drawCallData.textureCount = liquidType->numTextureFrames;
+                        drawCallData.hasDepth = liquidType->hasDepthEnabled;
+
+                        vec3 min = vec3(100000, 100000, 100000);
+                        vec3 max = vec3(-100000, -100000, -100000);
+
+                        for (u8 y = 0; y <= height; y++)
+                        {
+                            // This represents World (Forward/Backward) in other words, our X axis
+                            f32 offsetY = -(static_cast<f32>(posY + y) * Terrain::MAP_PATCH_SIZE);
+
+                            for (u8 x = 0; x <= width; x++)
+                            {
+                                // This represents World (West/East) in other words, our Y axis
+                                f32 offsetX = -(static_cast<f32>(posX + x) * Terrain::MAP_PATCH_SIZE);
+
+                                f32 vertexHeight = liquidBasePos.z - liquidInstance.minHeightLevel;
+
+                                u32 vertexIndex = x + (y * (width + 1));
+                                if (heightMap && liquidInstance.liquidType != 2 && liquidVertexFormat != 2)
+                                {
+                                    vertexHeight = heightMap[vertexIndex];
+                                }
+
+                                WaterVertex vertex;
+                                vertex.xCellOffset = y + liquidInstance.yOffset; // These are intended to be flipped, we are going from 2D to 3D
+                                vertex.yCellOffset = x + liquidInstance.xOffset;
+                                vertex.height = f16(vertexHeight);
+                                vertex.uv = hvec2(static_cast<f32>(x) / 2.0f, static_cast<f32>(y) / 2.0f);
+
+                                vertices.push_back(vertex);
+
+                                // Calculate worldspace pos for AABB usage
+                                vec3 pos = liquidBasePos - vec3(Terrain::MAP_PATCH_SIZE * (y + liquidInstance.yOffset), Terrain::MAP_PATCH_SIZE * (x + liquidInstance.xOffset), 0.0f);
+                                pos.z = vertexHeight;
+
+                                min = glm::min(min, pos);
+                                max = glm::max(max, pos);
+
+                                if (y < height && x < width)
+                                {
+                                    u16 topLeftVert = x + (y * (width + 1));
+                                    u16 topRightVert = topLeftVert + 1;
+                                    u16 bottomLeftVert = topLeftVert + (width + 1);
+                                    u16 bottomRightVert = bottomLeftVert + 1;
+
+                                    indices.push_back(topLeftVert);
+                                    indices.push_back(bottomLeftVert);
+                                    indices.push_back(topRightVert);
+
+                                    indices.push_back(topRightVert);
+                                    indices.push_back(bottomLeftVert);
+                                    indices.push_back(bottomRightVert);
+
+                                    drawCall.indexCount += 6;
+                                }
+                            }
+                        }
+
+                        _numTriangles += drawCall.indexCount / 3;
+
+                        // The water could literally be a flat plane, so we have to add offsets to min.z and max.z
+                        min.z -= 1.0f;
+                        max.z += 1.0f;
+
+                        AABB& boundingBox = boundingBoxes.emplace_back();
+                        boundingBox.min = vec4(min, 0.0f);
+                        boundingBox.max = vec4(max, 0.0f);
                 }
 
-                for (u8 y = 0; y < height; y++)
-                {
-                    for (u8 x = 0; x < width; x++)
-                    {
-                        u16 topLeftVert = x + (y * (width + 1));
-                        u16 topRightVert = topLeftVert + 1;
-                        u16 bottomLeftVert = topLeftVert + (width + 1);
-                        u16 bottomRightVert = bottomLeftVert + 1;
-
-                        _indices.push_back(topLeftVert);
-                        _indices.push_back(topRightVert);
-                        _indices.push_back(bottomLeftVert);
-
-                        _indices.push_back(topRightVert);
-                        _indices.push_back(bottomRightVert);
-                        _indices.push_back(bottomLeftVert);
-
-                        drawCall.indexCount += 6;
-                    }
-                }
+                liquidInfoOffset += numInstances;
             }
-
-            liquidInfoOffset += numInstances;
         }
-    }
+    });
 
-    DebugHandler::Print("Water: Loaded (%u, %u) Vertices/Indices", _vertices.size(), _indices.size());
+    DebugHandler::Print("Water: Loaded (%u, %u) Vertices/Indices", _vertices.Size(), _indices.Size());
     return true;
 }
 
 void WaterRenderer::ExecuteLoad()
 {
-    // -- Create DrawCall Buffer --
+    // Sync DrawCalls to GPU
     {
-        if (_drawCallsBuffer != Renderer::BufferID::Invalid())
-            _renderer->QueueDestroyBuffer(_drawCallsBuffer);
-    }
-    {
-        const size_t bufferSize = _drawCalls.size() * sizeof(DrawCall);
+        _drawCalls.SetDebugName("WaterDrawCalls");
+        _drawCalls.SetUsage(Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER);
+        _drawCalls.SyncToGPU(_renderer);
 
+        _cullingDescriptorSet.Bind("_drawCalls"_h, _drawCalls.GetBuffer());
+    }
+
+    // Sync DrawCallDatas to GPU
+    {
+        _drawCallDatas.SetDebugName("WaterDrawCallDatas");
+        _drawCallDatas.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _drawCallDatas.SyncToGPU(_renderer);
+
+        _passDescriptorSet.Bind("_drawCallDatas"_h, _drawCallDatas.GetBuffer());
+    }
+
+    // Sync Vertices to GPU
+    {
+        _vertices.SetDebugName("WaterVertices");
+        _vertices.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _vertices.SyncToGPU(_renderer);
+
+        _passDescriptorSet.Bind("_vertices"_h, _vertices.GetBuffer());
+    }
+
+    // Sync Indices to GPU
+    {
+        _indices.SetDebugName("WaterIndices");
+        _indices.SetUsage(Renderer::BufferUsage::INDEX_BUFFER);
+        _indices.SyncToGPU(_renderer);
+    }
+
+    // Sync BoundingBoxes to GPU
+    {
+        _boundingBoxes.SetDebugName("WaterBoundingBoxes");
+        _boundingBoxes.SetUsage(Renderer::BufferUsage::STORAGE_BUFFER);
+        _boundingBoxes.SyncToGPU(_renderer);
+
+        _cullingDescriptorSet.Bind("_boundingBoxes"_h, _boundingBoxes.GetBuffer());
+    }
+
+    // Create CulledDrawCallsBuffer
+    {
         Renderer::BufferDesc desc;
-        desc.name = "WaterDrawCallBuffer";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        desc.cpuAccess = Renderer::BufferCPUAccess::None;
+        desc.name = "WaterCulledDrawcalls";
+        desc.size = sizeof(DrawCall) * _drawCalls.Size();
+        desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
 
-        _drawCallsBuffer = _renderer->CreateBuffer(desc);
+        _culledDrawCallsBuffer = _renderer->CreateBuffer(_culledDrawCallsBuffer, desc);
 
-        // Create staging buffer
-        desc.name = "WaterDrawCallBufferStaging";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-        desc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-
-        Renderer::BufferID stagingBuffer = _renderer->CreateBuffer(desc);
-
-        // Upload to staging buffer
-
-        void* dst = _renderer->MapBuffer(stagingBuffer);
-        memcpy(dst, _drawCalls.data(), bufferSize);
-        _renderer->UnmapBuffer(stagingBuffer);
-
-        // Queue destroy staging buffer
-        _renderer->QueueDestroyBuffer(stagingBuffer);
-
-        // Copy from staging buffer to buffer
-        _renderer->CopyBuffer(_drawCallsBuffer, 0, stagingBuffer, 0, bufferSize);
+        _cullingDescriptorSet.Bind("_culledDrawCalls", _culledDrawCallsBuffer);
     }
 
-    // -- Create DrawCallDatas Buffer --
+    // Create CulledDrawCountBuffer
     {
-        if (_drawCallDatasBuffer != Renderer::BufferID::Invalid())
-            _renderer->QueueDestroyBuffer(_drawCallDatasBuffer);
-    }
-    {
-        const size_t bufferSize = _drawCallDatas.size() * sizeof(DrawCallData);
-
         Renderer::BufferDesc desc;
-        desc.name = "WaterDrawCallDatasBuffer";
-        desc.size = bufferSize;
+        desc.name = "WaterDrawCountBuffer";
+        desc.size = sizeof(u32);
+        desc.usage = Renderer::BufferUsage::INDIRECT_ARGUMENT_BUFFER | Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
+        _culledDrawCountBuffer = _renderer->CreateBuffer(_culledDrawCountBuffer, desc);
+
+        _cullingDescriptorSet.Bind("_drawCount", _culledDrawCountBuffer);
+
+        desc.name = "WaterDrawCountRBBuffer";
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        desc.cpuAccess = Renderer::BufferCPUAccess::None;
-
-        _drawCallDatasBuffer = _renderer->CreateBuffer(desc);
-
-        // Create staging buffer
-        desc.name = "WaterDrawCallDatasBufferStaging";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-        desc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-
-        Renderer::BufferID stagingBuffer = _renderer->CreateBuffer(desc);
-
-        // Upload to staging buffer
-
-        void* dst = _renderer->MapBuffer(stagingBuffer);
-        memcpy(dst, _drawCallDatas.data(), bufferSize);
-        _renderer->UnmapBuffer(stagingBuffer);
-
-        // Queue destroy staging buffer
-        _renderer->QueueDestroyBuffer(stagingBuffer);
-
-        // Copy from staging buffer to buffer
-        _renderer->CopyBuffer(_drawCallDatasBuffer, 0, stagingBuffer, 0, bufferSize);
+        desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
+        _culledDrawCountReadBackBuffer = _renderer->CreateBuffer(_culledDrawCountReadBackBuffer, desc);
     }
 
-    // -- Create Vertex Buffer --
+    // Create CulledTriangleCountBuffer
     {
-        if (_vertexBuffer != Renderer::BufferID::Invalid())
-            _renderer->QueueDestroyBuffer(_vertexBuffer);
-    }
-    {
-        const size_t bufferSize = _vertices.size() * sizeof(vec4);
-
         Renderer::BufferDesc desc;
-        desc.name = "VertexBuffer";
-        desc.size = bufferSize;
+        desc.name = "WaterTriangleCountBuffer";
+        desc.size = sizeof(u32);
+        desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION | Renderer::BufferUsage::TRANSFER_SOURCE;
+        _culledTriangleCountBuffer = _renderer->CreateBuffer(_culledTriangleCountBuffer, desc);
+
+        _cullingDescriptorSet.Bind("_triangleCount", _culledTriangleCountBuffer);
+
+        desc.name = "WaterTriangleCountRBBuffer";
         desc.usage = Renderer::BufferUsage::STORAGE_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        desc.cpuAccess = Renderer::BufferCPUAccess::None;
-
-        _vertexBuffer = _renderer->CreateBuffer(desc);
-
-        // Create staging buffer
-        desc.name = "VertexBufferStaging";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-        desc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-
-        Renderer::BufferID stagingBuffer = _renderer->CreateBuffer(desc);
-
-        // Upload to staging buffer
-
-        void* dst = _renderer->MapBuffer(stagingBuffer);
-        memcpy(dst, _vertices.data(), bufferSize);
-        _renderer->UnmapBuffer(stagingBuffer);
-
-        // Queue destroy staging buffer
-        _renderer->QueueDestroyBuffer(stagingBuffer);
-
-        // Copy from staging buffer to buffer
-        _renderer->CopyBuffer(_vertexBuffer, 0, stagingBuffer, 0, bufferSize);
+        desc.cpuAccess = Renderer::BufferCPUAccess::ReadOnly;
+        _culledTriangleCountReadBackBuffer = _renderer->CreateBuffer(_culledTriangleCountReadBackBuffer, desc);
     }
+}
 
-    // -- Create Index Buffer --
+bool WaterRenderer::TryLoadTexture(const std::string& textureName, u32 textureHash, u32 numTextures, u32& textureIndex)
+{
+    auto itr = _waterTextureInfos.find(textureHash);
+
+    WaterTextureInfo* waterTextureInfo = nullptr;
+    if (itr != _waterTextureInfos.end())
     {
-        if (_indexBuffer != Renderer::BufferID::Invalid())
-            _renderer->QueueDestroyBuffer(_indexBuffer);
+        waterTextureInfo = &itr->second;
+
+        if (numTextures <= waterTextureInfo->numTextures)
+        {
+            textureIndex = waterTextureInfo->textureArrayIndex;
+            return true;
+        }
     }
+    else
     {
-        const size_t bufferSize = _indices.size() * sizeof(u16);
-
-        Renderer::BufferDesc desc;
-        desc.name = "IndexBuffer";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::INDEX_BUFFER | Renderer::BufferUsage::TRANSFER_DESTINATION;
-        desc.cpuAccess = Renderer::BufferCPUAccess::None;
-
-        _indexBuffer = _renderer->CreateBuffer(desc);
-
-        // Create staging buffer
-        desc.name = "IndexBufferStaging";
-        desc.size = bufferSize;
-        desc.usage = Renderer::BufferUsage::TRANSFER_SOURCE;
-        desc.cpuAccess = Renderer::BufferCPUAccess::WriteOnly;
-
-        Renderer::BufferID stagingBuffer = _renderer->CreateBuffer(desc);
-
-        // Upload to staging buffer
-
-        void* dst = _renderer->MapBuffer(stagingBuffer);
-        memcpy(dst, _indices.data(), bufferSize);
-        _renderer->UnmapBuffer(stagingBuffer);
-
-        // Queue destroy staging buffer
-        _renderer->QueueDestroyBuffer(stagingBuffer);
-
-        // Copy from staging buffer to buffer
-        _renderer->CopyBuffer(_indexBuffer, 0, stagingBuffer, 0, bufferSize);
+        waterTextureInfo = &_waterTextureInfos[textureHash];
     }
+
+    Renderer::TextureDesc desc;
+    u32 index;
+    char tempTextureNameBuffer[1024];
+
+    for (u32 i = 1; i <= numTextures; i++)
+    {
+        i32 length = StringUtils::FormatString(tempTextureNameBuffer, 1024, textureName.c_str(), i);
+        if (length == 0)
+            return false;
+
+        u32 tempTextureHash = StringUtils::fnv1a_32(tempTextureNameBuffer, length);
+
+        entt::registry* registry = ServiceLocator::GetGameRegistry();
+        TextureSingleton& textureSingleton = registry->ctx<TextureSingleton>();
+
+        desc.path = textureSingleton.textureHashToPath[tempTextureHash];
+        _renderer->LoadTextureIntoArray(desc, _waterTextures, index);
+    }
+
+    textureIndex = (index + 1) - numTextures;
+
+    waterTextureInfo->textureArrayIndex = textureIndex;
+    waterTextureInfo->numTextures = numTextures;
+
+    return true;
 }

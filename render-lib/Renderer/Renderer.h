@@ -71,7 +71,7 @@ namespace Renderer
 
         // Loading
         virtual [[nodiscard]] TextureID LoadTexture(TextureDesc& desc) = 0;
-        virtual [[nodiscard]] TextureID LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex) = 0;
+        virtual [[nodiscard]] TextureID LoadTextureIntoArray(TextureDesc& desc, TextureArrayID textureArray, u32& arrayIndex, bool allowDuplicates = false) = 0;
 
         virtual [[nodiscard]] VertexShaderID LoadShader(VertexShaderDesc& desc) = 0;
         virtual [[nodiscard]] PixelShaderID LoadShader(PixelShaderDesc& desc) = 0;
@@ -113,6 +113,7 @@ namespace Renderer
         virtual void AddSignalSemaphore(CommandListID commandListID, SemaphoreID semaphoreID) = 0;
         virtual void AddWaitSemaphore(CommandListID commandListID, SemaphoreID semaphoreID) = 0;
         virtual void CopyImage(CommandListID commandListID, ImageID dstImageID, uvec2 dstPos, u32 dstMipLevel, ImageID srcImageID, uvec2 srcPos, u32 srcMipLevel, uvec2 size) = 0;
+        virtual void CopyDepthImage(CommandListID commandListID, DepthImageID dstImageID, uvec2 dstPos, DepthImageID srcImageID, uvec2 srcPos, uvec2 size) = 0;
         virtual void CopyBuffer(CommandListID commandListID, BufferID dstBuffer, u64 dstOffset, BufferID srcBuffer, u64 srcOffset, u64 range) = 0;
         virtual void PipelineBarrier(CommandListID commandListID, PipelineBarrierType type, BufferID buffer) = 0;
         virtual void ImageBarrier(CommandListID commandListID, ImageID image) = 0;

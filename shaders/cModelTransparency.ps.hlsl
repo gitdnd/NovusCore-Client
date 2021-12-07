@@ -3,6 +3,7 @@
 #include "globalData.inc.hlsl"
 #include "cModel.inc.hlsl"
 #include "visibilityBuffer.inc.hlsl"
+#include "orderIndependentTransparencyUtils.inc.hlsl"
 
 [[vk::binding(10, CMODEL)]] SamplerState _sampler;
 
@@ -12,7 +13,6 @@ struct PSInput
     uint drawID : TEXCOORD0;
     float4 uv01 : TEXCOORD1;
     float3 normal : TEXCOORD2;
-    float depth : TEXCOORD3;
 };
 
 struct PSOutput
@@ -61,25 +61,12 @@ PSOutput main(PSInput input)
     color.rgb = Lighting(color.rgb, float3(0.0f, 0.0f, 0.0f), input.normal, 1.0f, !isUnlit) + specular;
     color = saturate(color);
 
-    color.rgb *= color.a; // Premultiply it
-
-    // Insert your favorite weighting function here. The color-based factor
-    // avoids color pollution from the edges of wispy clouds. The z-based
-    // factor gives precedence to nearer surfaces.
-    //float z = -input.position.z;
-
-    // This distance wants to be 0.1 < z < 500 according to the whitepaper, our nearclip is 1.0 and farclip is 100000.0f so we need to remap it
-    float z = Map(input.depth, 1.0f, 100000.0f, 0.1f, 500.0f);
-    float distWeight = clamp(0.03f / (1e-5f + pow(z / 200.0f, 4.0f)), 1e-2f, 3e3f);
-
-    float alphaWeight = max(min(1.0f, max(max(color.r, color.g), color.b) * color.a), color.a);
-    //alphaWeight *= alphaWeight;
-    
-    float weight = alphaWeight * distWeight;
+    float oitDepth = input.position.z / input.position.w;
+    float oitWeight = CalculateOITWeight(color, oitDepth);
 
     PSOutput output;
-    output.transparency = color * weight;
-    output.transparencyWeight.a = weight;
+    output.transparency = float4(color.rgb /* color.a*/, color.a) * oitWeight;
+    output.transparencyWeight = color.aaaa;
 
     return output;
 }

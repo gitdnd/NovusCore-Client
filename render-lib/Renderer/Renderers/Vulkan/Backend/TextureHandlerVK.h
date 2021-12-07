@@ -27,7 +27,7 @@ namespace Renderer
             void InitDebugTexture();
 
             TextureID LoadTexture(const TextureDesc& desc);
-            TextureID LoadTextureIntoArray(const TextureDesc& desc, TextureArrayID textureArrayID, u32& arrayIndex);
+            TextureID LoadTextureIntoArray(const TextureDesc& desc, TextureArrayID textureArrayID, u32& arrayIndex, bool allowDuplicates);
 
             void UnloadTexture(const TextureID textureID);
             void UnloadTexturesInArray(const TextureArrayID textureArrayID, u32 unloadStartIndex);

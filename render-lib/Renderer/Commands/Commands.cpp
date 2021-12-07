@@ -65,6 +65,7 @@ namespace Renderer
         const BackendDispatchFunction AddSignalSemaphore::DISPATCH_FUNCTION = &BackendDispatch::AddSignalSemaphore;
         const BackendDispatchFunction AddWaitSemaphore::DISPATCH_FUNCTION = &BackendDispatch::AddWaitSemaphore;
         const BackendDispatchFunction CopyImage::DISPATCH_FUNCTION = &BackendDispatch::CopyImage;
+        const BackendDispatchFunction CopyDepthImage::DISPATCH_FUNCTION = &BackendDispatch::CopyDepthImage;
         const BackendDispatchFunction CopyBuffer::DISPATCH_FUNCTION = &BackendDispatch::CopyBuffer;
         const BackendDispatchFunction FillBuffer::DISPATCH_FUNCTION = &BackendDispatch::FillBuffer;
         const BackendDispatchFunction UpdateBuffer::DISPATCH_FUNCTION = &BackendDispatch::UpdateBuffer;

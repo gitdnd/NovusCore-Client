@@ -95,7 +95,7 @@ void SkyboxRenderer::AddSkyboxPass(Renderer::RenderGraph* renderGraph, RenderRes
                 i32 lockLight = *CVarSystem::Get()->GetIntCVar("lights.lock");
                 if (!lockLight)
                 {
-                    AreaUpdateLightColorData lightColor = mapSingleton.GetLightColorData();
+                    const AreaUpdateLightColorData& lightColor = mapSingleton.GetLightColorData();
                     _skybandColors.top = vec4(lightColor.skybandTopColor, 0.0f);
                     _skybandColors.middle = vec4(lightColor.skybandMiddleColor, 0.0f);
                     _skybandColors.bottom = vec4(lightColor.skybandBottomColor, 0.0f);

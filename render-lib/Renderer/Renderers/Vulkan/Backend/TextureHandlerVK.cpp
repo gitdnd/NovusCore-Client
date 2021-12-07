@@ -56,6 +56,7 @@ namespace Renderer
         struct TextureArray
         {
             u32 size;
+
             SafeVector<TextureID>* textures = nullptr;
             SafeVector<u64>* textureHashes = nullptr;
         };
@@ -169,12 +170,17 @@ namespace Renderer
             return textureID;
         }
 
-        TextureID TextureHandlerVK::LoadTextureIntoArray(const TextureDesc& desc, TextureArrayID textureArrayID, u32& arrayIndex)
+        TextureID TextureHandlerVK::LoadTextureIntoArray(const TextureDesc& desc, TextureArrayID textureArrayID, u32& arrayIndex, bool allowDuplicates)
         {
             ZoneScoped;
 
             TextureHandlerVKData& data = static_cast<TextureHandlerVKData&>(*_data);
-            TextureID textureID;
+            TextureArrayID::type id = static_cast<TextureArrayID::type>(textureArrayID);
+            
+            if (data.textureArrays.Size() < id)
+            {
+                DebugHandler::PrintFatal("TextureHandlerVK::LoadTextureIntoArray : Tried to load texture into array (%u) that doesn't exist", id);
+            }
 
             // Check the cache, we only want to do this for LOADED textures though, never CREATED data textures
             size_t nextID;
@@ -185,18 +191,15 @@ namespace Renderer
                 DebugHandler::PrintFatal("Calculated texture descriptor hash was 0, this is a big issue! (%s)", desc.path.c_str());
             }
 
-            if (TryFindExistingTextureInArray(textureArrayID, descHash, nextID, textureID))
-            {
-                arrayIndex = static_cast<u32>(nextID);
-                return textureID; // This texture already exists in this array
-            }
+            TextureID textureID;
 
-            TextureArrayID::type id = static_cast<TextureArrayID::type>(textureArrayID);
-
-            // Otherwise load it
-            if (id >= data.textureArrays.Size())
+            if (!allowDuplicates)
             {
-                DebugHandler::PrintFatal("Tried to load into a TextureArrayID which doesn't exist! (%u)", id);
+                if (TryFindExistingTextureInArray(textureArrayID, descHash, nextID, textureID))
+                {
+                    arrayIndex = static_cast<u32>(nextID);
+                    return textureID; // This texture already exists in this array
+                }
             }
 
             textureID = LoadTexture(desc);

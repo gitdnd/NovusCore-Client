@@ -15,7 +15,6 @@ struct VSOutput
     nointerpolation uint drawCallID : TEXCOORD0;
     float4 uv01 : TEXCOORD1;
     float3 normal : TEXCOORD2;
-    float depth : TEXCOORD3;
 };
 
 VSOutput main(VSInput input)
@@ -31,7 +30,7 @@ VSOutput main(VSInput input)
     float4x4 boneTransformMatrix = CalcBoneTransformMatrix(instanceData, vertex);
     float4 position = mul(float4(vertex.position, 1.0f), boneTransformMatrix);
 
-    position = mul(float4(-position.x, -position.y, position.z, 1.0f), instanceMatrix);
+    position = mul(float4(position.rgb, 1.0f), instanceMatrix);
 
     // Pass data to pixelshader
     VSOutput output;
@@ -39,7 +38,6 @@ VSOutput main(VSInput input)
     output.drawCallID = drawCallID;
     output.uv01 = vertex.uv01;
     output.normal = mul(vertex.normal, (float3x3)instanceMatrix);
-    output.depth = mul(position, _viewData.viewMatrix).z;
 
     return output;
 }

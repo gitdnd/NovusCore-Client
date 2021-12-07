@@ -453,6 +453,22 @@ namespace Renderer
 #endif
     }
 
+    void CommandList::CopyDepthImage(DepthImageID dstImage, uvec2 dstPos, DepthImageID srcImage, uvec2 srcPos, uvec2 size)
+    {
+        assert(dstImage != DepthImageID::Invalid());
+        assert(srcImage != DepthImageID::Invalid());
+        Commands::CopyDepthImage* command = AddCommand<Commands::CopyDepthImage>();
+        command->dstImage = dstImage;
+        command->dstPos = dstPos;
+        command->srcImage = srcImage;
+        command->srcPos = srcPos;
+        command->size = size;
+
+#if COMMANDLIST_DEBUG_IMMEDIATE_MODE
+        Commands::CopyDepthImage::DISPATCH_FUNCTION(_renderer, _immediateCommandList, command);
+#endif
+    }
+
     void CommandList::CopyBuffer(BufferID dstBuffer, u64 dstBufferOffset, BufferID srcBuffer, u64 srcBufferOffset, u64 region)
     {
         assert(dstBuffer != BufferID::Invalid());
