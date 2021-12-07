@@ -16,6 +16,7 @@ class ScriptLoader;
 class ScriptEngine;
 class ScriptAPI;
 class AnimationSystem;
+class GameConsole;
 
 namespace Editor
 {
@@ -131,6 +132,12 @@ public:
         return _animationSystem;
     }
     static void SetAnimationSystem(AnimationSystem* animationSystem);
+    static GameConsole* GetGameConsole()
+    {
+        assert(_gameConsole != nullptr);
+        return _gameConsole;
+    }
+    static void SetGameConsole(GameConsole* gameConsole);
 
 private:
     ServiceLocator() { }
@@ -151,4 +158,5 @@ private:
     static ScriptLoader* _scriptLoader;
     static ScriptAPI* _scriptAPI;
     static AnimationSystem* _animationSystem;
+    static GameConsole* _gameConsole;
 };

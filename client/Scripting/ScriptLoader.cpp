@@ -10,6 +10,7 @@
 #include <entt.hpp>
 #include <CVar/CVarSystem.h>
 
+#include "../Gameplay/GameConsole/GameConsole.h"
 #include "../ECS/Components/Singletons/ScriptSingleton.h"
 #include "../ECS/Components/Singletons/DataStorageSingleton.h"
 #include "../ECS/Components/Singletons/SceneManagerSingleton.h"
@@ -41,9 +42,10 @@ bool ScriptLoader::Reload()
 
 bool ScriptLoader::LoadScriptDirectory(std::string& scriptFolder)
 {
+    GameConsole* gameConsole = ServiceLocator::GetGameConsole();
     if (scriptFolder == "")
     {
-        DebugHandler::PrintError("ScriptLoader : No ScriptFolder was specified");
+        gameConsole->PrintError("ScriptLoader : No ScriptFolder was specified");
         return false;
     }
 
@@ -159,23 +161,24 @@ bool ScriptLoader::LoadScriptDirectory(std::string& scriptFolder)
 
     if (didFail)
     {
-        DebugHandler::PrintError("ScriptLoader : Please correct the errors above");
+        gameConsole->PrintError("ScriptLoader : Please correct the errors above");
     }
 
     f32 msTimeTaken = timer.GetLifeTime() * 1000;
-    DebugHandler::PrintSuccess("ScriptLoader : Loaded %u scripts in %.4f ms", numModulesFromNai, msTimeTaken);
-
+    gameConsole->PrintSuccess("ScriptLoader : Loaded %u scripts in %.4f ms", numModulesFromNai, msTimeTaken);
 
     return !didFail;
 }
 
 bool ScriptLoader::LoadScriptPipeline1(std::string& scriptName, std::string& scriptPath)
 {
+    GameConsole* gameConsole = ServiceLocator::GetGameConsole();
+
     FileReader reader(scriptPath, scriptPath);
 
     if (!reader.Open())
     {
-        DebugHandler::PrintError("ScriptLoader : Failed to read script (%s)", scriptPath.c_str());
+        gameConsole->PrintError("ScriptLoader : Failed to read script (%s)", scriptPath.c_str());
         return false;
     }
 
@@ -234,59 +237,3 @@ bool ScriptLoader::LoadScriptPipeline4(Module* module)
     //delete module->buffer;
     return true;
 }
-
-/*bool ScriptLoader::LoadScript(std::string& scriptName, std::string& scriptPath)
-{
-    FileReader reader(scriptPath, scriptPath);
-
-    if (!reader.Open())
-    {
-        DebugHandler::PrintError("ScriptLoader : Failed to read script (%s)", scriptPath.c_str());
-        return false;
-    }
-
-    Bytebuffer* buffer = new Bytebuffer(nullptr, reader.Length());
-    reader.Read(buffer, buffer->size);
-
-    Module* module = _compiler.CreateModule(scriptName, buffer);
-
-    if (!Lexer::Process(module))
-        return false;
-
-    if (!ExportPass::Process(&_compiler, module))
-        return false;
-
-    if (!ImportPass::Process(&_compiler, module))
-        return false;
-
-    if (!Parser::Process(module))
-        return false;
-
-    NativeFunction nfPrint(module, "print", PrintCallback); { nfPrint.AddParamChar("string", NativeFunction::PassAs::Pointer); }
-    NativeFunction nfRegisterLoadSceneEvent(module, "LoadSceneEvent", RegisterLoadSceneEvent); { nfRegisterLoadSceneEvent.AddParamU32("fnHash", NativeFunction::PassAs::Value); }
-
-    if (!Typer::Process(&_compiler, module))
-        return false;
-
-    if (!Bytecode::Process(module))
-        return false;
-
-    u32 mainHash = "main"_djb2;
-
-    auto itr = module->bytecodeInfo.functionHashToDeclaration.find(mainHash);
-    if (itr != module->bytecodeInfo.functionHashToDeclaration.end())
-    {
-        // Add Main to be executed later
-        {
-            ScriptEngine* scriptEngine = ServiceLocator::GetScriptEngine();
-
-            ScriptExecutionInfo scriptExecutionInfo(module, mainHash);
-            scriptEngine->AddExecution(scriptExecutionInfo);
-        }
-    }
-
-    // Delete Buffer
-    delete buffer;
-
-    return true;
-}*/

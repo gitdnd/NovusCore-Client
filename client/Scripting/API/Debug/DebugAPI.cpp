@@ -1,5 +1,7 @@
 #include "DebugAPI.h"
 #include "../../ScriptAPI.h"
+#include "../../../Utils/ServiceLocator.h"
+#include "../../../Gameplay/GameConsole/GameConsole.h"
 
 #include <Nai/Compiler/Compiler.h>
 
@@ -92,7 +94,7 @@ namespace ScriptingAPI
                 AddStringToResult(result, buffer, lastFormatSign, delta);
             }
 
-            DebugHandler::Print(result);
+            ServiceLocator::GetGameConsole()->Print(result);
         }
         bool PrintCallback(Interpreter* interpreter)
         {

@@ -27,6 +27,7 @@
 #include "Scripting/ScriptEngine.h"
 #include "Scripting/ScriptLoader.h"
 #include "Scripting/ScriptAPI.h"
+#include "Gameplay/GameConsole/GameConsole.h"
 
 // Loaders
 #include "Loaders/LoaderSystem.h"
@@ -79,11 +80,11 @@
 #include <GLFW/glfw3.h>
 #include <tracy/Tracy.hpp>
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_impl_vulkan.h"
-#include "imgui/imgui_impl_glfw.h"
-#include "imgui/misc/cpp/imgui_stdlib.h"
-#include "imgui/implot.h"
+#include <imgui/imgui.h>
+#include <imgui/imgui_impl_vulkan.h>
+#include <imgui/imgui_impl_glfw.h>
+#include <imgui/misc/cpp/imgui_stdlib.h>
+#include <imgui/implot.h>
 
 #include "CVar/CVarSystem.h"
 
@@ -226,6 +227,8 @@ bool EngineLoop::Init()
             return true;
         });
     }
+
+    ServiceLocator::SetGameConsole(new GameConsole());
 
     // Initialize Networking
     NetworkUtils::InitNetwork(&_updateFramework.gameRegistry);
@@ -1128,6 +1131,9 @@ void EngineLoop::DrawImguiMenuBar()
 
             ImGui::EndMenu();
         }
+
+        TimeSingleton& timeSingleton = _updateFramework.gameRegistry.ctx<TimeSingleton>();
+        ServiceLocator::GetGameConsole()->Render(timeSingleton.deltaTime);
 
         ImGui::EndMainMenuBar();
     }
