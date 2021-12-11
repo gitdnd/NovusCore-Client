@@ -165,16 +165,31 @@ void CameraFreeLook::Enabled()
 
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraFreeLook"_h);
-    keybindGroup->SetActive(true);
+    keybindGroup->SetActive(true);    
+    
+    if (_captureMouse)
+    {
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
+    else
+    {
+        ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 }
 
 void CameraFreeLook::Disabled()
 {
-    glfwSetInputMode(_window->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraFreeLook"_h);
-    keybindGroup->SetActive(false);
+    keybindGroup->SetActive(false);    
+    
+    if (_captureMouse)
+    {
+        ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 }
 
 void CameraFreeLook::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)

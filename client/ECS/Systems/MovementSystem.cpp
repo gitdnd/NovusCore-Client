@@ -7,6 +7,7 @@
 #include "../../Utils/MapUtils.h"
 #include "../../Utils/PhysicsUtils.h"
 #include "../../Rendering/CameraOrbital.h"
+#include "../../Rendering/CameraFreelook.h"
 #include "../../Rendering/ClientRenderer.h"
 #include "../../Rendering/CModelRenderer.h"
 #include "../../Rendering/DebugRenderer.h"
@@ -78,278 +79,290 @@ void MovementSystem::Init(entt::registry& registry)
 
 void MovementSystem::Update(entt::registry& registry)
 {
-    CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
     LocalplayerSingleton& localplayerSingleton = registry.ctx<LocalplayerSingleton>();
 
-    if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
+    if (localplayerSingleton.entity == entt::null)
         return;
 
-    InputManager* inputManager = ServiceLocator::GetInputManager();
-    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-    CModelRenderer* cmodelRenderer = clientRenderer->GetCModelRenderer();
-    DebugRenderer* debugRenderer = clientRenderer->GetDebugRenderer();
-
-    TimeSingleton& timeSingleton = registry.ctx<TimeSingleton>();
-    MapSingleton& mapSingleton = registry.ctx<MapSingleton>();
-    Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
-
-    KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
-    KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     Transform& transform = registry.get<Transform>(localplayerSingleton.entity);
-    Movement& movement = registry.get<Movement>(localplayerSingleton.entity);
-    ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(localplayerSingleton.entity);
-
-    // Here we save our original movement flags to know if we have "changed" direction, and have to update the server, otherwise we can continue sending heartbeats
-    Movement::Flags& movementFlags = movement.flags;
-    Movement::Flags originalFlags = movement.flags;
-    movementFlags.value = 0;
-
     vec3 originalPosition = transform.position;
     f32 originalPitch = transform.rotation.y;
     f32 originalYaw = transform.rotation.z;
     f32 originalYawOffset = transform.yawOffset;
 
-    bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
-    if (isRightClickDown)
+    CameraOrbital* orbitalCamera = ServiceLocator::GetCameraOrbital();
+    if (orbitalCamera->IsActive())
     {
-        transform.rotation.z = camera->GetYaw();
+        InputManager* inputManager = ServiceLocator::GetInputManager();
+        ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+        CModelRenderer* cmodelRenderer = clientRenderer->GetCModelRenderer();
+        DebugRenderer* debugRenderer = clientRenderer->GetDebugRenderer();
 
-        // Only set Pitch if we are flying
-        //transform.pitch = camera->GetPitch();
-    }
-    vec3 front, up, left;
-    mat4x4 rotationMatrix = transform.GetRotationMatrix(front, up, left);
+        TimeSingleton& timeSingleton = registry.ctx<TimeSingleton>();
+        MapSingleton& mapSingleton = registry.ctx<MapSingleton>();
+        Terrain::Map& currentMap = mapSingleton.GetCurrentMap();
 
-    {
-        vec3 moveDirection = vec3(0.f, 0.f, 0.f);
-        i8 moveAlongVerticalAxis = 0;
-        i8 moveAlongHorizontalAxis = 0;
-        bool isMoving = false;
-        bool isJumping = false;
+        KeybindGroup* movementKeybindGroup = inputManager->GetKeybindGroupByHash("Movement"_h);
+        KeybindGroup* cameraOrbitalKeybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
+        Movement& movement = registry.get<Movement>(localplayerSingleton.entity);
+        ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(localplayerSingleton.entity);
 
-        moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Forward"_h);
-        moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Backward"_h);
-        moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Left"_h);
-        moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Right"_h);
-        isMoving = moveAlongVerticalAxis + moveAlongHorizontalAxis;
+        // Here we save our original movement flags to know if we have "changed" direction, and have to update the server, otherwise we can continue sending heartbeats
+        Movement::Flags& movementFlags = movement.flags;
+        Movement::Flags originalFlags = movement.flags;
+        movementFlags.value = 0;
 
-        // Handle Move Direction
+        bool isRightClickDown = cameraOrbitalKeybindGroup->IsKeybindPressed("Right Mouse"_h);
+        if (isRightClickDown)
         {
-            // FORWARD
-            if (moveAlongVerticalAxis == 1)
+            transform.rotation.z = orbitalCamera->GetYaw();
+
+            // Only set Pitch if we are flying
+            //transform.pitch = camera->GetPitch();
+        }
+        vec3 front, up, left;
+        mat4x4 rotationMatrix = transform.GetRotationMatrix(front, up, left);
+
+        {
+            vec3 moveDirection = vec3(0.f, 0.f, 0.f);
+            i8 moveAlongVerticalAxis = 0;
+            i8 moveAlongHorizontalAxis = 0;
+            bool isMoving = false;
+            bool isJumping = false;
+
+            moveAlongVerticalAxis += movementKeybindGroup->IsKeybindPressed("Forward"_h);
+            moveAlongVerticalAxis -= movementKeybindGroup->IsKeybindPressed("Backward"_h);
+            moveAlongHorizontalAxis += movementKeybindGroup->IsKeybindPressed("Left"_h);
+            moveAlongHorizontalAxis -= movementKeybindGroup->IsKeybindPressed("Right"_h);
+            isMoving = moveAlongVerticalAxis + moveAlongHorizontalAxis;
+
+            // Handle Move Direction
             {
-                moveDirection += front;
-            }
-            // BACKWARD
-            else if (moveAlongVerticalAxis == -1)
-            {
-                moveDirection -= front;
-            }
-
-            // LEFT
-            if (moveAlongHorizontalAxis == 1)
-            {
-                moveDirection += left;
-            }
-            // RIGHT
-            else if (moveAlongHorizontalAxis == -1)
-            {
-                moveDirection -= left;
-            }
-
-            // JUMP
-            bool isPressingJump = movementKeybindGroup->IsKeybindPressed("Jump"_h);;
-            isJumping = isPressingJump && localplayerSingleton.movement.flags.canJump;
-
-            // This ensures we have to stop pressing "Move Jump" and press it again to jump
-            localplayerSingleton.movement.flags.canJump = !isPressingJump;
-
-            f32 moveDirectionLength = glm::length2(moveDirection);
-            if (moveDirectionLength != 0)
-            {
-                moveDirection = glm::normalize(moveDirection);
-            }
-
-            if (originalFlags.GROUNDED)
-            {
-                movementFlags.FORWARD = moveAlongVerticalAxis == 1;
-                movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
-                movementFlags.LEFT = moveAlongHorizontalAxis == 1;
-                movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
-
-                movement.velocity = moveDirection * movement.moveSpeed;
-
-                if (isJumping)
+                // FORWARD
+                if (moveAlongVerticalAxis == 1)
                 {
-                    movement.velocity += up * 8.0f; // 8 is decent value
-
-                    // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
-                    localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
+                    moveDirection += front;
                 }
-            }
-            else
-            {
-                // Check if we can change direction
-                if (isMoving && localplayerSingleton.movement.flags.canChangeDirection)
+                // BACKWARD
+                else if (moveAlongVerticalAxis == -1)
                 {
-                    localplayerSingleton.movement.flags.canChangeDirection = false;
+                    moveDirection -= front;
+                }
 
-                    f32 moveSpeed = movement.moveSpeed;
+                // LEFT
+                if (moveAlongHorizontalAxis == 1)
+                {
+                    moveDirection += left;
+                }
+                // RIGHT
+                else if (moveAlongHorizontalAxis == -1)
+                {
+                    moveDirection -= left;
+                }
 
-                    // If we were previously standing still reduce our moveSpeed by 66 percent
-                    if (originalFlags.value == 0 || originalFlags.value == 0x16)
-                        moveSpeed *= 0.33f;
+                // JUMP
+                bool isPressingJump = movementKeybindGroup->IsKeybindPressed("Jump"_h);;
+                isJumping = isPressingJump && localplayerSingleton.movement.flags.canJump;
 
+                // This ensures we have to stop pressing "Move Jump" and press it again to jump
+                localplayerSingleton.movement.flags.canJump = !isPressingJump;
+
+                f32 moveDirectionLength = glm::length2(moveDirection);
+                if (moveDirectionLength != 0)
+                {
+                    moveDirection = glm::normalize(moveDirection);
+                }
+
+                if (originalFlags.GROUNDED)
+                {
                     movementFlags.FORWARD = moveAlongVerticalAxis == 1;
                     movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
                     movementFlags.LEFT = moveAlongHorizontalAxis == 1;
                     movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
 
-                    vec3 newVelocity = moveDirection * moveSpeed;
-                    movement.velocity.x = newVelocity.x;
-                    movement.velocity.y = newVelocity.y;
+                    movement.velocity = moveDirection * movement.moveSpeed;
+
+                    if (isJumping)
+                    {
+                        movement.velocity += up * 8.0f; // 8 is decent value
+
+                        // Ensure we can only manipulate direction of the jump if we did not produce a direction when we initially jumped
+                        localplayerSingleton.movement.flags.canChangeDirection = moveAlongVerticalAxis == 0 && moveAlongHorizontalAxis == 0;
+                    }
                 }
                 else
                 {
-                    // We rebuild our movementFlags every frame to check if we need to send an update to the server, this ensures we keep the correct movement flags
-                    movementFlags.FORWARD = originalFlags.FORWARD;
-                    movementFlags.BACKWARD = originalFlags.BACKWARD;
-                    movementFlags.LEFT = originalFlags.LEFT;
-                    movementFlags.RIGHT = originalFlags.RIGHT;
-                }
+                    // Check if we can change direction
+                    if (isMoving && localplayerSingleton.movement.flags.canChangeDirection)
+                    {
+                        localplayerSingleton.movement.flags.canChangeDirection = false;
 
-                movement.fallSpeed += movement.fallAcceleration * timeSingleton.deltaTime;
-                movement.velocity -= up * movement.fallSpeed * timeSingleton.deltaTime;
-            }
-        }
+                        f32 moveSpeed = movement.moveSpeed;
 
-        CModelInfo& localplayerCModelInfo = registry.get<CModelInfo>(localplayerSingleton.entity);
+                        // If we were previously standing still reduce our moveSpeed by 66 percent
+                        if (originalFlags.value == 0 || originalFlags.value == 0x16)
+                            moveSpeed *= 0.33f;
 
-        bool isGrounded = false;
-        f32 timeToCollide = 0;
+                        movementFlags.FORWARD = moveAlongVerticalAxis == 1;
+                        movementFlags.BACKWARD = moveAlongVerticalAxis == -1;
+                        movementFlags.LEFT = moveAlongHorizontalAxis == 1;
+                        movementFlags.RIGHT = moveAlongHorizontalAxis == -1;
 
-        //vec3 triangleNormal;
-        //f32 triangleSteepness = 0;
-        bool willCollide = false;// PhysicsUtils::CheckCollisionForCModels(currentMap, movement, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
-        if (willCollide)
-        {
-            //transform.position += (movement.velocity * timeToCollide) * timeSingleton.deltaTime;
-            //isGrounded = triangleSteepness <= 50;
-        }
-        else
-        {
-            f32 sqrVelocity = glm::length2(movement.velocity);
-            if (sqrVelocity != 0)
-            {
-                vec3 newPosition = transform.position + (movement.velocity * timeSingleton.deltaTime);
-                transform.position = newPosition;
-            }
-        }
+                        vec3 newVelocity = moveDirection * moveSpeed;
+                        movement.velocity.x = newVelocity.x;
+                        movement.velocity.y = newVelocity.y;
+                    }
+                    else
+                    {
+                        // We rebuild our movementFlags every frame to check if we need to send an update to the server, this ensures we keep the correct movement flags
+                        movementFlags.FORWARD = originalFlags.FORWARD;
+                        movementFlags.BACKWARD = originalFlags.BACKWARD;
+                        movementFlags.LEFT = originalFlags.LEFT;
+                        movementFlags.RIGHT = originalFlags.RIGHT;
+                    }
 
-        f32 terrainHeight = 0;
-        bool isStandingOnTerrain = false;
-        if (!isGrounded)
-        {
-            isStandingOnTerrain = Terrain::MapUtils::IsStandingOnTerrain(transform.position, terrainHeight);
-            isGrounded = isStandingOnTerrain;
-        }
-
-        movementFlags.GROUNDED = isGrounded;
-
-        if (isGrounded)
-        {
-            localplayerSingleton.movement.flags.canChangeDirection = true;
-            movement.velocity.z = 0.0f;
-            movement.fallSpeed = 19.5f;
-
-            // Clip to Terrain
-            if (isStandingOnTerrain)
-            {
-                transform.position.z = glm::max(transform.position.z, terrainHeight);
-            }
-        }
-
-        bool isMovingForward = (movementFlags.FORWARD && !movementFlags.BACKWARD);
-        bool isMovingBackward = (movementFlags.BACKWARD && !movementFlags.FORWARD);
-        bool isMovingLeft = (movementFlags.LEFT && !movementFlags.RIGHT);
-        bool isMovingRight = (movementFlags.RIGHT && !movementFlags.LEFT);
-
-        if (isMovingForward && isMovingLeft)
-        {
-            transform.yawOffset = 45.0f;
-        }
-        else if (isMovingForward && isMovingRight)
-        {
-            transform.yawOffset = -45.0f;
-        }
-        else if (isMovingBackward && isMovingLeft)
-        {
-            transform.yawOffset = -45.0f;
-        }
-        else if (isMovingBackward && isMovingRight)
-        {
-            transform.yawOffset = 45.0f;
-        }
-        else if (isMovingLeft)
-        {
-            transform.yawOffset = 90.0f;
-        }
-        else if (isMovingRight)
-        {
-            transform.yawOffset = -90.0f;
-        }
-        else
-        {
-            transform.yawOffset = 0.0f;
-        }
-    }
-
-    vec3 cameraTransformPos = transform.position + vec3(0.0f, 0.0f, 1.3f);
-    camera->SetPosition(cameraTransformPos);
-
-    mat4x4 transformMatrix = transform.GetInstanceMatrix();
-    debugRenderer->DrawMatrix(transformMatrix, 1.0f);
-
-    // If our movement flags changed, lets see what animations we should play
-    if (movementFlags.value != originalFlags.value)
-    {
-        AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
-        u32 instanceID = modelDisplayInfo.instanceID;
-
-        AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
-        if (animationSystem->GetAnimationInstanceData(instanceID, animationInstanceData))
-        {
-            bool playForwardAnimation = (movementFlags.FORWARD || movementFlags.LEFT || movementFlags.RIGHT) && !movementFlags.BACKWARD;
-            bool playBackwardAnimation = (movementFlags.BACKWARD) && !movementFlags.FORWARD;
-
-            if (playForwardAnimation)
-            {
-                // Forward Animation
-                if (!animationInstanceData->IsAnimationIDPlaying(5))
-                {
-                    animationSystem->TryStopAllAnimations(instanceID);
-                    animationSystem->TryPlayAnimationID(instanceID, 5, true, true);
+                    movement.fallSpeed += movement.fallAcceleration * timeSingleton.deltaTime;
+                    movement.velocity -= up * movement.fallSpeed * timeSingleton.deltaTime;
                 }
             }
-            else if (playBackwardAnimation)
+
+            CModelInfo& localplayerCModelInfo = registry.get<CModelInfo>(localplayerSingleton.entity);
+
+            bool isGrounded = false;
+            f32 timeToCollide = 0;
+
+            //vec3 triangleNormal;
+            //f32 triangleSteepness = 0;
+            bool willCollide = false;// PhysicsUtils::CheckCollisionForCModels(currentMap, movement, localplayerCModelInfo, triangleNormal, triangleSteepness, timeToCollide);
+            if (willCollide)
             {
-                // Backward Animation
-                if (!animationInstanceData->IsAnimationIDPlaying(13))
-                {
-                    animationSystem->TryStopAllAnimations(instanceID);
-                    animationSystem->TryPlayAnimationID(instanceID, 13, true, true);
-                }
+                //transform.position += (movement.velocity * timeToCollide) * timeSingleton.deltaTime;
+                //isGrounded = triangleSteepness <= 50;
             }
             else
             {
-                // Stand
-                if (!animationInstanceData->IsAnimationIDPlaying(0))
+                f32 sqrVelocity = glm::length2(movement.velocity);
+                if (sqrVelocity != 0)
                 {
-                    animationSystem->TryStopAllAnimations(instanceID);
-                    animationSystem->TryPlayAnimationID(instanceID, 0, true, true);
+                    vec3 newPosition = transform.position + (movement.velocity * timeSingleton.deltaTime);
+                    transform.position = newPosition;
+                }
+            }
+
+            f32 terrainHeight = 0;
+            bool isStandingOnTerrain = false;
+            if (!isGrounded)
+            {
+                isStandingOnTerrain = Terrain::MapUtils::IsStandingOnTerrain(transform.position, terrainHeight);
+                isGrounded = isStandingOnTerrain;
+            }
+
+            movementFlags.GROUNDED = isGrounded;
+
+            if (isGrounded)
+            {
+                localplayerSingleton.movement.flags.canChangeDirection = true;
+                movement.velocity.z = 0.0f;
+                movement.fallSpeed = 19.5f;
+
+                // Clip to Terrain
+                if (isStandingOnTerrain)
+                {
+                    transform.position.z = glm::max(transform.position.z, terrainHeight);
+                }
+            }
+
+            bool isMovingForward = (movementFlags.FORWARD && !movementFlags.BACKWARD);
+            bool isMovingBackward = (movementFlags.BACKWARD && !movementFlags.FORWARD);
+            bool isMovingLeft = (movementFlags.LEFT && !movementFlags.RIGHT);
+            bool isMovingRight = (movementFlags.RIGHT && !movementFlags.LEFT);
+
+            if (isMovingForward && isMovingLeft)
+            {
+                transform.yawOffset = 45.0f;
+            }
+            else if (isMovingForward && isMovingRight)
+            {
+                transform.yawOffset = -45.0f;
+            }
+            else if (isMovingBackward && isMovingLeft)
+            {
+                transform.yawOffset = -45.0f;
+            }
+            else if (isMovingBackward && isMovingRight)
+            {
+                transform.yawOffset = 45.0f;
+            }
+            else if (isMovingLeft)
+            {
+                transform.yawOffset = 90.0f;
+            }
+            else if (isMovingRight)
+            {
+                transform.yawOffset = -90.0f;
+            }
+            else
+            {
+                transform.yawOffset = 0.0f;
+            }
+        }
+
+        vec3 cameraTransformPos = transform.position + vec3(0.0f, 0.0f, 1.3f);
+        orbitalCamera->SetPosition(cameraTransformPos);
+
+        mat4x4 transformMatrix = transform.GetInstanceMatrix();
+        debugRenderer->DrawMatrix(transformMatrix, 1.0f);
+
+        // If our movement flags changed, lets see what animations we should play
+        if (movementFlags.value != originalFlags.value)
+        {
+            AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+            u32 instanceID = modelDisplayInfo.instanceID;
+
+            AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
+            if (animationSystem->GetAnimationInstanceData(instanceID, animationInstanceData))
+            {
+                bool playForwardAnimation = (movementFlags.FORWARD || movementFlags.LEFT || movementFlags.RIGHT) && !movementFlags.BACKWARD;
+                bool playBackwardAnimation = (movementFlags.BACKWARD) && !movementFlags.FORWARD;
+
+                if (playForwardAnimation)
+                {
+                    // Forward Animation
+                    if (!animationInstanceData->IsAnimationIDPlaying(5))
+                    {
+                        animationSystem->TryPlayAnimationID(instanceID, 5, true, true);
+                    }
+                }
+                else if (playBackwardAnimation)
+                {
+                    // Backward Animation
+                    if (!animationInstanceData->IsAnimationIDPlaying(13))
+                    {
+                        animationSystem->TryPlayAnimationID(instanceID, 13, true, true);
+                    }
+                }
+                else
+                {
+                    // Stand
+                    if (!animationInstanceData->IsAnimationIDPlaying(0))
+                    {
+                        animationSystem->TryStopAnimationID(instanceID, 5);
+                        animationSystem->TryStopAnimationID(instanceID, 13);
+                        animationSystem->TryPlayAnimationID(instanceID, 0, true, true);
+                    }
                 }
             }
         }
+    }
+    else
+    {
+        CameraFreeLook* freelookCamera = ServiceLocator::GetCameraFreeLook();
+        if (!freelookCamera->IsActive())
+            return;
+
+        transform.position = freelookCamera->GetPosition();
+        transform.rotation.y = freelookCamera->GetPitch();
+        transform.rotation.z = freelookCamera->GetYaw();
     }
 
     if (transform.position      != originalPosition || 

@@ -32,7 +32,7 @@ namespace Editor
     struct CModelAnimationEntry
     {
         u16 id;
-        const char* name;
+        std::string name;
     };
 
     class Editor
@@ -101,12 +101,11 @@ namespace Editor
         const SelectedMapObjectData& GetSelectedMapObjectData() { return _selectedMapObjectData; }
         const SelectedComplexModelData& GetSelectedComplexModelData() { return _selectedComplexModelData; }
 
+        bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
     private:
         void TerrainSelectionDrawImGui();
         void MapObjectSelectionDrawImGui();
         void ComplexModelSelectionDrawImGui();
-
-        bool OnMouseClickLeft(i32 key, KeybindAction action, KeybindModifier modifier);
 
         NDBCEditorHandler _ndbcEditorHandler;
     private:

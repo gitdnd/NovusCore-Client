@@ -8,7 +8,7 @@
 #include "../Rendering/CModelRenderer.h"
 #include "../Rendering/DebugRenderer.h"
 #include "../Rendering/PixelQuery.h"
-#include "../Rendering/CameraFreelook.h"
+#include "../Rendering/Camera.h"
 #include "../Rendering/AnimationSystem/AnimationSystem.h"
 #include "../ECS/Components/Singletons/NDBCSingleton.h"
 #include "../ECS/Components/Singletons/MapSingleton.h"
@@ -264,15 +264,16 @@ namespace Editor
                                 const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
 
                                 _selectedComplexModelData.animationEntries.clear();
+                                _selectedComplexModelData.selectedAnimationEntry = 0;
+
                                 cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence> animationSequences)
                                 {
                                     for (u32 i = 0; i < animationModelInfo.numSequences; i++)
                                     {
                                         const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
 
-                                        // Skip all variations, global sequences & aliases
-                                        if (animationSequence.animationSubId > 0 ||
-                                            animationSequence.flags.isAlwaysPlaying && animationSequence.flags.isAlias)
+                                        // Global Sequences & Aliases
+                                        if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
                                             continue;
 
                                         NDBC::AnimationData* animationData = animationDataFile->GetRowById<NDBC::AnimationData>(animationSequence.animationId);
@@ -281,7 +282,9 @@ namespace Editor
 
                                         CModelAnimationEntry& animationEntry = _selectedComplexModelData.animationEntries.emplace_back();
                                         animationEntry.id = animationSequence.animationId;
-                                        animationEntry.name = animationDataStringTable->GetString(animationData->name).c_str();
+
+                                        std::string animationName = animationDataStringTable->GetString(animationData->name) + "(" + std::to_string(animationSequence.animationSubId) + ")";
+                                        animationEntry.name = animationName;
                                     }
                                 });
 
@@ -489,7 +492,7 @@ namespace Editor
                 static const char* previewAnimationName = nullptr;
 
                 u32& selectedAnimationEntry = _selectedComplexModelData.selectedAnimationEntry;
-                previewAnimationName = _selectedComplexModelData.animationEntries[selectedAnimationEntry].name;
+                previewAnimationName = _selectedComplexModelData.animationEntries[selectedAnimationEntry].name.c_str();
 
                 ImGui::Separator();
                 ImGui::Separator();
@@ -502,11 +505,11 @@ namespace Editor
                         const CModelAnimationEntry& animationEntry = _selectedComplexModelData.animationEntries[i];
                         bool isSelected = selectedAnimationEntry == i;
 
-                        if (ImGui::Selectable(animationEntry.name, &isSelected))
+                        if (ImGui::Selectable(animationEntry.name.c_str(), &isSelected))
                         {
                             selectedAnimationEntry = i;
-                            selectedAnimationName = animationEntry.name;
-                            previewAnimationName = animationEntry.name;
+                            selectedAnimationName = animationEntry.name.c_str();
+                            previewAnimationName = animationEntry.name.c_str();
                         }
 
                         if (isSelected)
@@ -571,7 +574,7 @@ namespace Editor
         if (!CVAR_EditorEnabled.Get())
             return false;
 
-        CameraFreeLook* camera = ServiceLocator::GetCameraFreeLook();
+        Camera* camera = ServiceLocator::GetCamera();
         if (!camera->IsActive())
             return false;
 

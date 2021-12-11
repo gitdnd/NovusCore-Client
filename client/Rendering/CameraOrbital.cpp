@@ -1,16 +1,24 @@
 #include "CameraOrbital.h"
-#include <windows.h>
+#include "imgui/imgui.h"
+#include "../Utils/ServiceLocator.h"
+#include "../Utils/MapUtils.h"
+
+#include "../Editor/Editor.h"
+#include "../ECS/Components/Singletons/LocalplayerSingleton.h"
+#include "../ECS/Components/Rendering/VisibleModel.h"
+
+#include <Utils/DebugHandler.h>
+#include <Utils/FileReader.h>
+
 #include <InputManager.h>
 #include <filesystem>
 #include <glm/gtx/rotate_vector.hpp>
 #include <glm/gtx/euler_angles.hpp>
 #include <GLFW/glfw3.h>
 #include <Window/Window.h>
-#include <Utils/DebugHandler.h>
-#include <Utils/FileReader.h>
-#include "../Utils/ServiceLocator.h"
-#include "../Utils/MapUtils.h"
-#include "imgui/imgui.h"
+#include <entt.hpp>
+#include <Gameplay/ECS/Components/Transform.h>
+#include <Gameplay/ECS/Components/Movement.h>
 
 namespace fs = std::filesystem;
 
@@ -19,15 +27,33 @@ void CameraOrbital::Init()
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->CreateKeybindGroup("CameraOrbital", 10);
 
-    keybindGroup->AddMouseScrollCallback([this](f32 xPos, f32 yPos)
+    keybindGroup->AddKeyboardCallback("Alt", GLFW_KEY_LEFT_ALT, KeybindAction::Press, KeybindModifier::Any, nullptr);
+    keybindGroup->AddMouseScrollCallback([this, keybindGroup](f32 x, f32 y)
     {
         if (!IsActive())
             return false;
-    
-        _distance = glm::clamp(_distance - yPos, 5.f, 30.f);
+
+        entt::registry* registry = ServiceLocator::GetGameRegistry();
+        LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
+
+        if (localplayerSingleton.entity != entt::null)
+        {
+            if (keybindGroup->IsKeybindPressed("Alt"_h))
+            {
+                Movement& movement = registry->get<Movement>(localplayerSingleton.entity);
+
+                f32 currentSpeed = movement.moveSpeed;
+                f32 newSpeed = currentSpeed + ((currentSpeed / 10) * y);
+                movement.moveSpeed = glm::max(newSpeed, 7.1111f);
+
+                return true;
+            }
+        }
+
+        _distance = glm::clamp(_distance - y, 5.f, 30.f);
         return true;
     });
-    keybindGroup->AddMousePositionCallback([this, inputManager](f32 xPos, f32 yPos)
+    keybindGroup->AddMousePositionCallback([this](f32 xPos, f32 yPos)
     {
         if (!IsActive())
             return false;
@@ -90,6 +116,13 @@ void CameraOrbital::Init()
     
         if (action == KeybindAction::Press)
         {
+            // Handle Editor Clicking for Orbital Camera (Shift clears, Ctrl Selects)
+            if ((modifier & KeybindModifier::Shift) != KeybindModifier::Invalid ||
+                (modifier & KeybindModifier::Ctrl) != KeybindModifier::Invalid)
+            {
+                return ServiceLocator::GetEditor()->OnMouseClickLeft(key, action, modifier);;
+            }
+
             if (!_captureMouse)
             {
                 _captureMouse = true;
@@ -153,6 +186,29 @@ void CameraOrbital::Enabled()
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     keybindGroup->SetActive(true);
+
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
+    if (localplayerSingleton.entity != entt::null)
+    {
+        Transform& transform = registry->get<Transform>(localplayerSingleton.entity);
+        transform.rotation.x = 0;
+        transform.rotation.y = 0;
+
+        registry->emplace_or_replace<TransformIsDirty>(localplayerSingleton.entity);
+        registry->emplace_or_replace<VisibleModel>(localplayerSingleton.entity);
+    }
+
+    if (_captureMouse)
+    {
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
+    else
+    {
+        ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 }
 
 void CameraOrbital::Disabled()
@@ -164,6 +220,19 @@ void CameraOrbital::Disabled()
     InputManager* inputManager = ServiceLocator::GetInputManager();
     KeybindGroup* keybindGroup = inputManager->GetKeybindGroupByHash("CameraOrbital"_h);
     keybindGroup->SetActive(false);
+
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
+    if (localplayerSingleton.entity != entt::null)
+    {
+        registry->remove<VisibleModel>(localplayerSingleton.entity);
+    }
+
+    if (_captureMouse)
+    {
+        ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        glfwSetInputMode(ServiceLocator::GetWindow()->GetWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
 }
 
 void CameraOrbital::Update(f32 deltaTime, f32 fovInDegrees, f32 aspectRatioWH)

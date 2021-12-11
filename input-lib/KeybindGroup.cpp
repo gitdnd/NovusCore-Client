@@ -45,8 +45,13 @@ void KeybindGroup::SetActive(bool state)
         for (u32 i = 0; i < numKeybinds; i++)
         {
             Keybind* keybind = _keybinds[i];
-            if (keybind->isPressed && keybind->callback)
-                keybind->callback(keybind->glfwKey, KeybindAction::Release, KeybindModifier::None);
+            if (keybind->isPressed)
+            {
+                if (keybind->callback)
+                    keybind->callback(keybind->glfwKey, KeybindAction::Release, KeybindModifier::None);
+
+                keybind->isPressed = false;
+            }
         }
     }
 }

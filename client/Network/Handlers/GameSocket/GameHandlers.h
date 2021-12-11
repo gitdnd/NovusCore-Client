@@ -17,6 +17,7 @@ namespace GameSocket
         static bool HandleCreateEntity(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
         static bool HandleUpdateEntity(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
         static bool HandleDeleteEntity(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
+        static bool HandleStoreLocAck(std::shared_ptr<NetClient>, std::shared_ptr<NetPacket>);
 
         static std::vector<u32> receivedEntityIDs;
     };

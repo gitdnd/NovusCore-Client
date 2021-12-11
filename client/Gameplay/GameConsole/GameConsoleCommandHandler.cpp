@@ -8,6 +8,12 @@ GameConsoleCommandHandler::GameConsoleCommandHandler()
     RegisterCommand("help"_h, GameConsoleCommands::HandleHelp);
     RegisterCommand("ping"_h, GameConsoleCommands::HandlePing);
     RegisterCommand("reload"_h, GameConsoleCommands::HandleScriptReload);
+    RegisterCommand("tele"_h, GameConsoleCommands::HandleTele);
+
+    RegisterCommand("goto"_h, GameConsoleCommands::HandleGoto);
+    RegisterCommand("storeloc"_h, GameConsoleCommands::HandleStoreLoc);
+
+    RegisterCommand("morph"_h, GameConsoleCommands::HandleMorph);
 }
 
 bool GameConsoleCommandHandler::HandleCommand(GameConsole* gameConsole, std::string& command)

@@ -5,6 +5,9 @@
 #include <Networking/NetPacketHandler.h>
 #include "../../../Utils/EntityUtils.h"
 #include "../../../Utils/ServiceLocator.h"
+#include "../../../Rendering/CameraFreelook.h"
+#include "../../../Rendering/CameraOrbital.h"
+#include "../../../Gameplay/GameConsole/GameConsole.h"
 
 #include <Gameplay/ECS/Components/Transform.h>
 #include <Gameplay/ECS/Components/GameEntity.h>
@@ -29,9 +32,11 @@ namespace GameSocket
         netPacketHandler->SetMessageHandler(Opcode::SMSG_CREATE_ENTITY,   { ConnectionStatus::CONNECTED, static_cast<u16>(sizeof(entt::entity) + GameEntity::GetPacketSize() + Transform::GetPacketSize()), GameHandlers::HandleCreateEntity });
         netPacketHandler->SetMessageHandler(Opcode::SMSG_UPDATE_ENTITY,   { ConnectionStatus::CONNECTED, static_cast<u16>(sizeof(entt::entity) + Transform::GetPacketSize()), GameHandlers::HandleUpdateEntity });
         netPacketHandler->SetMessageHandler(Opcode::SMSG_DELETE_ENTITY,   { ConnectionStatus::CONNECTED, sizeof(entt::entity), GameHandlers::HandleDeleteEntity });
+        
+        netPacketHandler->SetMessageHandler(Opcode::SMSG_STORELOC,        { ConnectionStatus::CONNECTED, sizeof(u8) + 1, sizeof(u8) + 257 + sizeof(vec3) + sizeof(f32), GameHandlers::HandleStoreLocAck });
     }
 
-    bool GameHandlers::HandshakeHandler(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandshakeHandler(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         ServerLogonChallenge logonChallenge;
         logonChallenge.Deserialize(packet->payload);
@@ -53,12 +58,12 @@ namespace GameSocket
 
         u16 payloadSize = clientResponse.Serialize(buffer);
         buffer->Put<u16>(payloadSize, 2);
-        networkClient->Send(buffer);
+        netClient->Send(buffer);
 
-        networkClient->SetConnectionStatus(ConnectionStatus::AUTH_HANDSHAKE);
+        netClient->SetConnectionStatus(ConnectionStatus::AUTH_HANDSHAKE);
         return true;
     }
-    bool GameHandlers::HandshakeResponseHandler(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandshakeResponseHandler(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         // Handle handshake response
         ServerLogonHandshake logonResponse;
@@ -81,17 +86,17 @@ namespace GameSocket
         std::shared_ptr<Bytebuffer> buffer = Bytebuffer::Borrow<128>();
         buffer->Put(Opcode::CMSG_CONNECTED);
         buffer->PutU16(0);
-        networkClient->Send(buffer);
+        netClient->Send(buffer);
 
-        networkClient->SetConnectionStatus(ConnectionStatus::AUTH_SUCCESS);
+        netClient->SetConnectionStatus(ConnectionStatus::AUTH_SUCCESS);
         return true;
     }
-    bool GameHandlers::HandleConnected(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandleConnected(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
-        networkClient->SetConnectionStatus(ConnectionStatus::CONNECTED);
+        netClient->SetConnectionStatus(ConnectionStatus::CONNECTED);
         return true;
     }
-    bool GameHandlers::HandleCreatePlayer(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandleCreatePlayer(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         entt::registry* registry = ServiceLocator::GetGameRegistry();
 
@@ -120,14 +125,16 @@ namespace GameSocket
 
             registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
             registry->emplace<Movement>(localplayerSingleton.entity);
-            registry->emplace<VisibleModel>(localplayerSingleton.entity);
+
+            if (ServiceLocator::GetCameraOrbital()->IsActive())
+                registry->emplace<VisibleModel>(localplayerSingleton.entity);
 
             ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, displayID);
         }
 
         return true;
     }
-    bool GameHandlers::HandleCreateEntity(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandleCreateEntity(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         entt::registry* registry = ServiceLocator::GetGameRegistry();
         LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
@@ -176,7 +183,7 @@ namespace GameSocket
 
         return true;
     }
-    bool GameHandlers::HandleUpdateEntity(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandleUpdateEntity(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         entt::registry* registry = ServiceLocator::GetGameRegistry();
         LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
@@ -191,11 +198,21 @@ namespace GameSocket
             return false;
         }
 
+        if (entityId == localplayerSingleton.entity)
+        {
+            CameraFreeLook* freelookCamera = ServiceLocator::GetCameraFreeLook();
+            if (freelookCamera->IsActive())
+            {
+                freelookCamera->SetPosition(transform.position);
+                freelookCamera->SetYaw(transform.rotation.z);
+            }
+        }
+
         registry->emplace_or_replace<TransformIsDirty>(entityId);
 
         return true;
     }
-    bool GameHandlers::HandleDeleteEntity(std::shared_ptr<NetClient> networkClient, std::shared_ptr<NetPacket> packet)
+    bool GameHandlers::HandleDeleteEntity(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
     {
         entt::registry* registry = ServiceLocator::GetGameRegistry();
         LocalplayerSingleton& localplayerSingleton = registry->ctx<LocalplayerSingleton>();
@@ -213,6 +230,39 @@ namespace GameSocket
         {
             registry->destroy(entity);
         }
+        return true;
+    }
+    bool GameHandlers::HandleStoreLocAck(std::shared_ptr<NetClient> netClient, std::shared_ptr<NetPacket> packet)
+    {
+        GameConsole* gameConsole = ServiceLocator::GetGameConsole();
+
+        u8 status = 0;
+        std::string name = "";
+
+        if (!packet->payload->GetU8(status))
+            return false;
+
+        if (!packet->payload->GetString(name))
+            return false;
+
+        if (status == 0)
+        {
+            gameConsole->PrintWarning("A Location with the same name already exists (Name : %s)", name.c_str());
+        }
+        else
+        {
+            vec3 position = vec3(0.0f, 0.0f, 0.0f);
+            f32 orientation = 0.0f;
+
+            if (!packet->payload->Get(position))
+                return false;
+
+            if (!packet->payload->GetF32(orientation))
+                return false;
+
+            gameConsole->PrintSuccess("Added Location (Name : '%s', Position: (X: %f, Y: %f, Z: %f), Orientation: %f)", name.c_str(), position.x, position.y, position.z, orientation);
+        }
+
         return true;
     }
 }

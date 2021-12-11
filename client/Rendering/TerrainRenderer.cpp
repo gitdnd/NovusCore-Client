@@ -6,6 +6,7 @@
 #include "WaterRenderer.h"
 #include "PixelQuery.h"
 #include "RenderUtils.h"
+#include "CameraOrbital.h"
 #include "../Utils/ServiceLocator.h"
 #include "../Utils/MapUtils.h"
 #include "../Editor/Editor.h"
@@ -119,9 +120,11 @@ void TerrainRenderer::Update(f32 deltaTime)
                 transform.scale = vec3(1.0f, 1.0f, 1.0f);
 
                 registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
-
                 registry->emplace<Movement>(localplayerSingleton.entity);
-                registry->emplace<VisibleModel>(localplayerSingleton.entity);
+
+                if (ServiceLocator::GetCameraOrbital()->IsActive())
+                    registry->emplace<VisibleModel>(localplayerSingleton.entity);
+
                 ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 65);
             }
             else
