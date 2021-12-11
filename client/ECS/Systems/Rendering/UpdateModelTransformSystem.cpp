@@ -34,7 +34,11 @@ void UpdateModelTransformSystem::Update(entt::registry& registry)
             instanceMatrix = transform.GetInstanceMatrix();
             transform.rotation.z -= transform.yawOffset;
 
-            modelInstanceMatrices.SetDirtyElement(modelDisplayInfo.instanceID);
+            if (registry.all_of<ModelIsReusedInstance>(entity) ||
+                !registry.all_of<ModelCreatedThisFrame>(entity))
+            {
+                //modelInstanceMatrices.SetDirtyElement(modelDisplayInfo.instanceID);
+            }
         });
     });
 }

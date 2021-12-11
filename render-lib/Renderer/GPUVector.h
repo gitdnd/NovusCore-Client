@@ -90,9 +90,22 @@ namespace Renderer
                 BufferRangeFrame bufferRangeFrame;
                 if (!_allocator.Allocate(bytesToAllocate, bufferRangeFrame))
                 {
-                    DebugHandler::PrintFatal("GPUVector : Failed to allocate GPU Vector %s", _debugName.c_str());
+                    DebugHandler::PrintFatal("[GPUVector] : Failed to allocate GPU Vector %s", _debugName.c_str());
                 }
             }
+
+#ifdef NC_Debug
+            _dirtyRegions.ReadLock([&](const std::vector<DirtyRegion>& dirtyRegions)
+            {
+                for (u32 i = 0; i < dirtyRegions.size(); i++)
+                {
+                    if (dirtyRegions[i].offset == allocatedBytes)
+                    {
+                        DebugHandler::PrintFatal("[GPUVector] : UploadToBuffer will attempt to update a region in the buffer that ALSO exists in UpdateDirtyRegions, this will cause data corruption.");
+                    }
+                }
+            });
+#endif
 
             // Upload everything between allocatedBytes and allocatedBytes+bytesToAllocate
             renderer->UploadToBuffer(_buffer, allocatedBytes, _vector.data(), allocatedBytes, bytesToAllocate);
@@ -138,7 +151,7 @@ namespace Renderer
                 BufferRangeFrame bufferRangeFrame;
                 if (!_allocator.Allocate(bytesToAllocate, bufferRangeFrame))
                 {
-                    DebugHandler::PrintFatal("GPUVector : Failed to allocate GPU Vector %s", _debugName.c_str());
+                    DebugHandler::PrintFatal("[GPUVector] : Failed to allocate GPU Vector %s", _debugName.c_str());
                 }
             }
 

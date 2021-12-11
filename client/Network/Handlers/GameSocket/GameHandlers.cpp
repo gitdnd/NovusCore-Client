@@ -126,10 +126,10 @@ namespace GameSocket
             registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
             registry->emplace<Movement>(localplayerSingleton.entity);
 
-            if (ServiceLocator::GetCameraOrbital()->IsActive())
-                registry->emplace<VisibleModel>(localplayerSingleton.entity);
-
             ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, displayID);
+
+            if (ServiceLocator::GetCameraOrbital()->IsActive())
+                registry->remove<VisibleModel>(localplayerSingleton.entity);
         }
 
         return true;
@@ -177,7 +177,6 @@ namespace GameSocket
 
         registry->emplace<TransformIsDirty>(entity);
         registry->emplace<Movement>(entity);
-        registry->emplace<VisibleModel>(entity);
 
         ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(entity, ModelType::Creature, displayID);
 

@@ -33,24 +33,8 @@ float4x4 MatrixScale(float3 v)
     return result;
 }
 
-/*
-inline Matrix<T, 4> ToMatrix4() const {
-    const T x2 = v_[0] * v_[0], y2 = v_[1] * v_[1], z2 = v_[2] * v_[2];
-    const T sx = s_ * v_[0], sy = s_ * v_[1], sz = s_ * v_[2];
-    const T xz = v_[0] * v_[2], yz = v_[1] * v_[2], xy = v_[0] * v_[1];
-    return Matrix<T, 4>(1 - 2 * (y2 + z2), 2 * (xy + sz), 2 * (xz - sy), 0.0f,
-                        2 * (xy - sz), 1 - 2 * (x2 + z2), 2 * (sx + yz), 0.0f,
-                        2 * (sy + xz), 2 * (yz - sx), 1 - 2 * (x2 + y2), 0.0f,
-                        0.0f, 0.0f, 0.0f, 1.0f);
-  }
-*/
-
 float4x4 RotationToMatrix(float4 quat)
 {
-    //quat.x = -quat.x;
-    //quat.y = -quat.y;
-    //quat.z = -quat.z;
-
     float x2 = quat.x * quat.x;
     float y2 = quat.y * quat.y;
     float z2 = quat.z * quat.z;
@@ -72,7 +56,7 @@ float4 slerp(float4 a, float4 b, float t)
     const float l2 = dot(a, b);
     if (l2 < 0.0f)
     {
-        b = float4(-b.x, -b.y, -b.z, -b.w); // Might just be -b
+        b = float4(-b.x, -b.y, -b.z, -b.w);
     }
 
     float4 c;
@@ -162,7 +146,7 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
                 float4 nextValue = ctx.trackValues[trackInfo.valueOffset + j];
 
                 float time = (state.animationProgress - defaultTimestamp) / (nextValueTimestamp - defaultTimestamp);
-                rotationValue = slerp(defaultValue, nextValue, time);
+                rotationValue = slerp(normalize(defaultValue), normalize(nextValue), time);
                 break;
             }
         }
@@ -172,7 +156,6 @@ float4x4 GetBoneMatrix(AnimationContext ctx)
     for (int p = 0; p < numTranslationSequences; p++)
     {
         AnimationTrackInfo trackInfo = ctx.animationTrackInfos[boneInfo.translationTrackOffset + p];
-
         if (trackInfo.sequenceIndex != ctx.activeSequenceId)
             continue;
 

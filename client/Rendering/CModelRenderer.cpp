@@ -80,6 +80,7 @@ CModelRenderer::~CModelRenderer()
 void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entity)
 {
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
+    registry.emplace<ModelCreatedThisFrame>(entity);
 
     NDBCSingleton& ndbcSingleton = registry.ctx<NDBCSingleton>();
     NDBC::File* creatureDisplayInfoFile = ndbcSingleton.GetNDBCFile("CreatureDisplayInfo");
@@ -180,10 +181,10 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
                 entt::registry* registry = ServiceLocator::GetGameRegistry();
                 CModelInfo& cmodelInfo = registry->get_or_emplace<CModelInfo>(entity, modelDisplayInfo.instanceID, false);
             
-                if (complexModel->numCollisionTriangles > 0)
-                {
-                    registry->emplace_or_replace<Collidable>(entity);
-                }
+                //if (complexModel->numCollisionTriangles > 0)
+                //{
+                //    registry->emplace_or_replace<Collidable>(entity);
+                //}
             
                 instanceIDToEntityID[modelDisplayInfo.instanceID] = entity;
             });
@@ -198,6 +199,8 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
     }
     else
     {
+        registry.emplace<ModelIsReusedInstance>(entity);
+
         if (complexModel->isAnimated)
         {
             AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
@@ -235,15 +238,7 @@ void CModelRenderer::OnModelCreated(entt::registry& registry, entt::entity entit
         }
     }
 
-    if (registry.all_of<VisibleModel>(entity))
-    {
-        OnModelVisible(registry, entity);
-    }
-    else
-    {
-        OnModelInvisible(registry, entity);
-    }
-
+    registry.emplace_or_replace<VisibleModel>(entity);
     _loadingIsDirty = true;
 }
 
@@ -279,6 +274,8 @@ void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entit
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
     u32 instanceID = modelDisplayInfo.instanceID;
 
+    bool isCreatedThisFrame = registry.all_of<ModelCreatedThisFrame>(entity);
+
     _instanceDisplayInfos.ReadLock([&](const std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
     {
         const InstanceDisplayInfo& instanceDisplayInfo = instanceDisplayInfos[instanceID];
@@ -292,8 +289,12 @@ void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entit
                     u32 drawCallID = instanceDisplayInfo.opaqueDrawCallOffset + i;
                     drawCalls[drawCallID].instanceCount = 1;
                 }
-            });
-            _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+            }); 
+            
+            if (!isCreatedThisFrame)
+            {
+                _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+            }
         }
         
         if (instanceDisplayInfo.transparentDrawCallCount > 0)
@@ -305,8 +306,12 @@ void CModelRenderer::OnModelVisible(entt::registry& registry, entt::entity entit
                     u32 drawCallID = instanceDisplayInfo.transparentDrawCallOffset + i;
                     drawCalls[drawCallID].instanceCount = 1;
                 }
-            });
-            _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+            }); 
+            
+            if (!isCreatedThisFrame)
+            {
+                _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+            }
         }
     });
 }
@@ -319,6 +324,8 @@ void CModelRenderer::OnModelInvisible(entt::registry& registry, entt::entity ent
     ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(entity);
     u32 instanceID = modelDisplayInfo.instanceID;
 
+    bool isCreatedThisFrame = registry.all_of<ModelCreatedThisFrame>(entity);
+
     _instanceDisplayInfos.ReadLock([&](const std::vector<InstanceDisplayInfo>& instanceDisplayInfos)
     {
         const InstanceDisplayInfo& instanceDisplayInfo = instanceDisplayInfos[instanceID];
@@ -333,7 +340,11 @@ void CModelRenderer::OnModelInvisible(entt::registry& registry, entt::entity ent
                     drawCalls[drawCallID].instanceCount = 0;
                 }
             });
-            _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+
+            if (!isCreatedThisFrame)
+            {
+                _opaqueDrawCalls.SetDirtyElements(instanceDisplayInfo.opaqueDrawCallOffset, instanceDisplayInfo.opaqueDrawCallCount);
+            }
         }
 
         if (instanceDisplayInfo.transparentDrawCallCount > 0)
@@ -345,14 +356,21 @@ void CModelRenderer::OnModelInvisible(entt::registry& registry, entt::entity ent
                     u32 drawCallID = instanceDisplayInfo.transparentDrawCallOffset + i;
                     drawCalls[drawCallID].instanceCount = 0;
                 }
-            });
-            _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+            }); 
+            
+            if (!isCreatedThisFrame)
+            {
+                _transparentDrawCalls.SetDirtyElements(instanceDisplayInfo.transparentDrawCallOffset, instanceDisplayInfo.transparentDrawCallCount);
+            }
         }
     });
 }
 
 void CModelRenderer::Update(f32 deltaTime)
 {
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    registry->clear<ModelCreatedThisFrame>();
+
     SyncBuffers();
 
     bool drawBoundingBoxes = CVAR_ComplexModelDrawBoundingBoxes.Get() == 1;
@@ -397,13 +415,13 @@ void CModelRenderer::Update(f32 deltaTime)
                 while (_animationRequests.try_dequeue(animationRequest))
                 {
                     const ModelInstanceData& modelInstanceData = _modelInstanceDatas.ReadGet(animationRequest.instanceId);
-
                     const LoadedComplexModel& complexModel = _loadedComplexModels.ReadGet(modelInstanceData.modelID);
-                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(modelInstanceData.modelID);
 
-                    u32 sequenceIndex = animationRequest.sequenceId;
                     if (!complexModel.isAnimated)
                         continue;
+
+                    const AnimationModelInfo& modelInfo = _animationModelInfo.ReadGet(modelInstanceData.modelID);
+                    u32 sequenceIndex = animationRequest.sequenceId;
 
                     for (u32 i = 0; i < modelInfo.numBones; i++)
                     {
@@ -419,7 +437,7 @@ void CModelRenderer::Update(f32 deltaTime)
                             continue;
                         }
 
-                        bool didUpdateBone = false;
+                        bool markBoneInstanceAsDirty = false;
 
                         for (u32 j = 0; j < animationBoneInfo.numTranslationSequences; j++)
                         {
@@ -444,68 +462,71 @@ void CModelRenderer::Update(f32 deltaTime)
                             }
 
                             _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                            didUpdateBone = true;
+                            markBoneInstanceAsDirty = true;
                             break;
                         }
 
-                        if (didUpdateBone)
-                            continue;
-
-                        for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
+                        if (!markBoneInstanceAsDirty)
                         {
-                            const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
-
-                            if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
-                                continue;
-
-                            boneInstance.animationProgress = 0;
-
-                            if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
+                            for (u32 j = 0; j < animationBoneInfo.numRotationSequences; j++)
                             {
-                                bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
+                                const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.rotationSequenceOffset + j];
 
-                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                boneInstance.sequenceIndex = sequenceIndex;
-                            }
-                            else
-                            {
-                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                boneInstance.sequenceIndex = 0;
-                            }
+                                if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
+                                    continue;
 
-                            _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                            didUpdateBone = true;
-                            break;
+                                boneInstance.animationProgress = 0;
+
+                                if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
+                                {
+                                    bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isRotationTrackGlobalSequence;
+
+                                    boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                    boneInstance.sequenceIndex = sequenceIndex;
+                                }
+                                else
+                                {
+                                    boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                    boneInstance.sequenceIndex = 0;
+                                }
+
+                                markBoneInstanceAsDirty = true;
+                                break;
+                            }
                         }
-                        
-                        if (didUpdateBone)
-                            continue;
 
-                        for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
+                        if (!markBoneInstanceAsDirty)
                         {
-                            const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
-
-                            if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
-                                continue;
-
-                            AnimationBoneInstance& boneInstance = animationBoneInstances[modelInstanceData.boneInstanceDataOffset + i];
-                            boneInstance.animationProgress = 0;
-
-                            if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
+                            for (u32 j = 0; j < animationBoneInfo.numScaleSequences; j++)
                             {
-                                bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
+                                const AnimationTrackInfo& animationTrackInfo = _animationTrackInfo[animationBoneInfo.scaleSequenceOffset + j];
 
-                                boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
-                                boneInstance.sequenceIndex = sequenceIndex;
-                            }
-                            else
-                            {
-                                boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
-                                boneInstance.sequenceIndex = 0;
-                            }
+                                if (!animationRequest.flags.stopAll && animationTrackInfo.sequenceIndex != sequenceIndex)
+                                    continue;
 
+                                boneInstance.animationProgress = 0;
+
+                                if (!animationRequest.flags.stopAll && animationRequest.flags.isPlaying)
+                                {
+                                    bool animationIsLooping = animationRequest.flags.isLooping || animationBoneInfo.flags.isScaleTrackGlobalSequence;
+
+                                    boneInstance.animateState = (AnimationBoneInstance::AnimateState::PLAY_ONCE * !animationIsLooping) + (AnimationBoneInstance::AnimateState::PLAY_LOOP * animationIsLooping);
+                                    boneInstance.sequenceIndex = sequenceIndex;
+                                }
+                                else
+                                {
+                                    boneInstance.animateState = AnimationBoneInstance::AnimateState::STOPPED;
+                                    boneInstance.sequenceIndex = 0;
+                                }
+
+                                markBoneInstanceAsDirty = true;
+                                break;
+                            }
+                        }
+
+                        if (markBoneInstanceAsDirty)
+                        {
                             _animationBoneInstances.SetDirtyElement(modelInstanceData.boneInstanceDataOffset + i);
-                            break;
                         }
                     }
 
@@ -2163,6 +2184,9 @@ bool CModelRenderer::LoadComplexModel(ComplexModelToBeLoaded& toBeLoaded, Loaded
                 boneInfo.flags.isTranslationTrackGlobalSequence = bone.translation.isGlobalSequence;
                 boneInfo.flags.isRotationTrackGlobalSequence = bone.rotation.isGlobalSequence;
                 boneInfo.flags.isScaleTrackGlobalSequence = bone.scale.isGlobalSequence;
+                boneInfo.flags.ignoreParentTranslation = bone.flags.ignoreParentTranslate;
+                boneInfo.flags.ignoreParentRotation = bone.flags.ignoreParentTranslate;
+                boneInfo.flags.ignoreParentScale = bone.flags.ignoreParentScale;
 
                 boneInfo.parentBoneId = bone.parentBoneId;
                 boneInfo.flags.animate = (bone.flags.transformed | bone.flags.unk_0x80) > 0;
@@ -2862,10 +2886,10 @@ void CModelRenderer::AddInstance(LoadedComplexModel& complexModel, const Terrain
                 registry->emplace_or_replace<TransformIsDirty>(entityID);
             }
 
-            if (cmodelInfo.isStaticModel && complexModel.numCollisionTriangles > 0)
-            {
-                registry->emplace_or_replace<Collidable>(entityID);
-            }
+            //if (cmodelInfo.isStaticModel && complexModel.numCollisionTriangles > 0)
+            //{
+            //    registry->emplace_or_replace<Collidable>(entityID);
+            //}
         }
     });
 

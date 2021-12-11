@@ -12,7 +12,7 @@ public:
         u16 editorSelectedAnimationID = 0;
         bool editorShouldAnimationLoop = 0;
 
-        std::vector<u16> activeAnimationIDs;
+        u16 primaryAnimationID = std::numeric_limits<u16>().max();
 
         bool IsAnimationIDPlaying(u16 animationID);
     };
@@ -26,6 +26,7 @@ public:
     // Helper Functions
 public:
     bool TryPlayAnimationID(u32 instanceID, u16 animationID, bool play, bool loop = false);
+    bool TryStopAnimationID(u32 instanceID, u16 animationID);
     void TryStopAllAnimations(u32 instanceID);
 
 private:

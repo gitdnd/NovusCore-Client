@@ -83,7 +83,7 @@ bool AnimationSystem::TryPlayAnimationID(u32 instanceID, u16 animationID, bool p
             if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
                 continue;
 
-            if (animationSequence.animationId == animationID)
+            if (animationID == animationSequence.animationId)
             {
                 sequenceID = i;
                 break;
@@ -103,19 +103,60 @@ bool AnimationSystem::TryPlayAnimationID(u32 instanceID, u16 animationID, bool p
 
         cModelRenderer->AddAnimationRequest(request);
 
-        auto activeAnimationIDsitr = std::find(animationInstanceData->activeAnimationIDs.begin(), animationInstanceData->activeAnimationIDs.end(), animationID);
-
-        if (play && activeAnimationIDsitr == animationInstanceData->activeAnimationIDs.end())
-        {
-            animationInstanceData->activeAnimationIDs.push_back(animationID);
-        }
-        else if (!play && activeAnimationIDsitr != animationInstanceData->activeAnimationIDs.end())
-        {
-            animationInstanceData->activeAnimationIDs.erase(activeAnimationIDsitr);
-        }
+        animationInstanceData->primaryAnimationID = animationID;
     }
 
     return canPlayAnimation;
+}
+
+bool AnimationSystem::TryStopAnimationID(u32 instanceID, u16 animationID)
+{
+    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
+    CModelRenderer* cModelRenderer = clientRenderer->GetCModelRenderer();
+
+    const CModelRenderer::ModelInstanceData& modelInstanceData = cModelRenderer->GetModelInstanceData(instanceID);
+    const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
+
+    if (animationModelInfo.numSequences == 0)
+        return false;
+
+    AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
+    if (!GetAnimationInstanceData(instanceID, animationInstanceData))
+        return false;
+
+    u32 sequenceID = std::numeric_limits<u32>().max();
+    cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence>& animationSequences)
+    {
+        for (u32 i = 0; i < animationModelInfo.numSequences; i++)
+        {
+            const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
+
+            if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
+                continue;
+
+            if (animationID == animationSequence.animationId)
+            {
+                sequenceID = i;
+                break;
+            }
+        }
+    });
+
+    if (sequenceID == std::numeric_limits<u32>().max())
+        return false;
+
+    if (animationID == animationInstanceData->primaryAnimationID)
+        animationInstanceData->primaryAnimationID = std::numeric_limits<u16>().max();
+
+    CModelRenderer::AnimationRequest request;
+    request.instanceId = instanceID;
+    request.sequenceId = sequenceID;
+    request.flags.isPlaying = false;
+    request.flags.isLooping = false;
+    request.flags.stopAll = false;
+
+    cModelRenderer->AddAnimationRequest(request);
+    return true;
 }
 
 void AnimationSystem::TryStopAllAnimations(u32 instanceID)
@@ -133,6 +174,8 @@ void AnimationSystem::TryStopAllAnimations(u32 instanceID)
     if (!GetAnimationInstanceData(instanceID, animationInstanceData))
         return;
 
+    animationInstanceData->primaryAnimationID = std::numeric_limits<u16>().max();
+
     CModelRenderer::AnimationRequest request;
     request.instanceId = instanceID;
     request.sequenceId = 0;
@@ -141,12 +184,9 @@ void AnimationSystem::TryStopAllAnimations(u32 instanceID)
     request.flags.stopAll = true;
 
     cModelRenderer->AddAnimationRequest(request);
-
-    animationInstanceData->activeAnimationIDs.clear();
 }
 
 bool AnimationSystem::AnimationInstanceData::IsAnimationIDPlaying(u16 animationID)
 {
-    auto itr = std::find(activeAnimationIDs.begin(), activeAnimationIDs.end(), animationID);
-    return itr != activeAnimationIDs.end();
+    return animationID == primaryAnimationID;
 }

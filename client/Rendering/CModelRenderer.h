@@ -328,6 +328,10 @@ private:
             u32 isTranslationTrackGlobalSequence : 1;
             u32 isRotationTrackGlobalSequence : 1;
             u32 isScaleTrackGlobalSequence : 1;
+
+            u32 ignoreParentTranslation : 1;
+            u32 ignoreParentRotation : 1;
+            u32 ignoreParentScale : 1;
         } flags;
 
         f32 pivotPointX = 0.f;
@@ -386,7 +390,7 @@ private:
 
     struct CullConstants
     {
-        vec4 frustumPlanes[6];       
+        vec4 frustumPlanes[6];
         vec3 cameraPos;
         u32 maxDrawCount;
         u32 occlusionCull = false;

@@ -122,10 +122,10 @@ void TerrainRenderer::Update(f32 deltaTime)
                 registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
                 registry->emplace<Movement>(localplayerSingleton.entity);
 
-                if (ServiceLocator::GetCameraOrbital()->IsActive())
-                    registry->emplace<VisibleModel>(localplayerSingleton.entity);
-
                 ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 65);
+
+                if (ServiceLocator::GetCameraOrbital()->IsActive())
+                    registry->remove<VisibleModel>(localplayerSingleton.entity);
             }
             else
             {
