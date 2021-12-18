@@ -42,11 +42,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     CModelInstanceData instanceData = _cModelInstanceDatas[instanceID];
     const AnimationModelInfo modelInfo = _animationModelInfos[instanceData.modelID];
 
-    int numSequences = modelInfo.packedData0 & 0xFFFF;
-    int numBones = (modelInfo.packedData0 >> 16) & 0xFFFF;
-
-    if (numSequences == 0)
+    if (modelInfo.isAnimated == 0)
         return;
+
+    int numBones = modelInfo.numBones;
 
     for (int i = 0; i < numBones; i++)
     {
@@ -54,11 +53,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         AnimationBoneInfo boneInfo = _animationBoneInfos[modelInfo.boneInfoOffset + i];
         uint parentBoneId = (boneInfo.packedData1 >> 16) & 0xFFFF;
 
-        uint sequenceIndex = boneInstance.packedData0 & 0xFFFF;
-        AnimationSequence sequence = _animationSequences[modelInfo.sequenceOffset + sequenceIndex];
+        uint sequenceIndex = boneInstance.sequenceIndex;
 
         if (boneInstance.animateState != 0)
         {
+            AnimationSequence sequence = _animationSequences[modelInfo.sequenceOffset + sequenceIndex];
+
             boneInstance.animationProgress += 1.f * _constants.deltaTime;
 
             if (boneInstance.animationProgress >= sequence.duration)
@@ -101,33 +101,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
             currBoneMatrix = GetBoneMatrix(ctx);
             currBoneMatrix = mul(currBoneMatrix, parentBoneMatrix);
-
-            //float3 position;
-            //float4 rotation;
-            //float3 scale;
-            //Decompose(parentBoneMatrix, position, rotation, scale);
-
-            //addedMatrix = mul(MatrixTranslate(-parentPivotPoint.xyz), addedMatrix);
-            //// Add Parent Translation
-            //if ((boneInfo.flags & 16) == 0)
-            //{
-            //    addedMatrix = mul(MatrixTranslate(position), addedMatrix);
-            //}
-            //
-            //// Add Parent Rotation
-            //if ((boneInfo.flags & 32) == 0)
-            //{
-            //    addedMatrix = mul(RotationToMatrix(rotation), addedMatrix);
-            //}
-            //
-            //// Add Parent Scale
-            //if ((boneInfo.flags & 64) == 0)
-            //{
-            //    addedMatrix = mul(MatrixScale(scale), addedMatrix);
-            //}
-            //
-            //addedMatrix = mul(MatrixTranslate(parentPivotPoint.xyz), addedMatrix);
-            //currBoneMatrix = mul(currBoneMatrix, addedMatrix);
 
             _animationBoneDeformMatrices[instanceData.boneDeformOffset + i] = currBoneMatrix;
         }

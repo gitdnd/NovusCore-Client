@@ -208,7 +208,6 @@ public:
 
     SafeVector<LoadedMapObject>& GetLoadedMapObjects() { return _loadedMapObjects; }
     SafeVector<InstanceData>& GetInstances() { return _instances; }
-    SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _mapObjectPlacementDetails; }
     SafeVector<InstanceLookupData>& GetInstanceLookupData() { return _instanceLookupData; }
 
     u32 GetNumLoadedMapObjects() { return static_cast<u32>(_loadedMapObjects.Size()); }
@@ -312,8 +311,6 @@ private:
     Renderer::TextureArrayID _mapObjectTextures;
 
     SafeUnorderedMap<u32, u8> _uniqueIdCounter;
-
-    SafeVector<Terrain::PlacementDetails> _mapObjectPlacementDetails;
 
     u32 _numSurvivingOccluderDrawCalls;
     u32 _numSurvivingGeometryDrawCalls;

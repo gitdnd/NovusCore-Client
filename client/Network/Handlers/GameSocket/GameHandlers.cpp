@@ -128,7 +128,7 @@ namespace GameSocket
 
             ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, displayID);
 
-            if (ServiceLocator::GetCameraOrbital()->IsActive())
+            if (ServiceLocator::GetCameraFreeLook()->IsActive())
                 registry->remove<VisibleModel>(localplayerSingleton.entity);
         }
 

@@ -261,16 +261,14 @@ namespace Editor
                                 NDBC::File* animationDataFile = ndbcSingleton.GetNDBCFile("AnimationData");
                                 StringTable*& animationDataStringTable = animationDataFile->GetStringTable();
 
-                                const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
-
                                 _selectedComplexModelData.animationEntries.clear();
                                 _selectedComplexModelData.selectedAnimationEntry = 0;
 
                                 cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence> animationSequences)
                                 {
-                                    for (u32 i = 0; i < animationModelInfo.numSequences; i++)
+                                    for (u32 i = 0; i < loadedComplexModel.numSequences; i++)
                                     {
-                                        const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
+                                        const CModelRenderer::AnimationSequence& animationSequence = animationSequences[loadedComplexModel.sequenceOffset + i];
 
                                         // Global Sequences & Aliases
                                         if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
@@ -474,6 +472,7 @@ namespace Editor
         glm::vec3 eulerAsDeg = glm::degrees(euler);
 
         ImGui::Text("Complex Model");
+        ImGui::Text("Instance Id (%u) - DrawCall Id (%u)", _selectedComplexModelData.instanceID, _selectedComplexModelData.drawCallDataID);
         ImGui::Text("Model: %s", loadedComplexModel.debugName.c_str());
         ImGui::Text("Position: X: %.2f, Y: %.2f, Z: %.2f", translation.x, translation.y, translation.z);
         ImGui::Text("Scale: X: %.2f, Y: %.2f, Z: %.2f", scale.x, scale.y, scale.z);
@@ -483,11 +482,18 @@ namespace Editor
         if (loadedComplexModel.isAnimated && hasAnimationEntries)
         {
             AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
-            AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
 
             // Animation Shenanigans
-            if (animationSystem->GetAnimationInstanceData(_selectedComplexModelData.instanceID, animationInstanceData))
+            auto& instanceIdToAnimationinfos = animationSystem->GetInstanceToAnimationModelInfo();
+            instanceIdToAnimationinfos.WriteLock([&](robin_hood::unordered_map<u32, AnimationModelInfo> instanceIdToAnimationinfo)
             {
+                auto itr = instanceIdToAnimationinfo.find(_selectedComplexModelData.instanceID);
+                if (itr == instanceIdToAnimationinfo.end())
+                    return;
+
+                AnimationModelInfo& animationModelInfo = itr->second;
+                AnimationEditorInstanceData& animationEditorInstanceData = animationModelInfo.editorInstanceData;
+
                 static const char* selectedAnimationName = nullptr;
                 static const char* previewAnimationName = nullptr;
 
@@ -521,31 +527,31 @@ namespace Editor
 
                 ImGui::SameLine();
 
-                bool value = animationInstanceData->editorShouldAnimationLoop;
+                bool value = animationEditorInstanceData.shouldAnimationLoop;
                 if (ImGui::Checkbox("Loop", &value))
                 {
-                    animationInstanceData->editorShouldAnimationLoop = value;
+                    animationEditorInstanceData.shouldAnimationLoop = value;
                 }
 
                 if (ImGui::Button("Play"))
                 {
                     u32 animationID = _selectedComplexModelData.animationEntries[selectedAnimationEntry].id;
-                    animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, true, animationInstanceData->editorShouldAnimationLoop);
+                    //animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, true, editorInstanceData->editorShouldAnimationLoop);
                 }
 
                 ImGui::SameLine();
                 if (ImGui::Button("Stop"))
                 {
                     u32 animationID = _selectedComplexModelData.animationEntries[selectedAnimationEntry].id;
-                    animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, false);
+                    //animationSystem->TryPlayAnimationID(_selectedComplexModelData.instanceID, animationID, false);
                 }
 
                 ImGui::SameLine();
                 if (ImGui::Button("Stop All"))
                 {
-                    animationSystem->TryStopAllAnimations(_selectedComplexModelData.instanceID);
+                    //animationSystem->TryStopAllAnimations(_selectedComplexModelData.instanceID);
                 }
-            }
+            });
         }
 
         if (_selectedComplexModelData.numRenderBatches)

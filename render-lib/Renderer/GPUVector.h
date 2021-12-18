@@ -22,6 +22,10 @@ namespace Renderer
     public:
         void SetDirtyRegion(size_t offset, size_t size)
         {
+            size_t allocatedBytes = _allocator.AllocatedBytes();
+            if (offset >= allocatedBytes)
+                return;
+
             _dirtyRegions.WriteLock([&](std::vector<DirtyRegion>& dirtyRegions)
             {
                 DirtyRegion& dirtyRegion = dirtyRegions.emplace_back();
@@ -99,7 +103,7 @@ namespace Renderer
             {
                 for (u32 i = 0; i < dirtyRegions.size(); i++)
                 {
-                    if (dirtyRegions[i].offset == allocatedBytes)
+                    if (dirtyRegions[i].offset >= allocatedBytes)
                     {
                         DebugHandler::PrintFatal("[GPUVector] : UploadToBuffer will attempt to update a region in the buffer that ALSO exists in UpdateDirtyRegions, this will cause data corruption.");
                     }
@@ -177,19 +181,24 @@ namespace Renderer
             std::unique_lock lock(_mutex);
             _vector.clear();
 
-            _allocator.Init(0, 0);
-
             if (shouldSync && _renderer != nullptr && _buffer != BufferID::Invalid())
             {
+                _allocator.Init(0, 0);
                 _renderer->QueueDestroyBuffer(_buffer);
                 _buffer = BufferID::Invalid();
                 _initialized = false;
+            }
+            else
+            {
+                size_t size = _allocator.Size();
+                _allocator.Init(0, size);
             }
 
             _dirtyRegions.Clear();
         }
 
         bool HasDirtyRegions() { return _dirtyRegions.Size() > 0; }
+        bool IsValid() { return _buffer != BufferID::Invalid(); }
 
         BufferID GetBuffer() { return _buffer; }
 

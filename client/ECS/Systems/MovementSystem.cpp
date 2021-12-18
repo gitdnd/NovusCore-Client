@@ -75,6 +75,25 @@ void MovementSystem::Init(entt::registry& registry)
     keybindGroup->AddKeyboardCallback("Left", GLFW_KEY_A, KeybindAction::Press, KeybindModifier::None, nullptr);
     keybindGroup->AddKeyboardCallback("Right", GLFW_KEY_D, KeybindAction::Press, KeybindModifier::None, nullptr);
     keybindGroup->AddKeyboardCallback("Jump", GLFW_KEY_SPACE, KeybindAction::Press, KeybindModifier::None, nullptr);
+    keybindGroup->AddKeyboardCallback("ToggleHands", GLFW_KEY_H, KeybindAction::Press, KeybindModifier::None, [&](i32 key, KeybindAction action, KeybindModifier modifier)
+    {
+        CameraOrbital* camera = ServiceLocator::GetCameraOrbital();
+        if (!camera->IsActive() || localplayerSingleton.entity == entt::null)
+            return false;
+
+        ModelDisplayInfo& modelDisplayInfo = registry.get<ModelDisplayInfo>(localplayerSingleton.entity);
+
+        AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+        bool handsAreClosed = localplayerSingleton.handsClosed;
+
+        for (u32 i = 8; i <= 17; i++)
+        {
+            animationSystem->SetBoneAnimation(modelDisplayInfo.instanceID, i, handsAreClosed ? -1 : 15);
+        }
+
+        localplayerSingleton.handsClosed = !handsAreClosed;
+        return true;
+    });
 }
 
 void MovementSystem::Update(entt::registry& registry)
@@ -120,6 +139,8 @@ void MovementSystem::Update(entt::registry& registry)
             // Only set Pitch if we are flying
             //transform.pitch = camera->GetPitch();
         }
+
+
         vec3 front, up, left;
         mat4x4 rotationMatrix = transform.GetRotationMatrix(front, up, left);
 
@@ -314,45 +335,45 @@ void MovementSystem::Update(entt::registry& registry)
         debugRenderer->DrawMatrix(transformMatrix, 1.0f);
 
         // If our movement flags changed, lets see what animations we should play
-        if (movementFlags.value != originalFlags.value)
-        {
-            AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
-            u32 instanceID = modelDisplayInfo.instanceID;
-
-            AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
-            if (animationSystem->GetAnimationInstanceData(instanceID, animationInstanceData))
-            {
-                bool playForwardAnimation = (movementFlags.FORWARD || movementFlags.LEFT || movementFlags.RIGHT) && !movementFlags.BACKWARD;
-                bool playBackwardAnimation = (movementFlags.BACKWARD) && !movementFlags.FORWARD;
-
-                if (playForwardAnimation)
-                {
-                    // Forward Animation
-                    if (!animationInstanceData->IsAnimationIDPlaying(5))
-                    {
-                        animationSystem->TryPlayAnimationID(instanceID, 5, true, true);
-                    }
-                }
-                else if (playBackwardAnimation)
-                {
-                    // Backward Animation
-                    if (!animationInstanceData->IsAnimationIDPlaying(13))
-                    {
-                        animationSystem->TryPlayAnimationID(instanceID, 13, true, true);
-                    }
-                }
-                else
-                {
-                    // Stand
-                    if (!animationInstanceData->IsAnimationIDPlaying(0))
-                    {
-                        animationSystem->TryStopAnimationID(instanceID, 5);
-                        animationSystem->TryStopAnimationID(instanceID, 13);
-                        animationSystem->TryPlayAnimationID(instanceID, 0, true, true);
-                    }
-                }
-            }
-        }
+        //if (movementFlags.value != originalFlags.value)
+        //{
+        //    AnimationSystem* animationSystem = ServiceLocator::GetAnimationSystem();
+        //    u32 instanceID = modelDisplayInfo.instanceID;
+        //
+        //    AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
+        //    if (animationSystem->GetAnimationInstanceData(instanceID, animationInstanceData))
+        //    {
+        //        bool playForwardAnimation = (movementFlags.FORWARD || movementFlags.LEFT || movementFlags.RIGHT) && !movementFlags.BACKWARD;
+        //        bool playBackwardAnimation = (movementFlags.BACKWARD) && !movementFlags.FORWARD;
+        //
+        //        if (playForwardAnimation)
+        //        {
+        //            // Forward Animation
+        //            if (!animationInstanceData->IsAnimationIDPlaying(5))
+        //            {
+        //                animationSystem->TryPlayAnimationID(instanceID, 5, true, true);
+        //            }
+        //        }
+        //        else if (playBackwardAnimation)
+        //        {
+        //            // Backward Animation
+        //            if (!animationInstanceData->IsAnimationIDPlaying(13))
+        //            {
+        //                animationSystem->TryPlayAnimationID(instanceID, 13, true, true);
+        //            }
+        //        }
+        //        else
+        //        {
+        //            // Stand
+        //            if (!animationInstanceData->IsAnimationIDPlaying(0))
+        //            {
+        //                animationSystem->TryStopAnimationID(instanceID, 5);
+        //                animationSystem->TryStopAnimationID(instanceID, 13);
+        //                animationSystem->TryPlayAnimationID(instanceID, 0, true, true);
+        //            }
+        //        }
+        //    }
+        //}
     }
     else
     {

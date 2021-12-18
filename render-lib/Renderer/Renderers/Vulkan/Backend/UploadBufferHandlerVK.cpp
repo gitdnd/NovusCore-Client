@@ -596,12 +596,33 @@ namespace Renderer
             bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             bufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
+            size_t srcBufferSize = _bufferHandler->GetBufferSize(stagingBuffer.buffer);
+            size_t dstBufferSize = _bufferHandler->GetBufferSize(uploadToBufferTask->targetBuffer);
+
+            if (copyRegion.srcOffset + copyRegion.size > srcBufferSize)
+            {
+                DebugHandler::PrintFatal("[UploadBufferHandlerVK::HandleUploadToBufferTask] Source Buffer out of bounds!");
+            }
+            if (copyRegion.dstOffset + copyRegion.size > dstBufferSize)
+            {
+                DebugHandler::PrintFatal("[UploadBufferHandlerVK::HandleUploadToBufferTask] Destination Buffer out of bounds!");
+            }
+
             vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
         }
 
         void UploadBufferHandlerVK::HandleUploadToTextureTask(VkCommandBuffer commandBuffer, StagingBuffer& stagingBuffer, UploadToTextureTask* uploadToTextureTask)
         {
             VkBuffer srcBuffer = _bufferHandler->GetBuffer(stagingBuffer.buffer);
+
+            size_t srcBufferSize = _bufferHandler->GetBufferSize(stagingBuffer.buffer);
+            size_t textureSize = _textureHandler->GetTextureSize(uploadToTextureTask->targetTexture);
+
+            if (uploadToTextureTask->stagingBufferOffset + textureSize > srcBufferSize)
+            {
+                DebugHandler::PrintFatal("[UploadBufferHandlerVK::HandleUploadToTextureTask] Source Buffer out of bounds!");
+            }
+
             _textureHandler->CopyBufferToImage(commandBuffer, srcBuffer, uploadToTextureTask->stagingBufferOffset, uploadToTextureTask->targetTexture);
         }
 
@@ -625,6 +646,19 @@ namespace Renderer
             copyRegion.dstOffset = copyBufferToBufferTask->targetOffset;
             copyRegion.srcOffset = copyBufferToBufferTask->sourceOffset;
             copyRegion.size = copyBufferToBufferTask->copySize;
+
+            size_t srcBufferSize = _bufferHandler->GetBufferSize(copyBufferToBufferTask->sourceBuffer);
+            size_t dstBufferSize = _bufferHandler->GetBufferSize(copyBufferToBufferTask->targetBuffer);
+
+            if (copyRegion.srcOffset + copyRegion.size > srcBufferSize)
+            {
+                DebugHandler::PrintFatal("[UploadBufferHandlerVK::HandleCopyBufferToBufferTask] Source Buffer out of bounds!");
+            }
+            if (copyRegion.dstOffset + copyRegion.size > dstBufferSize)
+            {
+                DebugHandler::PrintFatal("[UploadBufferHandlerVK::HandleCopyBufferToBufferTask] Destination Buffer out of bounds!");
+            }
+
             vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
             {

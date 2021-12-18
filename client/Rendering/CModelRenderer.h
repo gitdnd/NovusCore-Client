@@ -75,8 +75,7 @@ public:
         u32 modelID = 0;
         u32 boneDeformOffset;
         u32 boneInstanceDataOffset;
-        u16 editorSequenceId; // This is used by the editor to display the sequenceId we want to play.
-        u16 editorIsLoop; // This is used by the editor to display if the animation we want to play should looping.
+        u32 unused;
         u32 modelVertexOffset = 0;
         u32 animatedVertexOffset = 0;
     };
@@ -98,7 +97,6 @@ public:
         {
             modelID = other.modelID;
             debugName = other.debugName;
-            cullingDataID = other.cullingDataID;
             numVertices = other.numVertices;
             vertexOffset = other.vertexOffset;
             numBones = other.numBones;
@@ -114,16 +112,20 @@ public:
         u32 modelID;
         std::string debugName = "";
         bool failedToLoad = false;
+        bool isStaticModel = false;
 
-        u32 cullingDataID = std::numeric_limits<u32>().max();
         u32 numVertices = 0;
         u32 vertexOffset = 0;
+
         u32 numCollisionTriangles = 0;
         u32 collisionTriangleOffset = 0;
         Geometry::AABoundingBox collisionAABB;
+
         u32 numBones = 0;
+        u32 numSequences = 0;
+        u32 sequenceOffset = 0;
         bool isAnimated = false;
-        bool isStaticModel = false;
+        std::vector<i32> boneKeyId;
 
         u32 numOpaqueDrawCalls = 0;
         std::vector<DrawCall> opaqueDrawCallTemplates;
@@ -146,7 +148,7 @@ public:
         };
 
         f32 animationProgress = 0.f;
-        u32 sequenceIndex = 0;
+        u32 sequenceIndex = 65535;
         u32 animationframeIndex = 0;
         u32 animateState = 0; // 0 == STOPPED, 1 == PLAY_ONCE, 2 == PLAY_LOOP
     };
@@ -155,25 +157,23 @@ public:
     {
         struct Flags
         {
-            u32 isPlaying : 1;
-            u32 isLooping : 1;
-            u32 stopAll : 1;
+            u8 isPlaying : 1;
+            u8 isLooping : 1;
         };
 
         u32 instanceId = 0;
-        u32 sequenceId = 0;
+        u16 boneIndex = 0;
+        u16 sequenceIndex = 0;
 
         Flags flags;
     }; 
     
     struct AnimationModelInfo
     {
-        u16 numSequences = 0;
-        u16 numBones = 0;
-
-        u32 sequenceOffset = 0;
+        u32 isAnimated = 0;
+        u32 numBones = 0;
         u32 boneInfoOffset = 0;
-        u32 padding = 0;
+        u32 sequenceOffset = 0;
     };
 
     struct AnimationSequence
@@ -199,6 +199,51 @@ public:
         u16 blendTimeEnd = 0;
 
         u64 padding = 0;
+    };
+
+    struct AnimationBoneInfo
+    {
+        u16 numTranslationSequences = 0;
+        u16 numRotationSequences = 0;
+        u16 numScaleSequences = 0;
+
+        i16 parentBoneId = 0;
+
+        u32 translationSequenceOffset = 0;
+        u32 rotationSequenceOffset = 0;
+        u32 scaleSequenceOffset = 0;
+
+        struct Flags
+        {
+            u32 animate : 1;
+            u32 isTranslationTrackGlobalSequence : 1;
+            u32 isRotationTrackGlobalSequence : 1;
+            u32 isScaleTrackGlobalSequence : 1;
+
+            u32 ignoreParentTranslation : 1;
+            u32 ignoreParentRotation : 1;
+            u32 ignoreParentScale : 1;
+        } flags;
+
+        f32 pivotPointX = 0.f;
+        f32 pivotPointY = 0.f;
+        f32 pivotPointZ = 0.f;
+
+        u32 padding0;
+        u32 padding1;
+        u32 padding2;
+    };
+
+    struct AnimationTrackInfo
+    {
+        u16 sequenceIndex = 0;
+        u16 padding = 0;
+
+        u16 numTimestamps = 0;
+        u16 numValues = 0;
+
+        u32 timestampOffset = 0;
+        u32 valueOffset = 0;
     };
 
 public:
@@ -228,15 +273,21 @@ public:
     SafeVector<DrawCallData>& GetOpaqueDrawCallData() { return _opaqueDrawCallDatas; }
     SafeVector<DrawCallData>& GetTransparentDrawCallData() { return _transparentDrawCallDatas; }
     SafeVector<LoadedComplexModel>& GetLoadedComplexModels() { return _loadedComplexModels; }
+    SafeVector<CModel::ComplexModel>& GetLoadedComplexModelsFileData() { return _loadedComplexModelFileData; }
     SafeVector<ModelInstanceData>& GetModelInstanceDatas() { return _modelInstanceDatas; }
     SafeVector<Geometry::Triangle>& GetCollisionTriangles() { return _collisionTriangles; }
-    const ModelInstanceData& GetModelInstanceData(size_t instanceID) { return _modelInstanceDatas.ReadGet(instanceID); }
-    const AnimationModelInfo& GetAnimationModelInfo(size_t modelID) { return _animationModelInfo.ReadGet(modelID); }
+    const ModelInstanceData GetModelInstanceData(size_t instanceID) { return _modelInstanceDatas.ReadGet(instanceID); }
+    const AnimationModelInfo GetAnimationModelInfo(size_t modelID) { return _animationModelInfo.ReadGet(modelID); }
+    const AnimationBoneInstance GetAnimationBoneInstance(size_t boneIndex) { return _animationBoneInstances.ReadGet(boneIndex); }
+    const AnimationBoneInfo GetAnimationBoneInfo(size_t boneIndex) { return _animationBoneInfo.ReadGet(boneIndex); }
+    const AnimationTrackInfo GetAnimationTrackInfo(size_t trackIndex) { return _animationTrackInfo.ReadGet(trackIndex); }
 
     Renderer::GPUVector<mat4x4>& GetModelInstanceMatrices() { return _modelInstanceMatrices; }
-    const mat4x4& GetModelInstanceMatrix(size_t index) { return _modelInstanceMatrices.ReadGet(index); }
+    Renderer::GPUVector<AnimationBoneInfo>& GetAnimationBoneInfos() { return _animationBoneInfo; }
+    Renderer::GPUVector<AnimationBoneInstance>& GetAnimationBoneInstances() { return _animationBoneInstances; }
+    Renderer::GPUVector<AnimationTrackInfo>& GetAnimationTrackInfos() { return _animationTrackInfo; }
+    const mat4x4 GetModelInstanceMatrix(size_t index) { return _modelInstanceMatrices.ReadGet(index); }
 
-    const SafeVector<Terrain::PlacementDetails>& GetPlacementDetails() { return _complexModelPlacementDetails; }
     const SafeVector<CModel::CullingData>& GetCullingData() { return _cullingDatas; }
 
     void AddAnimationRequest(AnimationRequest request)
@@ -245,7 +296,7 @@ public:
     }
     u32 GetNumSequencesForModelId(u32 modelId)
     {
-        return _animationModelInfo.ReadGet(modelId).numSequences;
+        return _loadedComplexModels.ReadGet(modelId).numSequences;
     }
 
     const Renderer::GPUVector<AnimationSequence>& GetAnimationSequences()
@@ -254,6 +305,7 @@ public:
     }
 
     u32 GetNumLoadedCModels() { return static_cast<u32>(_loadedComplexModels.Size()); }
+    u32 GetNumLoadedCModelsFileData() { return static_cast<u32>(_loadedComplexModelFileData.Size()); }
     u32 GetNumCModelPlacements() { return static_cast<u32>(_modelInstanceDatas.Size()); }
     u32 GetModelIndexByDrawCallDataIndex(u32 index, bool isOpaque)
     {
@@ -309,51 +361,6 @@ private:
         u32 textureIds[2] = { CMODEL_INVALID_TEXTURE_ID, CMODEL_INVALID_TEXTURE_ID };
         u32 pad;
     };
-
-    struct AnimationBoneInfo
-    {
-        u16 numTranslationSequences = 0;
-        u16 numRotationSequences = 0;
-        u16 numScaleSequences = 0;
-
-        i16 parentBoneId = 0;
-
-        u32 translationSequenceOffset = 0;
-        u32 rotationSequenceOffset = 0;
-        u32 scaleSequenceOffset = 0;
-
-        struct Flags
-        {
-            u32 animate : 1;
-            u32 isTranslationTrackGlobalSequence : 1;
-            u32 isRotationTrackGlobalSequence : 1;
-            u32 isScaleTrackGlobalSequence : 1;
-
-            u32 ignoreParentTranslation : 1;
-            u32 ignoreParentRotation : 1;
-            u32 ignoreParentScale : 1;
-        } flags;
-
-        f32 pivotPointX = 0.f;
-        f32 pivotPointY = 0.f;
-        f32 pivotPointZ = 0.f;
-
-        u32 padding0;
-        u32 padding1;
-        u32 padding2;
-    };
-
-    struct AnimationTrackInfo
-    {
-        u16 sequenceIndex = 0;
-        u16 padding = 0;
-
-        u16 numTimestamps = 0;
-        u16 numValues = 0;
-
-        u32 timestampOffset = 0;
-        u32 valueOffset = 0;
-    };
     
     struct PackedAnimatedVertexPositions
     {
@@ -404,13 +411,14 @@ private:
 
     bool IsRenderBatchTransparent(const CModel::ComplexRenderBatch& renderBatch, const CModel::ComplexModel& cModel);
 
-    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, entt::entity entityID, u32& instanceIndex);
+    void AddInstance(LoadedComplexModel& complexModel, const Terrain::Placement& placement, entt::entity entityID, u32& instanceId);
 
     void CreateBuffers();
     void SyncBuffers();
 private:
-    Renderer::Renderer* _renderer;
+    Renderer::Renderer* _renderer; 
     bool _loadingIsDirty = false;
+    bool _clearedThisFrame = true;
 
     Renderer::SamplerID _sampler;
     Renderer::SamplerID _occlusionSampler;
@@ -429,10 +437,9 @@ private:
     robin_hood::unordered_map<u32, u8> _uniqueIdCounter;
     std::shared_mutex _uniqueIdCounterMutex;
 
-    SafeVector<Terrain::PlacementDetails> _complexModelPlacementDetails;
-
     SafeVector<ComplexModelToBeLoaded> _complexModelsToBeLoaded;
     SafeVector<LoadedComplexModel> _loadedComplexModels;
+    SafeVector<CModel::ComplexModel> _loadedComplexModelFileData;
 
     SafeUnorderedMap<u32, u32> _nameHashToIndexMap;
     SafeUnorderedMap<u32, NDBC::CreatureDisplayInfo*> _nameHashToCreatureDisplayInfo;
@@ -443,10 +450,6 @@ private:
 
     SafeUnorderedMap<u32, std::queue<u32>> _freedModelIDInstances; // Key is ModelID, value is queue of InstanceID
 
-    SafeVector<BufferRangeFrame> _instanceBoneDeformRangeFrames;
-    SafeVector<BufferRangeFrame> _instanceBoneInstanceRangeFrames;
-
-    BufferRangeAllocator _animationBoneDeformRangeAllocator;
     moodycamel::ConcurrentQueue<AnimationRequest> _animationRequests;
 
     Renderer::GPUVector<CModel::ComplexVertex> _vertices;
@@ -460,19 +463,14 @@ private:
     Renderer::GPUVector<mat4x4> _modelInstanceMatrices;
     Renderer::GPUVector<CModel::CullingData> _cullingDatas;
 
+    Renderer::GPUVector<mat4x4> _animationBoneDeformMatrices;
     Renderer::GPUVector<AnimationBoneInstance> _animationBoneInstances;
     Renderer::GPUVector<AnimationSequence> _animationSequences;
     Renderer::GPUVector<AnimationModelInfo> _animationModelInfo;
     Renderer::GPUVector<AnimationBoneInfo> _animationBoneInfo;
-
-    // TODO: Make these into GPUVectors, they are currently backed by regular std::vectors so it requires a bit of work
-    std::vector<AnimationTrackInfo> _animationTrackInfo;
-    std::vector<u32> _animationTrackTimestamps;
-    std::vector<vec4> _animationTrackValues;
-    std::mutex _animationTrackMutex;
-    Renderer::BufferID _animationTrackInfoBuffer;
-    Renderer::BufferID _animationTrackTimestampBuffer;
-    Renderer::BufferID _animationTrackValueBuffer;
+    Renderer::GPUVector<AnimationTrackInfo> _animationTrackInfo;
+    Renderer::GPUVector<u32> _animationTrackTimestamps;
+    Renderer::GPUVector<vec4> _animationTrackValues;
 
     Renderer::GPUVector<DrawCall> _opaqueDrawCalls;
     Renderer::GPUVector<DrawCallData> _opaqueDrawCallDatas;
@@ -487,7 +485,6 @@ private:
     Renderer::BufferID _visibleInstanceCountArgumentBuffer32;
 
     Renderer::BufferID _animatedVertexPositions;
-    Renderer::BufferID _animationBoneDeformMatrixBuffer;
 
     Renderer::BufferID _occluderDrawCountReadBackBuffer;
     Renderer::BufferID _occluderTriangleCountReadBackBuffer;
@@ -519,10 +516,6 @@ private:
     u32 _numOpaqueSurvivingTriangles;
     u32 _numTransparentTriangles;
     u32 _numTransparentSurvivingTriangles;
-
-    std::atomic<bool> _hasToResizeAnimationBoneDeformMatrixBuffer = false;
-    std::atomic<size_t> _newAnimationBoneDeformMatrixBufferSize = 0;
-    size_t _previousAnimationBoneDeformMatrixBufferSize = 0;
 
     DebugRenderer* _debugRenderer;
 };

@@ -1098,6 +1098,19 @@ namespace Renderer
         copyRegion.srcOffset = srcOffset;
         copyRegion.dstOffset = dstOffset;
         copyRegion.size = range;
+
+        size_t srcBufferSize = _bufferHandler->GetBufferSize(srcBuffer);
+        size_t dstBufferSize = _bufferHandler->GetBufferSize(dstBuffer);
+
+        if (srcOffset + range > srcBufferSize)
+        {
+            DebugHandler::PrintFatal("[RendererVK::CopyBuffer] Source Buffer out of bounds!");
+        }
+        if (dstOffset + range > dstBufferSize)
+        {
+            DebugHandler::PrintFatal("[RendererVK::CopyBuffer] Destination Buffer out of bounds!");
+        }
+
         vkCmdCopyBuffer(commandBuffer, vkSrcBuffer, vkDstBuffer, 1, &copyRegion);
     }
 

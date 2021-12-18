@@ -37,7 +37,7 @@ void UpdateModelTransformSystem::Update(entt::registry& registry)
             if (registry.all_of<ModelIsReusedInstance>(entity) ||
                 !registry.all_of<ModelCreatedThisFrame>(entity))
             {
-                //modelInstanceMatrices.SetDirtyElement(modelDisplayInfo.instanceID);
+                modelInstanceMatrices.SetDirtyElement(modelDisplayInfo.instanceID);
             }
         });
     });

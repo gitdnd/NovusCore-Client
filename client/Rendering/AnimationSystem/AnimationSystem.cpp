@@ -1,192 +1,219 @@
 #include "AnimationSystem.h"
 
 #include "../ClientRenderer.h"
-#include "../CModelRenderer.h"
 #include "../../Utils/ServiceLocator.h"
 
-#include <shared_mutex>
-
-bool AnimationSystem::AddInstance(u32 instanceID, const AnimationInstanceData& animationInstanceData)
+i32 AnimationModelInfo::GetBoneAnimation(i32 boneKeyId)
 {
-    bool didAdd = false;
+    u32 boneIndex = GetBoneIndexFromBoneKeyId(boneKeyId);
+    return boneInfos[boneIndex].activeSequence.id;
+}
+bool AnimationModelInfo::SetBoneAnimation(i32 boneKeyId, i32 animationId)
+{
+    if (animationId == -1)
+        return UnsetBoneAnimation(boneKeyId);
 
-    _instanceIDToAnimationInstanceData.WriteLock([&](robin_hood::unordered_map<u32, AnimationInstanceData>& animationInstanceDatas)
+    u32 boneIndex = GetBoneIndexFromBoneKeyId(boneKeyId);
+    BoneInfo& boneInfo = boneInfos[boneIndex];
+
+    // Handle Repeats, Variations, Transition and other such features Here
     {
-        auto itr = animationInstanceDatas.find(instanceID);
-        if (itr != animationInstanceDatas.end())
+
+    }
+
+    // Get sequenceId from animationId
+    i32 sequenceId = GetSequenceIdFromAnimationId(animationId);
+    if (sequenceId == -1)
+        return false;
+
+    boneInfo.activeSequence.id = sequenceId;
+
+    CModelRenderer::AnimationRequest animationRequest;
+    {
+        animationRequest.instanceId = instanceId;
+        animationRequest.boneIndex = boneIndex;
+        animationRequest.sequenceIndex = sequenceId;
+
+        animationRequest.flags.isPlaying = true;
+        animationRequest.flags.isLooping = false;
+    }
+
+    CModelRenderer* cmodelRenderer = ServiceLocator::GetClientRenderer()->GetCModelRenderer();
+    cmodelRenderer->AddAnimationRequest(animationRequest);
+
+    return true;
+}
+bool AnimationModelInfo::UnsetBoneAnimation(i32 boneKeyId)
+{
+    u32 boneIndex = GetBoneIndexFromBoneKeyId(boneKeyId);
+    BoneInfo& boneInfo = boneInfos[boneIndex];
+
+    u32 activeSequenceId = boneInfo.activeSequence.id;
+    boneInfo.activeSequence.id = std::numeric_limits<u32>().max();
+    boneInfo.transitionSequence.id = std::numeric_limits<u32>().max();
+
+    CModelRenderer::AnimationRequest animationRequest;
+    {
+        animationRequest.instanceId = instanceId;
+        animationRequest.boneIndex = boneIndex;
+        animationRequest.sequenceIndex = activeSequenceId;
+
+        animationRequest.flags.isPlaying = false;
+        animationRequest.flags.isLooping = false;
+    }
+
+    CModelRenderer* cmodelRenderer = ServiceLocator::GetClientRenderer()->GetCModelRenderer();
+    cmodelRenderer->AddAnimationRequest(animationRequest);
+
+    return activeSequenceId != std::numeric_limits<u32>().max();
+}
+
+u32 AnimationModelInfo::GetBoneIndexFromBoneKeyId(i32 boneKeyId)
+{
+    u32 boneIndex = 0;
+    if (boneKeyId != -1)
+    {
+        auto itr = boneKeyIdToBoneIndex.find(boneKeyId);
+        if (itr == boneKeyIdToBoneIndex.end())
+        {
+            boneIndex = std::numeric_limits<u32>().max();
+        }
+        else
+        {
+            boneIndex = itr->second;
+        }
+    }    
+    
+    if (boneIndex >= boneInfos.size())
+    {
+        DebugHandler::PrintFatal("[AnimationSystem] Attempted to call GetBoneAnimation with BoneKeyId(%u) not present", boneKeyId);
+    }
+
+    return boneIndex;
+}
+
+i32 AnimationModelInfo::GetSequenceIdFromAnimationId(i32 animationId)
+{
+    CModelRenderer* cmodelRenderer = ServiceLocator::GetClientRenderer()->GetCModelRenderer();
+
+    auto complexModelsFileDataReadLock = SafeVectorScopedReadLock(cmodelRenderer->GetLoadedComplexModelsFileData());
+    const std::vector<CModel::ComplexModel>& complexModelsFileData = complexModelsFileDataReadLock.Get();
+    const CModel::ComplexModel& complexModelFileData = complexModelsFileData[modelId];
+
+    i32 sequenceIndex = -1;
+    for (u32 i = 0; i < complexModelFileData.sequences.size(); i++)
+    {
+        const CModel::ComplexAnimationSequence& sequence = complexModelFileData.sequences[i];
+        if (sequence.flags.isAlwaysPlaying || sequence.flags.isAlias)
+            continue;
+
+        if (sequence.id == animationId && sequence.subId == 0)
+        {
+            sequenceIndex = i;
+            break;
+        }
+    }
+
+    // Handle Fallback here
+    {
+
+    }
+
+    return sequenceIndex;
+}
+
+bool AnimationSystem::AddInstance(u32 instanceID, const CModelRenderer::LoadedComplexModel& loadedComplexModel)
+{
+    CModelRenderer* cmodelRenderer = ServiceLocator::GetClientRenderer()->GetCModelRenderer();
+
+    const CModelRenderer::AnimationModelInfo& animationModelInfo = cmodelRenderer->GetAnimationModelInfo(loadedComplexModel.modelID);
+    if (animationModelInfo.numBones == 0)
+        return false;
+
+    bool result = false;
+
+    _instanceIdToAnimationModelInfo.WriteLock([&](robin_hood::unordered_map<u32, AnimationModelInfo>& instanceIdToAnimationModelInfo)
+    {
+        auto itr = instanceIdToAnimationModelInfo.find(instanceID);
+        if (itr != instanceIdToAnimationModelInfo.end())
             return;
 
-        animationInstanceDatas[instanceID] = animationInstanceData;
-        didAdd = true;
+        AnimationModelInfo animationInfo;
+
+        {
+            auto boneInfoReadLock = SafeVectorScopedReadLock(cmodelRenderer->GetAnimationBoneInfos());
+            auto boneInstanceWriteLock = SafeVectorScopedWriteLock(cmodelRenderer->GetAnimationBoneInstances());
+            auto trackInfoReadLock = SafeVectorScopedReadLock(cmodelRenderer->GetAnimationTrackInfos());
+
+            const std::vector<CModelRenderer::AnimationBoneInfo>& animationBoneInfos = boneInfoReadLock.Get();
+            std::vector<CModelRenderer::AnimationBoneInstance>& animationBoneInstances = boneInstanceWriteLock.Get();
+            const std::vector<CModelRenderer::AnimationTrackInfo>& animationTrackInfos = trackInfoReadLock.Get();
+
+            animationInfo.modelId = loadedComplexModel.modelID;
+            animationInfo.instanceId = instanceID;
+
+            animationInfo.boneInfos.resize(animationModelInfo.numBones);
+            for (u32 i = 0; i < animationModelInfo.numBones; i++)
+            {
+                const CModelRenderer::AnimationBoneInfo& animationBoneInfo = animationBoneInfos[animationModelInfo.boneInfoOffset + i];
+                const CModelRenderer::AnimationTrackInfo& animationTrackInfo = animationTrackInfos[animationBoneInfo.translationSequenceOffset];
+
+                AnimationModelInfo::BoneInfo boneInfo;
+                boneInfo.parentBoneId = animationBoneInfo.parentBoneId;
+
+                i32 boneKeyId = loadedComplexModel.boneKeyId[i];
+                if (boneKeyId != -1)
+                {
+                    auto itr = animationInfo.boneKeyIdToBoneIndex.find(boneKeyId);
+                    if (itr != animationInfo.boneKeyIdToBoneIndex.end())
+                    {
+                        DebugHandler::PrintFatal("[AnimationSystem] Attempted to AddInstance on model(%s) where multiple bones reference the same BoneKeyId", loadedComplexModel.debugName.c_str());
+                    }
+
+                    animationInfo.boneKeyIdToBoneIndex[boneKeyId] = i;
+                }
+
+                animationInfo.boneInfos[i] = boneInfo;
+            }
+        }
+
+        instanceIdToAnimationModelInfo[instanceID] = animationInfo;
+        result = true;
     });
 
-    return didAdd;
+    return result;
 }
 
 bool AnimationSystem::RemoveInstance(u32 instanceID)
 {
     bool didRemove = false;
 
-    _instanceIDToAnimationInstanceData.WriteLock([&](robin_hood::unordered_map<u32, AnimationInstanceData>& animationInstanceDatas)
+    _instanceIdToAnimationModelInfo.WriteLock([&](robin_hood::unordered_map<u32, AnimationModelInfo>& instanceIdToAnimationModelInfo)
     {
-        auto itr = animationInstanceDatas.find(instanceID);
-        if (itr == animationInstanceDatas.end())
+        auto itr = instanceIdToAnimationModelInfo.find(instanceID);
+        if (itr == instanceIdToAnimationModelInfo.end())
             return;
 
-        animationInstanceDatas.erase(itr);
+        instanceIdToAnimationModelInfo.erase(itr);
         didRemove = true;
     });
 
     return didRemove;
 }
 
-bool AnimationSystem::GetAnimationInstanceData(u32 instanceID, AnimationInstanceData*& out)
+bool AnimationSystem::SetBoneAnimation(u32 instanceID, i32 boneKeyId, i32 animationId)
 {
-    bool didFind = false;
+    bool result = false;
 
-    _instanceIDToAnimationInstanceData.WriteLock([&](robin_hood::unordered_map<u32, AnimationInstanceData>& animationInstanceDatas)
+    _instanceIdToAnimationModelInfo.WriteLock([&](robin_hood::unordered_map<u32, AnimationModelInfo>& instanceIdToAnimationModelInfo)
     {
-        auto itr = animationInstanceDatas.find(instanceID);
-        if (itr == animationInstanceDatas.end())
+        auto itr = instanceIdToAnimationModelInfo.find(instanceID);
+        if (itr == instanceIdToAnimationModelInfo.end())
             return;
 
-        out = &itr->second;
-        didFind = true;
+        AnimationModelInfo& animationModelInfo = itr->second;
+        result = animationModelInfo.SetBoneAnimation(boneKeyId, animationId);
     });
 
-    return didFind;
-}
-
-bool AnimationSystem::TryPlayAnimationID(u32 instanceID, u16 animationID, bool play, bool loop /* = false */)
-{
-    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-    CModelRenderer* cModelRenderer = clientRenderer->GetCModelRenderer();
-
-    const CModelRenderer::ModelInstanceData& modelInstanceData = cModelRenderer->GetModelInstanceData(instanceID);
-    const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
-
-    if (animationModelInfo.numSequences == 0)
-        return false;
-
-    AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
-    if (!GetAnimationInstanceData(instanceID, animationInstanceData))
-        return false;
-
-    u32 sequenceID = std::numeric_limits<u32>().max();
-
-    cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence>& animationSequences)
-    {
-        for (u32 i = 0; i < animationModelInfo.numSequences; i++)
-        {
-            const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
-
-            if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
-                continue;
-
-            if (animationID == animationSequence.animationId)
-            {
-                sequenceID = i;
-                break;
-            }
-        }
-    });
-
-    bool canPlayAnimation = sequenceID != std::numeric_limits<u32>().max();
-    if (canPlayAnimation)
-    {
-        CModelRenderer::AnimationRequest request;
-        request.instanceId = instanceID;
-        request.sequenceId = sequenceID;
-        request.flags.isPlaying = play;
-        request.flags.isLooping = loop;
-        request.flags.stopAll = false;
-
-        cModelRenderer->AddAnimationRequest(request);
-
-        animationInstanceData->primaryAnimationID = animationID;
-    }
-
-    return canPlayAnimation;
-}
-
-bool AnimationSystem::TryStopAnimationID(u32 instanceID, u16 animationID)
-{
-    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-    CModelRenderer* cModelRenderer = clientRenderer->GetCModelRenderer();
-
-    const CModelRenderer::ModelInstanceData& modelInstanceData = cModelRenderer->GetModelInstanceData(instanceID);
-    const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
-
-    if (animationModelInfo.numSequences == 0)
-        return false;
-
-    AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
-    if (!GetAnimationInstanceData(instanceID, animationInstanceData))
-        return false;
-
-    u32 sequenceID = std::numeric_limits<u32>().max();
-    cModelRenderer->GetAnimationSequences().ReadLock([&](const std::vector<CModelRenderer::AnimationSequence>& animationSequences)
-    {
-        for (u32 i = 0; i < animationModelInfo.numSequences; i++)
-        {
-            const CModelRenderer::AnimationSequence& animationSequence = animationSequences[animationModelInfo.sequenceOffset + i];
-
-            if (animationSequence.flags.isAlwaysPlaying || animationSequence.flags.isAlias)
-                continue;
-
-            if (animationID == animationSequence.animationId)
-            {
-                sequenceID = i;
-                break;
-            }
-        }
-    });
-
-    if (sequenceID == std::numeric_limits<u32>().max())
-        return false;
-
-    if (animationID == animationInstanceData->primaryAnimationID)
-        animationInstanceData->primaryAnimationID = std::numeric_limits<u16>().max();
-
-    CModelRenderer::AnimationRequest request;
-    request.instanceId = instanceID;
-    request.sequenceId = sequenceID;
-    request.flags.isPlaying = false;
-    request.flags.isLooping = false;
-    request.flags.stopAll = false;
-
-    cModelRenderer->AddAnimationRequest(request);
-    return true;
-}
-
-void AnimationSystem::TryStopAllAnimations(u32 instanceID)
-{
-    ClientRenderer* clientRenderer = ServiceLocator::GetClientRenderer();
-    CModelRenderer* cModelRenderer = clientRenderer->GetCModelRenderer();
-
-    const CModelRenderer::ModelInstanceData& modelInstanceData = cModelRenderer->GetModelInstanceData(instanceID);
-    const CModelRenderer::AnimationModelInfo& animationModelInfo = cModelRenderer->GetAnimationModelInfo(modelInstanceData.modelID);
-
-    if (animationModelInfo.numSequences == 0)
-        return;
-
-    AnimationSystem::AnimationInstanceData* animationInstanceData = nullptr;
-    if (!GetAnimationInstanceData(instanceID, animationInstanceData))
-        return;
-
-    animationInstanceData->primaryAnimationID = std::numeric_limits<u16>().max();
-
-    CModelRenderer::AnimationRequest request;
-    request.instanceId = instanceID;
-    request.sequenceId = 0;
-    request.flags.isPlaying = false;
-    request.flags.isLooping = false;
-    request.flags.stopAll = true;
-
-    cModelRenderer->AddAnimationRequest(request);
-}
-
-bool AnimationSystem::AnimationInstanceData::IsAnimationIDPlaying(u16 animationID)
-{
-    return animationID == primaryAnimationID;
+    return result;
 }

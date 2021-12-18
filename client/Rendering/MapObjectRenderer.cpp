@@ -650,10 +650,12 @@ void MapObjectRenderer::RegisterMapObjectToBeLoaded(const std::string& mapObject
     {
         if (uniqueIdCounter[uniqueID]++ == 0)
         {
-            MapObjectToBeLoaded& mapObjectToBeLoaded = _mapObjectsToBeLoaded.EmplaceBack();
+            MapObjectToBeLoaded mapObjectToBeLoaded;
             mapObjectToBeLoaded.placement = &mapObjectPlacement;
             mapObjectToBeLoaded.nmorName = &mapObjectName;
             mapObjectToBeLoaded.nmorNameHash = StringUtils::fnv1a_32(mapObjectName.c_str(), mapObjectName.length());
+
+            _mapObjectsToBeLoaded.PushBack(mapObjectToBeLoaded);
         }
     });
 }
@@ -670,10 +672,12 @@ void MapObjectRenderer::RegisterMapObjectsToBeLoaded(u16 chunkID, const Terrain:
         {
             if (uniqueIdCounter[uniqueID]++ == 0)
             {
-                MapObjectToBeLoaded& mapObjectToBeLoaded = _mapObjectsToBeLoaded.EmplaceBack();
+                MapObjectToBeLoaded mapObjectToBeLoaded;
                 mapObjectToBeLoaded.placement = &mapObjectPlacement;
                 mapObjectToBeLoaded.nmorName = &stringTable.GetString(mapObjectPlacement.nameID);
                 mapObjectToBeLoaded.nmorNameHash = stringTable.GetStringHash(mapObjectPlacement.nameID);
+
+                _mapObjectsToBeLoaded.PushBack(mapObjectToBeLoaded);
             }
         });
     }
@@ -704,11 +708,6 @@ void MapObjectRenderer::ExecuteLoad()
             instanceLookupData.reserve(numMapObjectsToBeLoaded);
         });
 
-        _mapObjectPlacementDetails.WriteLock([&](std::vector<Terrain::PlacementDetails>& mapObjectPlacementDetails)
-        {
-            mapObjectPlacementDetails.reserve(numMapObjectsToBeLoaded);
-        });
-        
 #if PARALLEL_LOADING
         tf::Taskflow tf;
         tf.parallel_for(mapObjectsToBeLoaded.begin(), mapObjectsToBeLoaded.end(), [&](MapObjectToBeLoaded& mapObjectToBeLoaded)
@@ -767,12 +766,9 @@ void MapObjectRenderer::ExecuteLoad()
                 }
             }
 
-            // Add Placement Details (This is used to go from a placement to LoadedMapObject or InstanceData
-            Terrain::PlacementDetails& placementDetails = _mapObjectPlacementDetails.EmplaceBack();
-            placementDetails.loadedIndex = mapObjectID;
-
             // Add placement as an instance here
-            AddInstance(*mapObject, mapObjectToBeLoaded.placement, placementDetails.instanceIndex);
+            u32 instanceId = std::numeric_limits<u32>().max();
+            AddInstance(*mapObject, mapObjectToBeLoaded.placement, instanceId);
 
             numMapObjectsToLoad++;
         }
@@ -808,7 +804,6 @@ void MapObjectRenderer::ExecuteLoad()
 void MapObjectRenderer::Clear()
 {
     _uniqueIdCounter.Clear();
-    _mapObjectPlacementDetails.Clear();
     _loadedMapObjects.Clear();
     _nameHashToIndexMap.Clear();
     _indices.Clear();
@@ -979,15 +974,6 @@ bool MapObjectRenderer::LoadMapObject(MapObjectToBeLoaded& mapObjectToBeLoaded, 
         }
     }
 
-    // Create per-MapObject culling data
-    Terrain::CullingData* mapObjectCullingData = nullptr;
-
-    _cullingData.WriteLock([&](std::vector<Terrain::CullingData>& cullingData)
-    {
-        mapObject.baseCullingDataOffset = static_cast<u32>(cullingData.size());
-        mapObjectCullingData = &cullingData.emplace_back();
-    });
-
     vec3 aabbMin = vec3(10000.0f, 10000.0f, 10000.0f);
     vec3 aabbMax = vec3(-10000.0f, -10000.0f, -10000.0f);
     for (const Terrain::CullingData& cullingData : mapObject.cullingData)
@@ -1009,9 +995,16 @@ bool MapObjectRenderer::LoadMapObject(MapObjectToBeLoaded& mapObjectToBeLoaded, 
         }
     }
 
-    mapObjectCullingData->center = (aabbMin + aabbMax) * 0.5f;
-    mapObjectCullingData->extents = hvec3(aabbMax) - mapObjectCullingData->center;
-    mapObjectCullingData->boundingSphereRadius = glm::distance(aabbMin, aabbMax) / 2.0f;
+    // Create per-MapObject culling data
+    _cullingData.WriteLock([&](std::vector<Terrain::CullingData>& cullingData)
+    {
+        mapObject.baseCullingDataOffset = static_cast<u32>(cullingData.size());
+        Terrain::CullingData* mapObjectCullingData = &cullingData.emplace_back();
+
+        mapObjectCullingData->center = (aabbMin + aabbMax) * 0.5f;
+        mapObjectCullingData->extents = hvec3(aabbMax) - mapObjectCullingData->center;
+        mapObjectCullingData->boundingSphereRadius = glm::distance(aabbMin, aabbMax) / 2.0f;
+    });
 
     return true;
 }
@@ -1358,7 +1351,7 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
             u32 drawCallID = static_cast<u32>(drawCalls.size());
             DrawCall& drawCall = drawCalls.emplace_back();
 
-            InstanceLookupData& instanceLookupData = _instanceLookupData.EmplaceBack();
+            InstanceLookupData instanceLookupData;
         
             mapObject.drawCallIDs.push_back(drawCallID);
 
@@ -1378,6 +1371,8 @@ void MapObjectRenderer::AddInstance(LoadedMapObject& mapObject, const Terrain::P
             instanceLookupData.vertexOffset = renderBatchOffsets.baseVertexOffset;
             instanceLookupData.vertexColor1Offset = renderBatchOffsets.baseVertexColor1Offset;
             instanceLookupData.vertexColor2Offset = renderBatchOffsets.baseVertexColor2Offset;
+
+            _instanceLookupData.PushBack(instanceLookupData);
         });
     }
 

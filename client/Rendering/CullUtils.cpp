@@ -225,7 +225,7 @@ void DepthPyramidUtils::BuildPyramid2(Renderer::Renderer* renderer, Renderer::Re
         commandList.EndPipeline(pipeline);
     }
 
-    //commandList.ImageBarrier(resources.depthPyramid);
+    commandList.ImageBarrier(resources.depthPyramid);
     
     commandList.PopMarker();
 }

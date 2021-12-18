@@ -15,7 +15,7 @@ struct CModelInstanceData
 struct AnimationBoneInstanceData
 {
     float animationProgress;
-    uint packedData0; // sequenceIndex (16 bit), sequenceOverrideIndex (16 bit)
+    uint sequenceIndex;
     uint animationframeIndex;
     uint animateState; // 0 == STOPPED, 1 == PLAY_ONCE, 2 == PLAY_LOOP
 };
@@ -37,10 +37,10 @@ struct AnimationSequence
 
 struct AnimationModelInfo
 {
-    uint packedData0; // numSequences (16 bit), numBones (16 bit)
-    uint sequenceOffset;
+    uint isAnimated;
+    uint numBones;
     uint boneInfoOffset;
-    uint padding0;
+    uint sequenceOffset;
 };
 
 struct AnimationBoneInfo

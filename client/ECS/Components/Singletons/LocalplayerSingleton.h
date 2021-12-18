@@ -4,6 +4,7 @@
 struct LocalplayerSingleton
 {
     entt::entity entity = entt::null;
+    bool handsClosed = false;
     
     struct Movement
     {

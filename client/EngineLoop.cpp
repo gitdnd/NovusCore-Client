@@ -41,9 +41,13 @@
 #include "ECS/Components/Network/ConnectionSingleton.h"
 
 // Components
+#include <Gameplay/ECS/Components/Transform.h>
+#include <Gameplay/ECS/Components/Movement.h>
 #include "ECS/Components/Physics/Rigidbody.h"
 #include "ECS/Components/Rendering/DebugBox.h"
 #include "ECS/Components/Rendering/CModelInfo.h"
+#include "ECS/Components/Rendering/VisibleModel.h"
+#include "ECS/Components/Rendering/ModelDisplayInfo.h"
 
 #include "UI/ECS/Components/Transform.h"
 #include "UI/ECS/Components/NotCulled.h"
@@ -271,6 +275,29 @@ bool EngineLoop::Init()
     {
         MovementSystem::Init(_updateFramework.gameRegistry);
         SimulateDebugCubeSystem::Init(_updateFramework.gameRegistry);
+    }
+
+    entt::registry* registry = ServiceLocator::GetGameRegistry();
+    ConfigSingleton& configSingleton = registry->ctx<ConfigSingleton>();
+    const std::string& defaultMapString = configSingleton.uiConfig.GetDefaultMap();
+
+    if (defaultMapString.length() == 0)
+    {
+        LocalplayerSingleton& localplayerSingleton = _updateFramework.gameRegistry.ctx_or_set<LocalplayerSingleton>();
+        localplayerSingleton.entity = _updateFramework.gameRegistry.create();
+
+        //registry->emplace<DebugBox>(localplayerSingleton.entity);
+        Transform& transform = _updateFramework.gameRegistry.emplace<Transform>(localplayerSingleton.entity);
+        transform.position = vec3(-9249.f, 87.f, 79.f);
+        transform.scale = vec3(1.0f, 1.0f, 1.0f);
+
+        _updateFramework.gameRegistry.emplace<TransformIsDirty>(localplayerSingleton.entity);
+        _updateFramework.gameRegistry.emplace<Movement>(localplayerSingleton.entity);
+
+        ModelDisplayInfo& modelDisplayInfo = _updateFramework.gameRegistry.emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 517);
+
+        if (ServiceLocator::GetCameraFreeLook()->IsActive())
+            _updateFramework.gameRegistry.remove<VisibleModel>(localplayerSingleton.entity);
     }
 
     _isInitialized = true;
@@ -586,6 +613,7 @@ void EngineLoop::SetupUpdateFramework()
         ZoneScopedNC("UpdateModelTransformSystem::Update", tracy::Color::Blue2);
         UpdateModelTransformSystem::Update(gameRegistry);
         //gameRegistry.ctx<ScriptSingleton>().CompleteSystem();
+        gameRegistry.clear<TransformIsDirty>();
     });
     updateModelTransformSystemTask.gather(updateCModelInfoSystemTask);
 

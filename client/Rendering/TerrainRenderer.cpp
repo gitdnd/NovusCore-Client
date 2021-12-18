@@ -122,9 +122,9 @@ void TerrainRenderer::Update(f32 deltaTime)
                 registry->emplace<TransformIsDirty>(localplayerSingleton.entity);
                 registry->emplace<Movement>(localplayerSingleton.entity);
 
-                ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 65);
+                ModelDisplayInfo& modelDisplayInfo = registry->emplace<ModelDisplayInfo>(localplayerSingleton.entity, ModelType::Creature, 517);
 
-                if (ServiceLocator::GetCameraOrbital()->IsActive())
+                if (ServiceLocator::GetCameraFreeLook()->IsActive())
                     registry->remove<VisibleModel>(localplayerSingleton.entity);
             }
             else
@@ -1277,12 +1277,14 @@ void TerrainRenderer::LoadChunk(const ChunkToBeLoaded& chunkToBeLoaded)
             max.y = chunkOrigin.x - ((cellX + 1) * Terrain::MAP_CELL_SIZE);
             max.z = *minmax.second;
 
-            Geometry::AABoundingBox& boundingBox = _cellBoundingBoxes.EmplaceBack();
+            Geometry::AABoundingBox boundingBox;
             vec3 aabbMin = glm::max(min, max);
             vec3 aabbMax = glm::min(min, max);
 
             boundingBox.center = (aabbMin + aabbMax) * 0.5f;
             boundingBox.extents = aabbMax - boundingBox.center;
+
+            _cellBoundingBoxes.PushBack(boundingBox);
 
             TerrainCellHeightRange heightRange;
 #if USE_PACKED_HEIGHT_RANGE
