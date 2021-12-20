@@ -425,16 +425,16 @@ void ClientRenderer::CreatePermanentResources()
 
     _resources.depth = _renderer->CreateDepthImage(mainDepthDesc);
 
-    // Copy of the depth, taken after we render opaque
-    Renderer::DepthImageDesc opaqueDepthCopyDesc;
-    opaqueDepthCopyDesc.debugName = "OpaqueDepthCopy";
-    opaqueDepthCopyDesc.dimensions = vec2(1.0f, 1.0f);
-    opaqueDepthCopyDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
-    opaqueDepthCopyDesc.format = Renderer::DepthImageFormat::D32_FLOAT;
-    opaqueDepthCopyDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
-    opaqueDepthCopyDesc.depthClearValue = 0.0f;
+    // Copy of the depth, as a color rendertarget
+    Renderer::ImageDesc depthColorCopyDesc;
+    depthColorCopyDesc.debugName = "DepthColorCopy";
+    depthColorCopyDesc.dimensions = vec2(1.0f, 1.0f);
+    depthColorCopyDesc.dimensionType = Renderer::ImageDimensionType::DIMENSION_SCALE;
+    depthColorCopyDesc.format = Renderer::ImageFormat::R32_FLOAT;
+    depthColorCopyDesc.sampleCount = Renderer::SampleCount::SAMPLE_COUNT_1;
+    depthColorCopyDesc.clearColor = Color::Clear;
 
-    _resources.opaqueDepthCopy = _renderer->CreateDepthImage(opaqueDepthCopyDesc);
+    _resources.depthColorCopy = _renderer->CreateImage(depthColorCopyDesc);
 
     // View Constant Buffer (for camera data)
     _resources.viewConstantBuffer = new Renderer::Buffer<ViewConstantBuffer>(_renderer, "ViewConstantBuffer", Renderer::BufferUsage::UNIFORM_BUFFER, Renderer::BufferCPUAccess::WriteOnly);

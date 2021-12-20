@@ -75,8 +75,11 @@ public:
 
         return numBytesNeeded;
     }
+
+    static void CopyDepthToColorRT(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, u32 frameIndex, Renderer::DepthImageID source, Renderer::ImageID destination, u32 destinationMip);
 private:
 
 private:
     static Renderer::DescriptorSet _overlayDescriptorSet;
+    static Renderer::DescriptorSet _copyDepthToColorRTDescriptorSet;
 };

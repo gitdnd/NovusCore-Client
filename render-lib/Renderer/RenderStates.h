@@ -376,7 +376,8 @@ namespace Renderer
         SamplerReductionMode mode = SamplerReductionMode::NONE;
         f32 mipLODBias = 0.0f;
         u32 maxAnisotropy = 0;
-        ComparisonFunc comparisonFunc = ComparisonFunc::NEVER;
+        bool comparisonEnabled = false;
+        ComparisonFunc comparisonFunc = ComparisonFunc::ALWAYS;
         StaticBorderColor borderColor = StaticBorderColor::OPAQUE_BLACK;
         f32 minLOD = 0.0f;
         f32 maxLOD = std::numeric_limits<f32>::max();

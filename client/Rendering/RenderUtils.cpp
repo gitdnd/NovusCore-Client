@@ -7,6 +7,7 @@
 #include <Renderer/Descriptors/PixelShaderDesc.h>
 
 Renderer::DescriptorSet RenderUtils::_overlayDescriptorSet;
+Renderer::DescriptorSet RenderUtils::_copyDepthToColorRTDescriptorSet;
 
 void RenderUtils::Blit(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, u32 frameIndex, const BlitParams& params)
 {
@@ -365,5 +366,67 @@ void RenderUtils::DepthOverlay(Renderer::Renderer* renderer, Renderer::RenderGra
 
     commandList.EndPipeline(pipeline);
     commandList.ImageBarrier(params.overlayImage);
+    commandList.PopMarker();
+}
+
+inline u32 GetGroupCount(u32 threadCount, u32 localSize)
+{
+    return (threadCount + localSize - 1) / localSize;
+}
+
+void RenderUtils::CopyDepthToColorRT(Renderer::Renderer* renderer, Renderer::RenderGraphResources& graphResources, Renderer::CommandList& commandList, u32 frameIndex, Renderer::DepthImageID source, Renderer::ImageID destination, u32 destinationMip)
+{
+    Renderer::ComputePipelineDesc queryPipelineDesc;
+    graphResources.InitializePipelineDesc(queryPipelineDesc);
+
+    Renderer::ComputeShaderDesc shaderDesc;
+    shaderDesc.path = "Blitting/blitDepth.cs.hlsl";
+    queryPipelineDesc.computeShader = renderer->LoadShader(shaderDesc);
+
+    // Do culling
+    Renderer::ComputePipelineID pipeline = renderer->CreatePipeline(queryPipelineDesc);
+    commandList.BeginPipeline(pipeline);
+
+    commandList.PushMarker("CopyDepthToColorRT", Color::White);
+
+    Renderer::ImageDesc destinationInfo = renderer->GetImageDesc(destination);
+    Renderer::DepthImageDesc sourceInfo = renderer->GetDepthImageDesc(source);
+
+    uvec2 destinationSize = renderer->GetImageDimension(destination, destinationMip);
+
+    Renderer::SamplerDesc samplerDesc;
+    samplerDesc.filter = Renderer::SamplerFilter::MINIMUM_MIN_MAG_MIP_LINEAR;
+    samplerDesc.addressU = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.addressV = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.addressW = Renderer::TextureAddressMode::CLAMP;
+    samplerDesc.minLOD = 0.f;
+    samplerDesc.maxLOD = 16.f;
+    samplerDesc.mode = Renderer::SamplerReductionMode::MIN;
+
+    Renderer::SamplerID occlusionSampler = renderer->CreateSampler(samplerDesc);
+    _copyDepthToColorRTDescriptorSet.Bind("_sampler", occlusionSampler);
+    _copyDepthToColorRTDescriptorSet.Bind("_source", source);
+    _copyDepthToColorRTDescriptorSet.BindStorage("_target", destination, destinationMip);
+
+    struct CopyParams
+    {
+        glm::vec2 imageSize;
+        u32 level;
+        u32 dummy;
+    };
+
+    CopyParams* copyParams = graphResources.FrameNew<CopyParams>();
+    copyParams->imageSize = glm::vec2(destinationSize);
+    copyParams->level = destinationMip;
+
+    commandList.PushConstant(copyParams, 0, sizeof(CopyParams));
+
+    commandList.BindDescriptorSet(Renderer::GLOBAL, &_copyDepthToColorRTDescriptorSet, frameIndex);
+    commandList.Dispatch(GetGroupCount(destinationSize.x, 32), GetGroupCount(destinationSize.y, 32), 1);
+
+    commandList.EndPipeline(pipeline);
+
+    commandList.ImageBarrier(destination);
+
     commandList.PopMarker();
 }

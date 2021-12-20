@@ -5,6 +5,7 @@
 #include "RenderResources.h"
 #include "CVar/CVarSystem.h"
 #include "Camera.h"
+#include "RenderUtils.h"
 
 #include <filesystem>
 #include <GLFW/glfw3.h>
@@ -26,7 +27,7 @@ AutoCVar_Int CVAR_WaterCullingEnabled("water.cullEnable", "enable culling of wat
 AutoCVar_Int CVAR_WaterLockCullingFrustum("water.lockCullingFrustum", "lock frustrum for water culling", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_WaterDrawBoundingBoxes("water.drawBoundingBoxes", "draw bounding boxes for water", 0, CVarFlags::EditCheckbox);
 AutoCVar_Int CVAR_WaterOcclusionCullEnabled("water.occlusionCullEnable", "enable culling of water", 1, CVarFlags::EditCheckbox);
-AutoCVar_Float CVAR_WaterVisibilityRange("water.visibilityRange", "How far underwater you should see", 10.0f, CVarFlags::EditFloatDrag);
+AutoCVar_Float CVAR_WaterVisibilityRange("water.visibilityRange", "How far underwater you should see", 3.0f, CVarFlags::EditFloatDrag);
 
 WaterRenderer::WaterRenderer(Renderer::Renderer* renderer, DebugRenderer* debugRenderer)
     : _renderer(renderer)
@@ -230,10 +231,8 @@ void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResou
 
             commandList.PushMarker("Water", Color::White);
 
-            uvec2 depthSize = _renderer->GetImageDimension(resources.depth);
-            commandList.CopyDepthImage(resources.opaqueDepthCopy, uvec2(0, 0), resources.depth, uvec2(0, 0), depthSize);
+            RenderUtils::CopyDepthToColorRT(_renderer, graphResources, commandList, frameIndex, resources.depth, resources.depthColorCopy, 0);
 
-            commandList.ImageBarrier(resources.opaqueDepthCopy);
             commandList.ImageBarrier(resources.transparency);
             commandList.ImageBarrier(resources.transparencyWeights);
 
@@ -291,7 +290,7 @@ void WaterRenderer::AddWaterPass(Renderer::RenderGraph* renderGraph, RenderResou
             Renderer::GraphicsPipelineID pipeline = _renderer->CreatePipeline(pipelineDesc); // This will compile the pipeline and return the ID, or just return ID of cached pipeline
             commandList.BeginPipeline(pipeline);
 
-            _passDescriptorSet.Bind("_depthRT"_h, resources.opaqueDepthCopy);
+            _passDescriptorSet.Bind("_depthRT"_h, resources.depthColorCopy);
 
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::GLOBAL, &resources.globalDescriptorSet, frameIndex);
             commandList.BindDescriptorSet(Renderer::DescriptorSetSlot::PER_PASS, &_passDescriptorSet, frameIndex);

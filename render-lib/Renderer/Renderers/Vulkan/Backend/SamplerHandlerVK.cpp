@@ -67,7 +67,7 @@ namespace Renderer
             samplerInfo.maxAnisotropy = static_cast<f32>(desc.maxAnisotropy);
             samplerInfo.borderColor = FormatConverterVK::ToVkBorderColor(desc.borderColor);
             samplerInfo.unnormalizedCoordinates = desc.unnormalizedCoordinates;
-            samplerInfo.compareEnable = desc.comparisonFunc != ComparisonFunc::ALWAYS;
+            samplerInfo.compareEnable = desc.comparisonEnabled;
             samplerInfo.compareOp = FormatConverterVK::ToVkCompareOp(desc.comparisonFunc);
             samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
             samplerInfo.mipLodBias = desc.mipLODBias;

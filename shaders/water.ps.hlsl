@@ -71,7 +71,7 @@ PSOutput main(PSInput input)
     _depthRT.GetDimensions(dimensions.x, dimensions.y);
 
     float2 pixelUV = input.pixelPos.xy / dimensions;
-    float opaqueDepth = _depthRT.Sample(_sampler, pixelUV); // 0.0 .. 1.0
+    float opaqueDepth = _depthRT.Load(int3(input.pixelPos.xy, 0)); // 0.0 .. 1.0
 
     float waterDepth = input.pixelPos.z / input.pixelPos.w;
 

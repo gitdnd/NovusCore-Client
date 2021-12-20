@@ -22,7 +22,7 @@ struct RenderResources
     Renderer::ImageID transparencyWeights;
     Renderer::ImageID depthPyramid;
     Renderer::ImageID ambientObscurance;
+    Renderer::ImageID depthColorCopy;
 
     Renderer::DepthImageID depth;
-    Renderer::DepthImageID opaqueDepthCopy;
 };
